@@ -74,9 +74,11 @@ function enhance(video: HTMLVideoElement): void {
     attributeFilter: ['controls', 'controlslist', 'disablepictureinpicture', 'loop', 'style'],
   });
 
-  if (skin === 'thin') {
-    video.addEventListener('pointerenter', () => bindScrubber(video));
-  }
+  // Always attached, and gated at call time — a listener added only while the thin skin
+  // was active would leave videos enhanced before a settings change without one.
+  video.addEventListener('pointerenter', () => {
+    if (skin === 'thin') bindScrubber(video);
+  });
 }
 
 function applyFlags(video: HTMLVideoElement): void {

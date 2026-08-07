@@ -78,13 +78,15 @@ async function handle(req: Request): Promise<unknown> {
     case 'posts:captured': {
       const inserted = await db.putIfNew(req.posts.map((p: CapturedPost) => toRecord(p)));
       if (inserted > 0) {
+        // Push the new total straight away so the library's counts and rows update as
+        // you scroll, whether or not categorisation is about to run.
+        broadcast({ type: 'progress', progress: await categorizer.progress() });
+
         const settings = await getSettings();
         // Auto-index picks up newly captured posts without the user asking, but only
         // when a key exists and a run isn't already in flight.
         if (settings.autoIndex && settings.apiKey && !categorizer.isRunning()) {
           void categorizer.start();
-        } else {
-          broadcast({ type: 'progress', progress: await categorizer.progress() });
         }
       }
       return { inserted };

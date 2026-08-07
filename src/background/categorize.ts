@@ -57,6 +57,12 @@ export class Categorizer {
   private message: string | null = null;
   private running: Promise<void> | null = null;
   private cancelled = false;
+  /**
+   * Records written in the current round. The outer loop re-reads pending work each
+   * pass, so a round that writes nothing would hand back an identical queue and spin
+   * forever — this is the guard against that.
+   */
+  private roundUpdates = 0;
 
   constructor(private readonly onProgress: ProgressFn) {}
 
@@ -118,6 +124,7 @@ export class Categorizer {
         // Re-read each round: passive capture keeps adding posts while we work.
         const pending = await db.pendingCategorization(500);
         if (!pending.length) break;
+        this.roundUpdates = 0;
 
         // --- tier 1: free, and it shrinks the LLM workload before we spend anything ---
         const needsModel: PostRecord[] = [];
@@ -142,6 +149,7 @@ export class Categorizer {
 
         if (ruled.length) {
           await db.updateMany(ruled);
+          this.roundUpdates += ruled.length;
           await this.emit();
         }
 
@@ -176,6 +184,15 @@ export class Categorizer {
 
         // A rate-limit or auth failure sets phase; stop rather than hammering.
         if (this.phase === 'error' || this.cancelled) return void this.emit();
+
+        if (this.roundUpdates === 0) {
+          // Every job ran and none produced a usable record — almost always the model
+          // refusing to return parseable JSON. Retrying the identical queue would spin.
+          this.phase = 'error';
+          this.message =
+            'The model returned nothing usable for a full pass. Try a different model.';
+          return void this.emit();
+        }
       }
 
       this.phase = 'done';
@@ -241,6 +258,7 @@ export class Categorizer {
 
     if (updates.length) {
       await db.updateMany(updates);
+      this.roundUpdates += updates.length;
       await this.emit();
     }
   }
@@ -282,6 +300,7 @@ export class Categorizer {
       const first = results[0];
       if (!first) return;
       await db.update(applyResult(post, first, settings.model));
+      this.roundUpdates++;
       await this.emit();
     } catch {
       /* leave pending */
@@ -300,6 +319,7 @@ export class Categorizer {
       categorizedAt: Date.now(),
       modelUsed: 'skipped',
     });
+    this.roundUpdates++;
   }
 
   /**

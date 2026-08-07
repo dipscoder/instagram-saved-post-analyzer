@@ -16,20 +16,8 @@ const SCROLL_MAX_MS = 2000;
 /** Give up after this many scrolls that surface nothing new — we've hit the end. */
 const IDLE_ROUNDS_BEFORE_STOP = 3;
 
-type Listener = (count: number) => void;
-
 let rateLimited = false;
 const seen = new Set<string>();
-const onCapture = new Set<Listener>();
-
-export function onPostsCaptured(fn: Listener): () => void {
-  onCapture.add(fn);
-  return () => onCapture.delete(fn);
-}
-
-export function wasRateLimited(): boolean {
-  return rateLimited;
-}
 
 export function startBridge(): void {
   window.addEventListener('message', handleMessage);
@@ -68,7 +56,6 @@ async function ingest(posts: CapturedPost[]): Promise<void> {
 
   try {
     await send({ type: 'posts:captured', posts: fresh });
-    for (const fn of onCapture) fn(fresh.length);
   } catch {
     // Service worker asleep or extension reloading; the tile will come round again.
     for (const p of fresh) seen.delete(p.shortcode);

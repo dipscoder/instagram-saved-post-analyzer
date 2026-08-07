@@ -5,11 +5,10 @@
  * starts posting. UI work waits for a body to attach to.
  */
 
-import { onPostsCaptured, startBridge, startHarvest, wasRateLimited } from './capture/bridge';
+import { startBridge } from './capture/bridge';
 import { isLibraryMounted, mountLibrary, unmountLibrary } from './page/library';
 import { setScrubberSkin, startVideoControls } from './page/video';
-import { send, subscribe, type Broadcast } from './messaging';
-import type { SafeSettings } from './messaging';
+import { send, type SafeSettings } from './messaging';
 
 startBridge();
 
@@ -36,8 +35,6 @@ async function boot(): Promise<void> {
     const next = changes['settings'].newValue as { scrubberSkin?: 'native' | 'thin' } | undefined;
     if (next?.scrubberSkin) setScrubberSkin(next.scrubberSkin);
   });
-
-  subscribe(onBroadcast);
 }
 
 /** The saved grid lives at /{username}/saved/… and sometimes /saved/…. */
@@ -79,31 +76,6 @@ function watchRouteChanges(): void {
   // Belt and braces: some client-side routes swap content without touching history.
   setInterval(check, 1000);
 }
-
-function onBroadcast(_msg: Broadcast): void {
-  // The library subscribes independently; nothing else on-page needs pushes yet.
-}
-
-// Newly captured posts should be reflected in the rail counts promptly.
-onPostsCaptured(() => {
-  if (isLibraryMounted()) void send({ type: 'posts:stats' }).catch(() => {});
-});
-
-/**
- * Exposed for the popup's "Index now": the harvester must run in the page, because
- * only the page can scroll. The popup asks the content script, not the worker.
- */
-chrome.runtime.onMessage.addListener((msg: { type?: string }, _sender, sendResponse) => {
-  if (msg?.type !== 'harvest:start') return;
-  const handle = startHarvest();
-  void handle.done.then((result) =>
-    chrome.runtime
-      .sendMessage({ type: 'harvest:done', result, rateLimited: wasRateLimited() })
-      .catch(() => {}),
-  );
-  sendResponse({ ok: true });
-  return true;
-});
 
 function whenBodyReady(fn: () => void): void {
   if (document.body) return fn();

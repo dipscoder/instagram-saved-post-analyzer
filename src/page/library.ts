@@ -9,6 +9,7 @@
  */
 
 import { send, subscribe, type Broadcast, type Stats } from '../messaging';
+import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
 import type { IndexProgress, PostRecord } from '../types';
 import { styles } from './library.css';
@@ -26,6 +27,8 @@ interface State {
   visible: boolean;
   loading: boolean;
   stripDismissed: boolean;
+  /** True while the page is auto-scrolling to surface more posts. */
+  harvesting: boolean;
 }
 
 const state: State = {
@@ -38,6 +41,7 @@ const state: State = {
   visible: true,
   loading: true,
   stripDismissed: false,
+  harvesting: false,
 };
 
 let host: HTMLDivElement | null = null;
@@ -77,12 +81,15 @@ export function isLibraryMounted(): boolean {
 }
 
 function onBroadcast(msg: Broadcast): void {
-  if (msg.type === 'progress') {
-    state.progress = msg.progress;
-    // Cards fill in as they're written, so pull fresh rows when the count moves.
-    if (msg.progress.categorized !== state.stats.categorized) void refresh();
-    else render();
-  }
+  if (msg.type !== 'progress') return;
+  const moved =
+    msg.progress.categorized !== state.stats.categorized ||
+    msg.progress.total !== state.stats.total;
+  state.progress = msg.progress;
+  // Cards fill in as they're written, and newly captured posts appear as they scroll
+  // past — either count moving means the rows on screen are stale.
+  if (moved) void refresh();
+  else render();
 }
 
 async function refresh(): Promise<void> {
@@ -217,7 +224,9 @@ function railRow(name: string, count: number): HTMLElement {
 function main(): HTMLElement {
   const el = h('main', 'main');
 
-  if (!state.stripDismissed && state.progress.phase !== 'idle') el.append(strip());
+  if (!state.stripDismissed && (state.progress.phase !== 'idle' || state.harvesting)) {
+    el.append(strip());
+  }
 
   const head = h('div', 'main-head');
   const title = state.selected.size ? [...state.selected].join(', ') : 'All saved';
@@ -322,7 +331,11 @@ function strip(): HTMLElement {
   });
 
   el.append(bar, dismiss);
-  if (p.message) el.append(h('div', 'strip-note', p.message));
+
+  const note = state.harvesting
+    ? 'Scrolling your saved posts to find everything — leave this tab open.'
+    : p.message;
+  if (note) el.append(h('div', 'strip-note', note));
   return el;
 }
 
@@ -412,11 +425,43 @@ function showRestoreChip(): void {
 
 async function onIndexAction(): Promise<void> {
   const phase = state.progress.phase;
-  if (phase === 'running') return void send({ type: 'index:pause' });
+
+  if (phase === 'running') {
+    harvest?.stop();
+    harvest = null;
+    return void send({ type: 'index:pause' });
+  }
+
   if (phase === 'done' && state.stats.categorized === state.stats.total && state.stats.total > 0) {
     return void send({ type: 'index:reindex' });
   }
+
+  // Two halves, and they run together: the harvester scrolls the page so the capture
+  // layer sees every saved post, while the worker categorises whatever has landed.
+  // Only the page can scroll, so the harvester has to live here, not in the worker.
+  startHarvesting();
   await send({ type: 'index:start' });
+}
+
+let harvest: HarvestHandle | null = null;
+
+function startHarvesting(): void {
+  if (harvest) return;
+  state.harvesting = true;
+  harvest = startHarvest();
+  void harvest.done.then((result) => {
+    harvest = null;
+    state.harvesting = false;
+    if (result.reason === 'rate-limited') {
+      state.progress = {
+        ...state.progress,
+        phase: 'paused',
+        message: 'Instagram rate-limited the page, so scrolling stopped. Try again shortly.',
+      };
+    }
+    void refresh();
+  });
+  render();
 }
 
 function clearFilters(): void {
