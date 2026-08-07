@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Saved Index",
+  "version": "0.1.0",
+  "description": "An AI index over your Instagram saved posts, plus real seek controls on Instagram videos.",
+  "minimum_chrome_version": "111",
+
+  "permissions": ["storage", "unlimitedStorage"],
+
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Saved Index",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["capture-main.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["capture-main.js"],
+      "matches": ["https://www.instagram.com/*"]
+    }
+  ]
+}

@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#f2f2f0;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased;text-wrap:pretty}
+  a{color:oklch(0.50 0.10 150);text-decoration:none}
+  a:hover{color:oklch(0.42 0.11 150)}
+  input,select,button,textarea{font:inherit;color:inherit}
+  input::placeholder{color:oklch(0.66 0.004 150)}
+  ::selection{background:oklch(0.90 0.05 150)}
+</style>
+</helmet>
+
+<div style="display:flex;flex-direction:column;gap:80px;padding:72px 80px 120px;background:#f2f2f0;color:oklch(0.24 0.005 150);min-height:100vh">
+
+  <div style="display:flex;flex-direction:column;gap:28px;max-width:1080px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <div style="font-size:20px;font-weight:560;letter-spacing:-0.01em">Saved Index</div>
+      <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Chrome extension · side panel + page overlay</div>
+    </div>
+    <div style="font-size:13px;line-height:1.55;color:oklch(0.42 0.005 150);max-width:620px">An AI index layered over the saved-posts page. The panel replaces the blind thumbnail grid with summaries, categories and dates; the overlay adds a scrubber to video posts. Six screens, all states, light and dark.</div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:oklch(0.90 0.004 150);border:1px solid oklch(0.90 0.004 150);border-radius:8px;overflow:hidden">
+      <div style="background:#fff;padding:22px 24px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Type scale</div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-size:20px;font-weight:560;letter-spacing:-0.01em">Display</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">20 / 560 / -1%</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-size:15px;font-weight:520">Section title</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">15 / 520</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-size:13px;font-weight:450">Body · card summary</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">13 / 450 / 1.35</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-size:12px;font-weight:450;color:oklch(0.46 0.005 150)">Secondary · labels</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">12 / 450</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-size:11px;font-weight:500">Chip</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">11 / 450–560</span></div>
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase">Meta · mono</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.58 0.005 150)">10 / 0.12em</span></div>
+        </div>
+      </div>
+      <div style="background:#fff;padding:22px 24px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Spacing scale</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:4px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">4 · icon gap</span></div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:8px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">8 · meta row</span></div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:12px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">12 · card internals</span></div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:16px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">16 · panel gutter</span></div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:24px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">24 · block gap</span></div>
+          <div style="display:flex;align-items:center;gap:12px"><div style="height:6px;width:40px;background:oklch(0.80 0.005 150)"></div><span style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">40 · empty-state inset</span></div>
+        </div>
+      </div>
+      <div style="background:#fff;padding:22px 24px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Accent · one, restrained</div>
+        <div style="display:flex;gap:8px">
+          <div style="width:44px;height:44px;border-radius:4px;background:oklch(0.50 0.10 150)"></div>
+          <div style="width:44px;height:44px;border-radius:4px;background:oklch(0.74 0.11 150)"></div>
+          <div style="width:44px;height:44px;border-radius:4px;background:oklch(0.96 0.02 150);border:1px solid oklch(0.89 0.03 150)"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;font-family:'Geist Mono',monospace;font-size:10px;line-height:1.6;color:oklch(0.50 0.005 150)">
+          <div>light &nbsp;oklch(0.50 0.10 150)</div>
+          <div>dark &nbsp;&nbsp;oklch(0.74 0.11 150)</div>
+          <div>wash &nbsp;oklch(0.96 0.02 150)</div>
+        </div>
+        <div style="font-size:12px;line-height:1.5;color:oklch(0.46 0.005 150)">Used only for state: selection, focus, scrub-in-progress, connection confirmed. Never decoration.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:12px">
+      <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.50 0.10 150)">S1 · S2 · S3</div>
+      <div style="font-size:15px;font-weight:520">Library, filter rail, indexing strip</div>
+      <div style="font-size:12px;color:oklch(0.50 0.005 150)">Live — type in search, toggle categories, dismiss the strip.</div>
+    </div>
+
+    <div style="display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S1 · library — light</div>
+        <div style="width:440px;height:724px;background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:10px;overflow:hidden;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 12px;border-bottom:1px solid oklch(0.93 0.004 150)">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <div style="font-size:13px;font-weight:560;letter-spacing:-0.005em">Saved</div>
+              <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.60 0.005 150)">380</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div onClick="{{ toggleRail }}" title="Filters" style="width:26px;height:26px;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;background:{{ railBg }}" style-hover="background:oklch(0.96 0.004 150)">
+                <div style="width:13px;height:1px;background:oklch(0.40 0.005 150)"></div>
+                <div style="width:9px;height:1px;background:oklch(0.40 0.005 150)"></div>
+                <div style="width:5px;height:1px;background:oklch(0.40 0.005 150)"></div>
+              </div>
+              <div title="Settings" style="width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:oklch(0.96 0.004 150)">
+                <div style="width:11px;height:11px;border:1px solid oklch(0.40 0.005 150);border-radius:50%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:12px 16px;border-bottom:1px solid oklch(0.93 0.004 150)">
+            <input value="{{ q }}" onChange="{{ onQ }}" placeholder="Search summaries, handles, categories" style="width:100%;border:1px solid oklch(0.91 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:#fff;outline:none" style-focus="border-color:oklch(0.50 0.10 150)" />
+          </div>
+
+          <sc-if value="{{ showStrip }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 16px;background:oklch(0.975 0.006 150);border-bottom:1px solid oklch(0.93 0.004 150)">
+              <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+                  <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.06em;color:oklch(0.42 0.005 150)">142 of 380 categorized</div>
+                  <div onClick="{{ pauseStrip }}" style="font-size:11px;color:oklch(0.50 0.10 150);cursor:pointer">Pause</div>
+                </div>
+                <div style="height:2px;background:oklch(0.91 0.004 150);border-radius:1px;overflow:hidden"><div style="width:37.4%;height:100%;background:oklch(0.50 0.10 150)"></div></div>
+              </div>
+              <div onClick="{{ hideStrip }}" title="Dismiss" style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:12px;color:oklch(0.55 0.005 150);cursor:pointer" style-hover="background:oklch(0.93 0.004 150)">×</div>
+            </div>
+          </sc-if>
+
+          <div style="flex:1;overflow:hidden;display:flex">
+            <sc-if value="{{ rail }}" hint-placeholder-val="{{ false }}">
+              <div style="width:132px;flex:none;border-right:1px solid oklch(0.93 0.004 150);padding:12px 8px;display:flex;flex-direction:column;gap:1px">
+                <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.64 0.005 150);padding:0 8px 8px">Categories</div>
+                <sc-for list="{{ railCats }}" as="c" hint-placeholder-count="6">
+                  <div onClick="{{ c.onClick }}" style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 8px;border-radius:5px;cursor:pointer;font-size:12px;background:{{ c.bg }};color:{{ c.col }};font-weight:{{ c.w }}" style-hover="background:oklch(0.96 0.004 150)">
+                    <span>{{ c.name }}</span>
+                    <span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.62 0.005 150)">{{ c.count }}</span>
+                  </div>
+                </sc-for>
+                <div style="margin-top:auto;padding:0 8px">
+                  <div onClick="{{ clearAll }}" style="font-size:11px;color:oklch(0.50 0.10 150);cursor:pointer;opacity:{{ clearOpacity }}">Clear filters</div>
+                </div>
+              </div>
+            </sc-if>
+
+            <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+              <sc-if value="{{ hasFilters }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid oklch(0.93 0.004 150);flex-wrap:wrap">
+                  <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.62 0.005 150);margin-right:2px">Filters</div>
+                  <sc-for list="{{ activeChips }}" as="a" hint-placeholder-count="2">
+                    <div onClick="{{ a.onClick }}" style="display:flex;align-items:center;gap:5px;padding:2px 6px 2px 7px;border:1px solid oklch(0.89 0.03 150);background:oklch(0.97 0.015 150);border-radius:4px;font-size:11px;color:oklch(0.36 0.04 150);cursor:pointer">
+                      <span>{{ a.label }}</span><span style="font-size:11px;color:oklch(0.52 0.03 150)">×</span>
+                    </div>
+                  </sc-for>
+                  <div onClick="{{ clearAll }}" style="margin-left:auto;font-size:11px;color:oklch(0.50 0.005 150);cursor:pointer" style-hover="color:oklch(0.50 0.10 150)">Clear</div>
+                </div>
+              </sc-if>
+
+              <div style="flex:1;overflow-y:auto;padding:4px 0">
+                <sc-for list="{{ posts }}" as="p" hint-placeholder-count="9">
+                  <div style="display:flex;gap:12px;padding:{{ rowPad }};cursor:pointer;border-bottom:1px solid oklch(0.965 0.004 150)" style-hover="background:oklch(0.978 0.004 150)">
+                    <sc-if value="{{ thumbs }}" hint-placeholder-val="{{ true }}">
+                      <div style="width:44px;height:44px;flex:none;border-radius:4px;background:{{ p.thumb }};display:flex;align-items:flex-end;justify-content:flex-start;padding:3px">
+                        <span style="font-family:'Geist Mono',monospace;font-size:8px;letter-spacing:0.08em;color:oklch(0.36 0.005 150);opacity:0.72">{{ p.kind }}</span>
+                      </div>
+                    </sc-if>
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+                      <div style="font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:oklch(0.24 0.005 150)">{{ p.summary }}</div>
+                      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                        <div style="flex:none;padding:1.5px 6px;border-radius:4px;font-size:10.5px;line-height:1.5;background:{{ p.cBg }};border:{{ p.cBd }};color:{{ p.cCol }};font-weight:{{ p.cW }}">{{ p.cat }}</div>
+                        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.56 0.005 150);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.handle }}</div>
+                        <div style="margin-left:auto;flex:none;font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.66 0.005 150)">{{ p.date }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:56px 40px;display:flex;flex-direction:column;gap:8px;align-items:center;text-align:center">
+                    <div style="width:18px;height:18px;border:1px solid oklch(0.84 0.004 150);border-radius:3px;margin-bottom:6px"></div>
+                    <div style="font-size:13px;font-weight:500">Nothing matches</div>
+                    <div style="font-size:12px;color:oklch(0.52 0.005 150);line-height:1.5">Try a shorter query or clear a category.</div>
+                    <div onClick="{{ clearAll }}" style="margin-top:6px;font-size:11px;color:oklch(0.50 0.10 150);cursor:pointer">Clear filters</div>
+                  </div>
+                </sc-if>
+              </div>
+
+              <div style="padding:9px 14px;border-top:1px solid oklch(0.93 0.004 150);display:flex;align-items:center;justify-content:space-between">
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.60 0.005 150)">{{ countLabel }}</div>
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.68 0.005 150)">⌘K</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S1 · library + rail — dark</div>
+        <div style="width:440px;height:724px;background:oklch(0.17 0.004 150);border:1px solid oklch(0.26 0.004 150);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;color:oklch(0.93 0.004 150)">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 12px;border-bottom:1px solid oklch(0.24 0.004 150)">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <div style="font-size:13px;font-weight:560;letter-spacing:-0.005em">Saved</div>
+              <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.62 0.005 150)">380</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="width:26px;height:26px;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:oklch(0.23 0.004 150);cursor:pointer">
+                <div style="width:13px;height:1px;background:oklch(0.84 0.005 150)"></div>
+                <div style="width:9px;height:1px;background:oklch(0.84 0.005 150)"></div>
+                <div style="width:5px;height:1px;background:oklch(0.84 0.005 150)"></div>
+              </div>
+              <div style="width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer">
+                <div style="width:11px;height:11px;border:1px solid oklch(0.78 0.005 150);border-radius:50%"></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:12px 16px;border-bottom:1px solid oklch(0.24 0.004 150)">
+            <div style="border:1px solid oklch(0.30 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:oklch(0.20 0.004 150);color:oklch(0.58 0.005 150)">Search summaries, handles, categories</div>
+          </div>
+
+          <div style="flex:1;overflow:hidden;display:flex">
+            <div style="width:132px;flex:none;border-right:1px solid oklch(0.24 0.004 150);padding:12px 8px;display:flex;flex-direction:column;gap:1px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.56 0.005 150);padding:0 8px 8px">Categories</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Recipes</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">64</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Design</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">71</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Travel</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">52</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Fitness</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">43</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Reading</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">38</span></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:5px;font-size:12px;color:oklch(0.80 0.005 150)"><span>Tools</span><span style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">29</span></div>
+              <div style="margin-top:auto;padding:0 8px"><div style="font-size:11px;color:oklch(0.62 0.005 150);cursor:pointer;opacity:0.35">Clear filters</div></div>
+            </div>
+
+            <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+              <div style="flex:1;overflow:hidden;padding:4px 0">
+                <sc-for list="{{ postsDark }}" as="p" hint-placeholder-count="9">
+                  <div style="display:flex;gap:12px;padding:11px 14px;cursor:pointer;border-bottom:1px solid oklch(0.21 0.004 150)" style-hover="background:oklch(0.20 0.004 150)">
+                    <div style="width:44px;height:44px;flex:none;border-radius:4px;background:{{ p.thumbD }};display:flex;align-items:flex-end;padding:3px">
+                      <span style="font-family:'Geist Mono',monospace;font-size:8px;letter-spacing:0.08em;color:oklch(0.90 0.005 150);opacity:0.6">{{ p.kind }}</span>
+                    </div>
+                    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+                      <div style="font-size:13px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:oklch(0.93 0.004 150)">{{ p.summary }}</div>
+                      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+                        <div style="flex:none;padding:1.5px 6px;border-radius:4px;font-size:10.5px;line-height:1.5;background:{{ p.dBg }};border:{{ p.dBd }};color:{{ p.dCol }};font-weight:{{ p.cW }}">{{ p.cat }}</div>
+                        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.62 0.005 150);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.handle }}</div>
+                        <div style="margin-left:auto;flex:none;font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.54 0.005 150)">{{ p.date }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding:9px 14px;border-top:1px solid oklch(0.24 0.004 150);display:flex;align-items:center;justify-content:space-between">
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.60 0.005 150)">showing 16 · 380 indexed</div>
+                <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.50 0.005 150)">⌘K</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:24px;width:376px">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S3 · indexing strip — three states</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:oklch(0.975 0.006 150)">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.06em;color:oklch(0.42 0.005 150)">142 of 380 categorized</div><div style="font-size:11px;color:oklch(0.50 0.10 150)">Pause</div></div>
+                  <div style="height:2px;background:oklch(0.91 0.004 150);border-radius:1px;overflow:hidden"><div style="width:37.4%;height:100%;background:oklch(0.50 0.10 150)"></div></div>
+                </div>
+                <div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;color:oklch(0.55 0.005 150)">×</div>
+              </div>
+              <div style="padding:7px 14px;border-top:1px solid oklch(0.94 0.004 150);font-size:11px;color:oklch(0.54 0.005 150)">Running · about 4 minutes left</div>
+            </div>
+
+            <div style="background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:8px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 14px">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.06em;color:oklch(0.42 0.005 150)">142 of 380 · paused</div><div style="font-size:11px;color:oklch(0.50 0.10 150)">Resume</div></div>
+                  <div style="height:2px;background:oklch(0.91 0.004 150);border-radius:1px;overflow:hidden"><div style="width:37.4%;height:100%;background:oklch(0.72 0.005 150)"></div></div>
+                </div>
+                <div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;color:oklch(0.55 0.005 150)">×</div>
+              </div>
+            </div>
+
+            <div style="background:oklch(0.17 0.004 150);border:1px solid oklch(0.26 0.004 150);border-radius:8px;overflow:hidden;color:oklch(0.93 0.004 150)">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:oklch(0.20 0.004 150)">
+                <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                  <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.06em;color:oklch(0.86 0.005 150)">380 of 380 categorized</div><div style="font-size:11px;color:oklch(0.74 0.11 150)">Re-index</div></div>
+                  <div style="height:2px;background:oklch(0.28 0.004 150);border-radius:1px;overflow:hidden"><div style="width:100%;height:100%;background:oklch(0.74 0.11 150)"></div></div>
+                </div>
+                <div style="width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;color:oklch(0.70 0.005 150)">×</div>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:12px;line-height:1.5;color:oklch(0.48 0.005 150)">The strip lives under the search field, never over content. Dismiss hides it for the session; work continues and the footer count keeps updating.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:12px">
+      <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.50 0.10 150)">S4</div>
+      <div style="font-size:15px;font-weight:520">Settings</div>
+      <div style="font-size:12px;color:oklch(0.50 0.005 150)">Live — press Test to cycle idle → checking → connected.</div>
+    </div>
+    <div style="display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S4 · light</div>
+        <div style="width:440px;background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:10px;overflow:hidden;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid oklch(0.93 0.004 150)">
+            <div style="font-size:12px;color:oklch(0.52 0.005 150);cursor:pointer">←</div>
+            <div style="font-size:13px;font-weight:560">Settings</div>
+          </div>
+          <div style="padding:20px 16px 24px;display:flex;flex-direction:column;gap:24px">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.60 0.005 150)">Provider</div>
+              <select value="{{ provider }}" onChange="{{ onProvider }}" style="appearance:none;width:100%;border:1px solid oklch(0.91 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:#fff;outline:none;cursor:pointer" style-focus="border-color:oklch(0.50 0.10 150)">
+                <option>OpenAI</option>
+                <option>Anthropic</option>
+                <option>Gemini</option>
+                <option>OpenRouter</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.60 0.005 150)">Model</div>
+              <select value="{{ model }}" onChange="{{ onModel }}" style="appearance:none;width:100%;border:1px solid oklch(0.91 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:#fff;outline:none;cursor:pointer" style-focus="border-color:oklch(0.50 0.10 150)">
+                <sc-for list="{{ models }}" as="m" hint-placeholder-count="3">
+                  <option>{{ m }}</option>
+                </sc-for>
+              </select>
+              <div style="font-size:11px;color:oklch(0.56 0.005 150)">Smaller models are cheaper per post and usually enough for one-line summaries.</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.60 0.005 150)">API key</div>
+              <div style="display:flex;gap:8px">
+                <input type="password" value="{{ keyVal }}" onChange="{{ onKey }}" placeholder="sk-…" style="flex:1;border:1px solid oklch(0.91 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;font-family:'Geist Mono',monospace;letter-spacing:0.08em;background:#fff;outline:none" style-focus="border-color:oklch(0.50 0.10 150)" />
+                <div onClick="{{ testKey }}" style="flex:none;padding:7px 12px;border:1px solid oklch(0.88 0.004 150);border-radius:6px;font-size:12px;cursor:pointer;background:#fff;white-space:nowrap" style-hover="border-color:oklch(0.50 0.10 150);color:oklch(0.44 0.10 150)">{{ testLabel }}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:7px;min-height:16px">
+                <div style="width:5px;height:5px;border-radius:50%;background:{{ testDot }}"></div>
+                <div style="font-size:11px;color:{{ testColor }}">{{ testMsg }}</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding-top:20px;border-top:1px solid oklch(0.94 0.004 150)">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:12px;font-weight:500">Index new saves automatically</div>
+                  <div style="font-size:11px;color:oklch(0.56 0.005 150)">Categorize a post the next time you open the panel.</div>
+                </div>
+                <div onClick="{{ toggleAuto }}" style="flex:none;width:32px;height:18px;border-radius:9px;padding:2px;cursor:pointer;display:flex;justify-content:{{ autoJustify }};background:{{ autoBg }}">
+                  <div style="width:14px;height:14px;border-radius:50%;background:#fff"></div>
+                </div>
+              </div>
+              <div style="font-size:11px;line-height:1.55;color:oklch(0.52 0.005 150)">Your key is stored in this browser only, in Chrome’s extension storage. It is sent to your provider and nowhere else — no server of ours ever sees it.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S4 · dark · key rejected</div>
+        <div style="width:440px;background:oklch(0.17 0.004 150);border:1px solid oklch(0.26 0.004 150);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;color:oklch(0.93 0.004 150)">
+          <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid oklch(0.24 0.004 150)">
+            <div style="font-size:12px;color:oklch(0.70 0.005 150)">←</div>
+            <div style="font-size:13px;font-weight:560">Settings</div>
+          </div>
+          <div style="padding:20px 16px 24px;display:flex;flex-direction:column;gap:24px">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Provider</div>
+              <div style="border:1px solid oklch(0.30 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:oklch(0.20 0.004 150);display:flex;justify-content:space-between"><span>OpenRouter</span><span style="color:oklch(0.60 0.005 150)">▾</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">Model</div>
+              <div style="border:1px solid oklch(0.30 0.004 150);border-radius:6px;padding:7px 10px;font-size:12px;background:oklch(0.20 0.004 150);display:flex;justify-content:space-between"><span>anthropic/claude-haiku</span><span style="color:oklch(0.60 0.005 150)">▾</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="font-family:'Geist Mono',monospace;font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.58 0.005 150)">API key</div>
+              <div style="display:flex;gap:8px">
+                <div style="flex:1;border:1px solid oklch(0.44 0.10 25);border-radius:6px;padding:7px 10px;font-size:12px;font-family:'Geist Mono',monospace;letter-spacing:0.18em;background:oklch(0.20 0.004 150);color:oklch(0.80 0.005 150)">••••••••••••••••</div>
+                <div style="flex:none;padding:7px 12px;border:1px solid oklch(0.32 0.004 150);border-radius:6px;font-size:12px;background:oklch(0.22 0.004 150);white-space:nowrap;cursor:pointer">Test</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:7px">
+                <div style="width:5px;height:5px;border-radius:50%;background:oklch(0.62 0.15 25)"></div>
+                <div style="font-size:11px;color:oklch(0.78 0.08 25)">Key rejected — provider returned 401. Check the key and try again.</div>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding-top:20px;border-top:1px solid oklch(0.24 0.004 150)">
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:12px;font-weight:500">Index new saves automatically</div>
+                  <div style="font-size:11px;color:oklch(0.60 0.005 150)">Categorize a post the next time you open the panel.</div>
+                </div>
+                <div style="flex:none;width:32px;height:18px;border-radius:9px;padding:2px;display:flex;justify-content:flex-end;background:oklch(0.74 0.11 150)"><div style="width:14px;height:14px;border-radius:50%;background:oklch(0.17 0.004 150)"></div></div>
+              </div>
+              <div style="font-size:11px;line-height:1.55;color:oklch(0.62 0.005 150)">Your key is stored in this browser only, in Chrome’s extension storage. It is sent to your provider and nowhere else — no server of ours ever sees it.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:12px">
+      <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.50 0.10 150)">S5</div>
+      <div style="font-size:15px;font-weight:520">Empty and error states</div>
+      <div style="font-size:12px;color:oklch(0.50 0.005 150)">One sentence of cause, one action, nothing else.</div>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="width:340px;height:300px;background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:10px;padding:40px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
+        <div style="width:22px;height:22px;border:1px solid oklch(0.84 0.004 150);border-radius:3px;margin-bottom:8px"></div>
+        <div style="font-size:13px;font-weight:520">Nothing indexed yet</div>
+        <div style="font-size:12px;line-height:1.55;color:oklch(0.50 0.005 150)">380 saved posts found on this page. Indexing reads captions and thumbnails to write one line each.</div>
+        <div style="margin-top:14px;padding:7px 14px;border:1px solid oklch(0.50 0.10 150);border-radius:6px;font-size:12px;color:oklch(0.44 0.10 150);cursor:pointer">Start indexing</div>
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.66 0.005 150);margin-top:4px">est. 6 min · ~$0.14</div>
+      </div>
+
+      <div style="width:340px;height:300px;background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:10px;padding:40px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
+        <div style="width:22px;height:22px;border:1px solid oklch(0.84 0.004 150);border-radius:50%;margin-bottom:8px"></div>
+        <div style="font-size:13px;font-weight:520">No API key set</div>
+        <div style="font-size:12px;line-height:1.55;color:oklch(0.50 0.005 150)">Categorizing needs your own provider key. It stays in this browser.</div>
+        <div style="margin-top:14px;padding:7px 14px;border:1px solid oklch(0.50 0.10 150);border-radius:6px;font-size:12px;color:oklch(0.44 0.10 150);cursor:pointer">Add key</div>
+        <div style="font-size:11px;color:oklch(0.60 0.005 150);margin-top:4px">Browse saved posts without one</div>
+      </div>
+
+      <div style="width:340px;height:300px;background:#fff;border:1px solid oklch(0.90 0.004 150);border-radius:10px;padding:40px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
+        <div style="width:22px;height:22px;border:1px solid oklch(0.72 0.11 25);border-radius:3px;margin-bottom:8px"></div>
+        <div style="font-size:13px;font-weight:520">Key rejected</div>
+        <div style="font-size:12px;line-height:1.55;color:oklch(0.50 0.005 150)">Anthropic returned 401 for this key. Indexing stopped at 142 of 380 and will resume where it left off.</div>
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <div style="padding:7px 14px;border:1px solid oklch(0.88 0.004 150);border-radius:6px;font-size:12px;cursor:pointer">Retry</div>
+          <div style="padding:7px 14px;border:1px solid oklch(0.50 0.10 150);border-radius:6px;font-size:12px;color:oklch(0.44 0.10 150);cursor:pointer">Open settings</div>
+        </div>
+      </div>
+
+      <div style="width:340px;height:300px;background:oklch(0.17 0.004 150);border:1px solid oklch(0.26 0.004 150);border-radius:10px;padding:40px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;color:oklch(0.93 0.004 150)">
+        <div style="width:22px;height:22px;border:1px dashed oklch(0.40 0.004 150);border-radius:3px;margin-bottom:8px"></div>
+        <div style="font-size:13px;font-weight:520">Offline</div>
+        <div style="font-size:12px;line-height:1.55;color:oklch(0.62 0.005 150)">142 indexed posts are still searchable. New posts will be categorized when the connection returns.</div>
+        <div style="margin-top:14px;padding:7px 14px;border:1px solid oklch(0.32 0.004 150);border-radius:6px;font-size:12px;cursor:pointer">Retry now</div>
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;color:oklch(0.52 0.005 150);margin-top:4px">auto-retry in 30s</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:12px">
+      <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:oklch(0.50 0.10 150)">S6</div>
+      <div style="font-size:15px;font-weight:520">Video scrubber skin</div>
+      <div style="font-size:12px;color:oklch(0.50 0.005 150)">Live — hover the bottom edge of the frame, then drag to seek.</div>
+    </div>
+
+    <div style="display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S6 · overlaid on host video</div>
+        <div style="width:352px;height:508px;border-radius:8px;overflow:hidden;position:relative;background:oklch(0.32 0.004 150);display:flex;flex-direction:column;justify-content:space-between">
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.62 0.004 150)">host page video</div>
+          </div>
+          <div style="position:relative;display:flex;align-items:center;gap:8px;padding:14px 14px 0">
+            <div style="width:26px;height:26px;border-radius:50%;background:oklch(0.42 0.004 150)"></div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="width:78px;height:7px;border-radius:2px;background:oklch(0.48 0.004 150)"></div>
+              <div style="width:52px;height:6px;border-radius:2px;background:oklch(0.40 0.004 150)"></div>
+            </div>
+          </div>
+          <div style="position:relative;display:flex;flex-direction:column;gap:0">
+            <div style="display:flex;align-items:center;gap:14px;padding:0 14px 14px">
+              <div style="width:18px;height:18px;border:1.5px solid oklch(0.62 0.004 150);border-radius:3px"></div>
+              <div style="width:18px;height:18px;border:1.5px solid oklch(0.62 0.004 150);border-radius:50%"></div>
+              <div style="width:18px;height:18px;border:1.5px solid oklch(0.62 0.004 150);border-radius:3px"></div>
+              <div style="margin-left:auto;width:18px;height:18px;border:1.5px solid oklch(0.62 0.004 150);border-radius:3px"></div>
+            </div>
+            <div onMouseEnter="{{ sA.onEnter }}" onMouseLeave="{{ sA.onLeave }}" onPointerDown="{{ sA.onDown }}" style="position:relative;height:20px;display:flex;align-items:flex-end;cursor:pointer;touch-action:none">
+              <div style="position:absolute;bottom:0;left:0;right:0;height:{{ sA.h }}px;background:rgba(255,255,255,0.24);transition:height 120ms ease">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:{{ sA.pct }}%;background:{{ sA.fill }}"></div>
+                <div style="position:absolute;left:{{ sA.pct }}%;top:50%;width:{{ sA.knob }}px;height:{{ sA.knob }}px;margin-left:{{ sA.knobOff }}px;margin-top:{{ sA.knobOff }}px;border-radius:50%;background:#fff;opacity:{{ sA.knobO }};transition:opacity 120ms ease"></div>
+              </div>
+              <div style="position:absolute;bottom:14px;left:{{ sA.pct }}%;transform:translateX(-50%);padding:2px 6px;border-radius:4px;background:rgba(0,0,0,0.72);color:#fff;font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.04em;opacity:{{ sA.labO }};pointer-events:none;white-space:nowrap">{{ sA.label }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;width:520px">
+        <div style="font-family:'Geist Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:oklch(0.58 0.005 150)">S6 · states, detail at 2×</div>
+        <div style="display:flex;flex-direction:column;gap:1px;border:1px solid oklch(0.90 0.004 150);border-radius:8px;overflow:hidden;background:oklch(0.90 0.004 150)">
+          <div style="background:#fff;padding:16px 18px;display:flex;align-items:center;gap:20px">
+            <div style="width:110px;flex:none;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:12px;font-weight:500">At rest</div>
+              <div style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">3px · white 72%</div>
+            </div>
+            <div style="flex:1;height:44px;background:oklch(0.32 0.004 150);border-radius:4px;position:relative">
+              <div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(255,255,255,0.24)"><div style="width:34%;height:100%;background:rgba(255,255,255,0.72)"></div></div>
+            </div>
+          </div>
+          <div style="background:#fff;padding:16px 18px;display:flex;align-items:center;gap:20px">
+            <div style="width:110px;flex:none;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:12px;font-weight:500">Hover</div>
+              <div style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">7px · knob 9px</div>
+            </div>
+            <div style="flex:1;height:44px;background:oklch(0.32 0.004 150);border-radius:4px;position:relative">
+              <div style="position:absolute;bottom:0;left:0;right:0;height:7px;background:rgba(255,255,255,0.24)">
+                <div style="width:34%;height:100%;background:#fff"></div>
+                <div style="position:absolute;left:34%;top:50%;width:9px;height:9px;margin-left:-4.5px;margin-top:-4.5px;border-radius:50%;background:#fff"></div>
+              </div>
+            </div>
+          </div>
+          <div style="background:#fff;padding:16px 18px;display:flex;align-items:center;gap:20px">
+            <div style="width:110px;flex:none;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:12px;font-weight:500">Dragging</div>
+              <div style="font-family:'Geist Mono',monospace;font-size:9.5px;color:oklch(0.58 0.005 150)">accent fill · time label</div>
+            </div>
+            <div style="flex:1;height:44px;background:oklch(0.32 0.004 150);border-radius:4px;position:relative">
+              <div style="position:absolute;bottom:0;left:0;right:0;height:7px;background:rgba(255,255,255,0.24)">
+                <div style="width:58%;height:100%;background:oklch(0.74 0.11 150)"></div>
+                <div style="position:absolute;left:58%;top:50%;width:9px;height:9px;margin-left:-4.5px;margin-top:-4.5px;border-radius:50%;background:#fff"></div>
+              </div>
+              <div style="position:absolute;bottom:14px;left:58%;transform:translateX(-50%);padding:2px 6px;border-radius:4px;background:rgba(0,0,0,0.72);color:#fff;font-family:'Geist Mono',monospace;font-size:10px">0:27</div>
+            </div>
+          </div>
+          <div style="background:#fff;padding:16px 18px;display:flex;align-items:flex-start;gap:20px">
+            <div style="width:110px;flex:none;font-size:12px;font-weight:500">Rules</div>
+            <div style="flex:1;font-size:12px;line-height:1.6;color:oklch(0.46 0.005 150)">Sits flush to the bottom edge of the video, inside its rounded corners. No shadow, no container, no play button of ours — the host controls stay in charge. Hit area is 20px tall while the bar itself stays 3px, so it never competes with the frame at rest.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1720,&quot;height&quot;:1100},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Library list&quot;},&quot;showThumbnails&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Library list&quot;}}">
+class Component extends DCLogic {
+  state = {
+    q: '', cats: [], strip: true, rail: true,
+    provider: 'Anthropic', model: 'claude-haiku-4',
+    keyVal: 'PASTE_YOUR_API_KEY', test: 'idle', auto: true,
+    a: { t: 0.34, hover: false, drag: false }
+  };
+
+  chips = {
+    Recipes: { bg: 'oklch(0.965 0.014 90)', bd: '1px solid oklch(0.90 0.024 90)', col: 'oklch(0.42 0.04 75)', w: 500, dbg: 'oklch(0.26 0.016 90)', dbd: '1px solid oklch(0.35 0.024 90)', dcol: 'oklch(0.87 0.04 85)' },
+    Design: { bg: 'oklch(0.965 0.02 150)', bd: '1px solid oklch(0.89 0.03 150)', col: 'oklch(0.40 0.06 150)', w: 500, dbg: 'oklch(0.26 0.03 150)', dbd: '1px solid oklch(0.36 0.04 150)', dcol: 'oklch(0.87 0.06 150)' },
+    Travel: { bg: 'transparent', bd: '1px solid oklch(0.88 0.004 150)', col: 'oklch(0.46 0.004 150)', w: 450, dbg: 'transparent', dbd: '1px solid oklch(0.34 0.004 150)', dcol: 'oklch(0.76 0.004 150)' },
+    Fitness: { bg: 'oklch(0.94 0.004 150)', bd: '1px solid transparent', col: 'oklch(0.34 0.004 150)', w: 560, dbg: 'oklch(0.27 0.004 150)', dbd: '1px solid transparent', dcol: 'oklch(0.90 0.004 150)' },
+    Reading: { bg: 'transparent', bd: '1px dashed oklch(0.84 0.004 150)', col: 'oklch(0.48 0.004 150)', w: 450, dbg: 'transparent', dbd: '1px dashed oklch(0.38 0.004 150)', dcol: 'oklch(0.72 0.004 150)' },
+    Tools: { bg: 'oklch(0.26 0.005 150)', bd: '1px solid transparent', col: 'oklch(0.96 0.004 150)', w: 500, dbg: 'oklch(0.90 0.004 150)', dbd: '1px solid transparent', dcol: 'oklch(0.18 0.004 150)' }
+  };
+
+  counts = { Recipes: 64, Design: 71, Travel: 52, Fitness: 43, Reading: 38, Tools: 29 };
+
+  raw = [
+    ['@cafe.oshi', 'Miso butter pasta, 15 min, pantry staples', 'Recipes', 'REEL', 'Jul 28', 0.86, 0.24],
+    ['@studio.mkbd', 'Grid system breakdown for editorial layouts', 'Design', 'POST', 'Jul 27', 0.80, 0.28],
+    ['@trailnotes', 'Two-day hut loop above Lauterbrunnen', 'Travel', 'CAR', 'Jul 27', 0.74, 0.32],
+    ['@drmobility', 'Hip mobility set, 6 minutes, no kit', 'Fitness', 'REEL', 'Jul 25', 0.88, 0.22],
+    ['@paperhouse', 'Seven short novels for August', 'Reading', 'POST', 'Jul 24', 0.78, 0.30],
+    ['@toolbelt.dev', 'Free tool for auditing font loading', 'Tools', 'POST', 'Jul 23', 0.83, 0.26],
+    ['@kitchen.min', 'Cold noodle sauce, four ingredients', 'Recipes', 'REEL', 'Jul 22', 0.76, 0.34],
+    ['@typearchive', 'Grotesk revival specimen, 1968 source', 'Design', 'CAR', 'Jul 21', 0.90, 0.20],
+    ['@slowcoast', 'Ferry route through the inner islands', 'Travel', 'POST', 'Jul 20', 0.72, 0.36],
+    ['@liftlog', 'Progressive overload without more volume', 'Fitness', 'POST', 'Jul 19', 0.85, 0.25],
+    ['@marginalia', 'Annotation method for dense nonfiction', 'Reading', 'REEL', 'Jul 18', 0.79, 0.29],
+    ['@shipfast', 'Keyboard-first task capture, self-hosted', 'Tools', 'POST', 'Jul 17', 0.87, 0.23],
+    ['@fermentco', 'Two-week kimchi timeline, cold kitchen', 'Recipes', 'CAR', 'Jul 15', 0.75, 0.33],
+    ['@grid.notes', 'A spacing scale that survives handoff', 'Design', 'POST', 'Jul 14', 0.82, 0.27],
+    ['@northlight', 'Night train sleeper, what to pack', 'Travel', 'REEL', 'Jul 12', 0.77, 0.31],
+    ['@quietreps', 'Zone 2 base, eight-week build', 'Fitness', 'POST', 'Jul 11', 0.84, 0.24]
+  ];
+
+  modelsFor = {
+    OpenAI: ['gpt-4o-mini', 'gpt-4o', 'o4-mini'],
+    Anthropic: ['claude-haiku-4', 'claude-sonnet-4', 'claude-opus-4'],
+    Gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    OpenRouter: ['anthropic/claude-haiku', 'meta-llama/llama-3.3-70b', 'qwen/qwen-2.5-72b']
+  };
+
+  map = (r) => {
+    const c = this.chips[r[2]];
+    return {
+      handle: r[0], summary: r[1], cat: r[2], kind: r[3], date: r[4],
+      thumb: 'oklch(' + r[5] + ' 0.006 150)', thumbD: 'oklch(' + r[6] + ' 0.006 150)',
+      cBg: c.bg, cBd: c.bd, cCol: c.col, cW: c.w, dBg: c.dbg, dBd: c.dbd, dCol: c.dcol
+    };
+  };
+
+  toggleCat = (name) => this.setState(s => ({
+    cats: s.cats.includes(name) ? s.cats.filter(x => x !== name) : s.cats.concat(name)
+  }));
+
+  onMove = (e) => {
+    if (!this.trk) return;
+    const r = this.trk.getBoundingClientRect();
+    const t = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    this.setState(s => ({ a: Object.assign({}, s.a, { t }) }));
+  };
+  onUp = () => {
+    this.trk = null;
+    window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('pointerup', this.onUp);
+    this.setState(s => ({ a: Object.assign({}, s.a, { drag: false }) }));
+  };
+  onDown = (e) => {
+    this.trk = e.currentTarget;
+    this.setState(s => ({ a: Object.assign({}, s.a, { drag: true }) }));
+    window.addEventListener('pointermove', this.onMove);
+    window.addEventListener('pointerup', this.onUp);
+    this.onMove(e);
+  };
+
+  fmt = (sec) => {
+    const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  };
+
+  test = () => {
+    const seq = { idle: 'checking', bad: 'checking', checking: 'ok', ok: 'idle' };
+    this.setState({ test: seq[this.state.test] || 'idle' });
+    if (this.state.test !== 'checking') return;
+  };
+
+  renderVals() {
+    const s = this.state;
+    const q = s.q.trim().toLowerCase();
+    const all = this.raw.map(this.map);
+    const posts = all.filter(p =>
+      (!s.cats.length || s.cats.includes(p.cat)) &&
+      (!q || (p.summary + ' ' + p.handle + ' ' + p.cat).toLowerCase().includes(q))
+    );
+    const railCats = Object.keys(this.counts).map(name => {
+      const on = s.cats.includes(name);
+      return {
+        name, count: this.counts[name], onClick: () => this.toggleCat(name),
+        bg: on ? 'oklch(0.965 0.02 150)' : 'transparent',
+        col: on ? 'oklch(0.36 0.05 150)' : 'oklch(0.40 0.004 150)',
+        w: on ? 520 : 450
+      };
+    });
+    const hasFilters = s.cats.length > 0;
+    const dur = 47;
+    const a = s.a;
+    const active = a.hover || a.drag;
+    const t = { idle: ['Test', 'oklch(0.78 0.004 150)', 'oklch(0.54 0.004 150)', 'Not tested since the key changed.'],
+      checking: ['Testing…', 'oklch(0.70 0.05 150)', 'oklch(0.48 0.004 150)', 'Sending one token to Anthropic…'],
+      ok: ['Test', 'oklch(0.50 0.10 150)', 'oklch(0.42 0.08 150)', 'Connected · claude-haiku-4 responded in 240ms'] }[s.test];
+
+    const dense = (this.props.density ?? 'comfortable') === 'compact';
+    return {
+      rowPad: dense ? '7px 14px' : '11px 14px',
+      thumbs: this.props.showThumbnails ?? true,
+      railBg: s.rail ? 'oklch(0.96 0.004 150)' : 'transparent',
+      q: s.q, onQ: (e) => this.setState({ q: e.target.value }),
+      posts, postsDark: all,
+      railCats, rail: s.rail, toggleRail: () => this.setState(x => ({ rail: !x.rail })),
+      hasFilters,
+      activeChips: s.cats.map(name => ({ label: name, onClick: () => this.toggleCat(name) })),
+      clearAll: () => this.setState({ cats: [], q: '' }),
+      clearOpacity: hasFilters || q ? 1 : 0.35,
+      noResults: posts.length === 0,
+      countLabel: 'showing ' + posts.length + ' · 380 indexed' + (s.cats.length || q ? ' · filtered' : ''),
+      showStrip: s.strip,
+      hideStrip: () => this.setState({ strip: false }),
+      pauseStrip: () => this.setState({ strip: false }),
+      provider: s.provider,
+      onProvider: (e) => this.setState({ provider: e.target.value, model: this.modelsFor[e.target.value][0], test: 'idle' }),
+      models: this.modelsFor[s.provider],
+      model: s.model,
+      onModel: (e) => this.setState({ model: e.target.value, test: 'idle' }),
+      keyVal: s.keyVal,
+      onKey: (e) => this.setState({ keyVal: e.target.value, test: 'idle' }),
+      testKey: this.test,
+      testLabel: t[0], testDot: t[1], testColor: t[2], testMsg: t[3],
+      toggleAuto: () => this.setState(x => ({ auto: !x.auto })),
+      autoBg: s.auto ? 'oklch(0.50 0.10 150)' : 'oklch(0.88 0.004 150)',
+      autoJustify: s.auto ? 'flex-end' : 'flex-start',
+      sA: {
+        h: active ? 7 : 3,
+        pct: (a.t * 100).toFixed(2),
+        fill: a.drag ? 'oklch(0.74 0.11 150)' : (active ? '#fff' : 'rgba(255,255,255,0.72)'),
+        knob: 9, knobOff: -4.5, knobO: active ? 1 : 0,
+        labO: a.drag ? 1 : 0, label: this.fmt(a.t * dur) + ' / ' + this.fmt(dur),
+        onEnter: () => this.setState(x => ({ a: Object.assign({}, x.a, { hover: true }) })),
+        onLeave: () => this.setState(x => ({ a: Object.assign({}, x.a, { hover: false }) })),
+        onDown: this.onDown
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>
