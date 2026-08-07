@@ -10,7 +10,9 @@ export const WIRE = 'saved-index';
 
 export type MainWorldMessage =
   | { wire: typeof WIRE; kind: 'captured'; payloads: unknown[] }
-  | { wire: typeof WIRE; kind: 'main-ready' };
+  | { wire: typeof WIRE; kind: 'main-ready' }
+  /** Instagram answered an API call with 429. Only the MAIN world can see this. */
+  | { wire: typeof WIRE; kind: 'rate-limited' };
 
 export type BridgeMessage = { wire: typeof WIRE; kind: 'bridge-ready' };
 
