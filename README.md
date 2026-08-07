@@ -19,12 +19,15 @@ npm install
 npm run build
 ```
 
-Then in Chrome:
+The build prints the exact folder to load. Then in Chrome:
 
 1. Go to `chrome://extensions`
 2. Turn on **Developer mode** (top right)
 3. Click **Load unpacked**
-4. Select the **`dist/`** folder — not the repo root
+4. Select **`dist/`** — ⚠️ **not the repo root.** The root has no `manifest.json`; it is
+   generated into `dist/` by the build. Selecting the root gives
+   *"Manifest file is missing or unreadable"*. On macOS, `Cmd+Shift+G` in the picker lets
+   you paste the path the build printed.
 
 Needs **Chrome 111 or newer** (that's when manifest-declared `world: "MAIN"` content
 scripts landed).

@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild';
 import { cp, mkdir, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 const watch = process.argv.includes('--watch');
 
@@ -28,10 +29,15 @@ const ctx = await esbuild.context({
   logLevel: 'info',
 });
 
+// Chrome loads the built folder, not the repo root — the repo root has no manifest.
+// Print the exact path so it can be pasted straight into the Load unpacked dialog.
+const loadPath = resolve('dist');
+
 if (watch) {
   await ctx.watch();
-  console.log('watching…');
+  console.log(`\nwatching… load unpacked from:\n  ${loadPath}\n`);
 } else {
   await ctx.rebuild();
   await ctx.dispose();
+  console.log(`\nBuilt. In chrome://extensions → Load unpacked, select:\n  ${loadPath}\n`);
 }
