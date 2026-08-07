@@ -8,6 +8,12 @@ import type { CapturedPost, IndexProgress, PostRecord, Settings } from './types'
 /** Namespace tag on window.postMessage traffic — instagram.com posts plenty of its own. */
 export const WIRE = 'saved-index';
 
+/**
+ * Long-lived port name for service-worker → UI pushes. Ports rather than
+ * `chrome.tabs.sendMessage` so we never need the `tabs` permission.
+ */
+export const PORT = 'saved-index-events';
+
 export type MainWorldMessage =
   | { wire: typeof WIRE; kind: 'captured'; payloads: unknown[] }
   | { wire: typeof WIRE; kind: 'main-ready' }
@@ -56,4 +62,29 @@ export async function send<T = unknown>(req: Request): Promise<T> {
   if (!res) throw new Error('No response from the extension service worker.');
   if (!res.ok) throw new Error(res.error);
   return res.value as T;
+}
+
+/** Subscribe to service-worker pushes. Returns an unsubscribe function. */
+export function subscribe(onEvent: (msg: Broadcast) => void): () => void {
+  let port: chrome.runtime.Port | null = null;
+  let closed = false;
+
+  const connect = (): void => {
+    if (closed) return;
+    port = chrome.runtime.connect({ name: PORT });
+    port.onMessage.addListener((msg) => onEvent(msg as Broadcast));
+    // MV3 idles the worker out from under us roughly every 5 minutes; reconnect so
+    // the UI keeps receiving progress instead of silently going stale.
+    port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError;
+      port = null;
+      if (!closed) setTimeout(connect, 1000);
+    });
+  };
+
+  connect();
+  return () => {
+    closed = true;
+    port?.disconnect();
+  };
 }
