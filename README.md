@@ -37,18 +37,72 @@ changes up.
 
 ## First run
 
-1. Click the extension icon. Pick a provider, paste a key, press **Test**.
-2. Open your saved posts on Instagram (`instagram.com/<you>/saved/`).
+1. Click the extension icon. Pick a provider and model, paste a key, press **Test and
+   save** — it saves and round-trips one token so you find out immediately if the key
+   works.
+2. Open your saved posts on Instagram: your profile → **Saved**.
 3. The library takes over the page. Scroll and posts are captured automatically, or press
-   **Index now** to auto-scroll the whole collection in one pass.
+   **Index now** and it scrolls for you.
 
-Costs run roughly **$0.10–0.15 per 1,000 posts** on a small model — the popup shows a live
-estimate before you start. Most posts are categorised by free local rules and never reach
-the model at all.
+Roughly **$0.37 per 1,000 posts** on Claude Haiku 4.5 — and that is the ceiling, because
+posts caught by the free local rules never reach the model. The popup and the in-page panel
+both show what you have actually spent, metered from the token counts the provider returns.
 
 ---
 
-## How it works
+## How indexing actually works
+
+This is the part that looks like one thing and is really two. Only the second half costs
+money.
+
+**1 — Capture (free).** Instagram sends about a dozen posts per network request. A post
+cannot be captured before it has loaded, so *the library fills as you scroll*. If you have
+1,000 saved posts and 30 are on screen, 30 is what exists so far. **Index now** does the
+scrolling for you: it pages to the bottom with randomised 800–2000 ms pauses and stops
+immediately if Instagram returns a 429. It makes no requests of its own — it reads the
+responses the page was fetching anyway.
+
+**2 — Categorise (the part that costs).** Hashtag and keyword rules label whatever they can
+for nothing. Everything else goes to your model in batches of 25 captions. Only posts with
+no usable caption *and* no alt text cost a look at the thumbnail. Nothing is ever
+categorised twice, and a paused run resumes exactly where it stopped — progress lives in
+the database, not in memory, so closing the tab or letting Chrome kill the service worker
+costs you at most the in-flight batch.
+
+Both halves can be paused and resumed from either the popup or the in-page panel, and a
+pause in one stops the other.
+
+---
+
+## Is it safe?
+
+**Your API key.** It lives in `chrome.storage.local` under the extension's own origin — not
+in `localStorage`, which would put it on instagram.com's doorstep. It is not encrypted at
+rest, and encrypting it would be theatre: the decryption key would have to ship in the same
+bundle. The protection is the access boundary instead, and it holds in three places at
+once: page scripts can't call `chrome.storage` at all; `setAccessLevel({
+TRUSTED_CONTEXTS })` means even *our own* content script can't read it; and every model
+call is made by the background worker, so the key is never passed over a message or into a
+page. Errors run through a `redact()` that strips key-shaped strings before anything is
+logged or shown.
+
+It does not protect against someone at your unlocked computer opening the service-worker
+console — that is true of every extension holding a credential. Scope the key, set a spend
+cap at your provider, and use **Remove** in the popup when you're done; it clears the key
+without touching anything you've indexed.
+
+**Your posts.** Everything captured sits in this extension's own IndexedDB, in your
+browser. Nothing is uploaded anywhere. The only outbound traffic is the caption text sent
+to the provider you chose. There is no server in this project and no telemetry.
+
+**Your Instagram account.** The extension never calls Instagram's API. It reads the
+responses the page fetches for itself, which is why no `doc_id` is ever forged and no
+request pattern is added. The one active behaviour is auto-scroll, which is randomised
+rather than metronomic and halts on the first 429.
+
+---
+
+## How it works under the hood
 
 The full design rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md). The short version:
 
@@ -92,19 +146,20 @@ src/
   background/
     index.ts               service worker: message router, port broadcasts → background.js
     db.ts                  IndexedDB store, dedupe + gap-filling merge
-    settings.ts            settings + the TRUSTED_CONTEXTS lockdown
+    settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
+    spend.ts               metered tokens + dollars, survives worker restarts
     categorize.ts          the three-tier pipeline, concurrency, backoff
     providers/
-      index.ts             adapter interface, registry, key redaction
+      index.ts             adapter interface, registry, pricing, key redaction
       anthropic.ts         (sends anthropic-dangerous-direct-browser-access)
       openai.ts  gemini.ts  openrouter.ts
 
   page/
-    library.ts             in-page library (Shadow DOM)
+    library.ts             in-page library (Shadow DOM), filters, indexing panel
     library.css.ts         its styles
-    video.ts               controls, observers, arrow keys, thin scrubber skin
+    video.ts               body-level control bar, geometric targeting, observers
 
-  popup/popup.ts           3-step onboarding + index controls          → popup.js
+  popup/popup.ts           setup screen + control room                 → popup.js
 
 public/
   manifest.json  popup.html  icons/
@@ -160,9 +215,16 @@ stopped.
 **The library covers something I need.** Press **Hide** in its header — Instagram's own
 grid is underneath, untouched. A chip in the bottom-right brings the library back.
 
-**Video controls disappear after a while.** They shouldn't — each video has its own
-attribute observer that re-applies them after React re-renders. If it happens, note the
-page and open an issue against `src/page/video.ts`.
+**Only a handful of posts show up.** That is capture working as designed — see *How
+indexing actually works* above. Press **Index now** and leave the tab open.
+
+**The video scrubber won't seek.** Check the **Extension video controls** toggle in the
+popup is on. With it off you get the browser's own control strip, which Instagram's
+click-catcher frequently swallows; our bar renders outside their DOM specifically to avoid
+that. The bar appears when the pointer is over a player.
+
+**Reels stop at the end instead of looping.** Deliberate: `loop` is removed, because a
+looping video restarts under you mid-scrub and hides where the end is.
 
 ---
 

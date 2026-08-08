@@ -70,53 +70,53 @@ Ordered. Each phase is one commit. `[x]` = done and committed.
 Filed after using the built extension. Each phase is one commit.
 
 ## Phase 11 — Key visibility and removal
-- [ ] `maskKey` result must render as *text*, not inside a `type="password"` field —
+- [x] `maskKey` result must render as *text*, not inside a `type="password"` field —
       the mask was there all along but drawn as `•••••`
-- [ ] Connected state is its own row: provider · masked key · Test · Replace · Remove
-- [ ] `settings:clear-key` request; clearing wipes only the key, never the DB
+- [x] Connected state is its own row: provider · masked key · Test · Replace · Remove
+- [x] `settings:clear-key` request; clearing wipes only the key, never the DB
 
 ## Phase 12 — Cost accounting (real, not guessed)
-- [ ] `Provider.chat` returns `{ text, usage: { inputTokens, outputTokens } }`
-- [ ] `ModelInfo` carries `inputPer1M` / `outputPer1M` list prices, not a made-up
+- [x] `Provider.chat` returns `{ text, usage: { inputTokens, outputTokens } }`
+- [x] `ModelInfo` carries `inputPer1M` / `outputPer1M` list prices, not a made-up
       per-1k-posts figure
-- [ ] `background/spend.ts` — cumulative tokens + USD in `storage.local`, per model
-- [ ] Progress carries `spentUsd` and `estimateUsd`; popup and library both show them
+- [x] `background/spend.ts` — cumulative tokens + USD in `storage.local`, per model
+- [x] Progress carries `spentUsd` and `estimateUsd`; popup and library both show them
 
 ## Phase 13 — Onboarding rewrite
-- [ ] First screen answers "what is this and what do I do first" before asking for a key
-- [ ] Provider + model + key on one screen, not three
-- [ ] Explicit "you can browse without a key" path
-- [ ] Post-setup screen is the control room: found / indexed / pending, spend, controls
+- [x] First screen answers "what is this and what do I do first" before asking for a key
+- [x] Provider + model + key on one screen, not three
+- [x] Explicit "you can browse without a key" path
+- [x] Post-setup screen is the control room: found / indexed / pending, spend, controls
 
 ## Phase 14 — Library filters and stable rendering
-- [ ] Categories are **single-select** — a click replaces the selection
-- [ ] ⌘/Ctrl-click adds a second category; chips row shows and clears the combination
-- [ ] Re-render preserves scroll position and focus (progress pushes were bouncing the
+- [x] Categories are **single-select** — a click replaces the selection
+- [x] ⌘/Ctrl-click adds a second category; chips row shows and clears the combination
+- [x] Re-render preserves scroll position and focus (progress pushes were bouncing the
       grid back to the top mid-scroll — the "glitchy" scrolling)
-- [ ] Coalesce refreshes so a burst of writes costs one re-render
+- [x] Coalesce refreshes so a burst of writes costs one re-render
 
 ## Phase 15 — Indexing you can see and steer
-- [ ] Explain the two halves in-product: capture (scroll-driven) vs categorise (worker)
-- [ ] Pause/Resume stops and restarts *both* halves — `harvest-stop` / `harvest-start`
+- [x] Explain the two halves in-product: capture (scroll-driven) vs categorise (worker)
+- [x] Pause/Resume stops and restarts *both* halves — `harvest-stop` / `harvest-start`
       broadcasts so a pause in the popup stops the page auto-scroll too
-- [ ] Show captured-so-far, pending, spend, and estimate while running
+- [x] Show captured-so-far, pending, spend, and estimate while running
 
 ## Phase 16 — Video controls that actually seek
-- [ ] Root cause: Instagram's click-catcher sits above `<video>`, so `pointerenter`
+- [x] Root cause: Instagram's click-catcher sits above `<video>`, so `pointerenter`
       never fired and native control clicks never reached the player
-- [ ] Own control bar rendered into `document.body` — hit-tested by geometry, immune to
+- [x] Own control bar rendered into `document.body` — hit-tested by geometry, immune to
       Instagram's stacking contexts. Play/pause, elapsed/duration, drag-to-seek
-- [ ] Swallow the click that ends a scrub so the post doesn't open
+- [x] Swallow the click that ends a scrub so the post doesn't open
 
 ## Phase 17 — Categorisation accuracy
-- [ ] Feed the model `altText`, media type, and audio track — Instagram's alt text is
+- [x] Feed the model `altText`, media type, and audio track — Instagram's alt text is
       often the strongest signal on a caption-less reel
-- [ ] Give the model the subcategory vocabulary instead of free text
-- [ ] `confidence` field; low confidence lands in Uncategorized rather than guessing
+- [x] Give the model the subcategory vocabulary instead of free text
+- [x] `confidence` field; low confidence lands in Uncategorized rather than guessing
 
 ## Phase 18 — Docs
-- [ ] ARCHITECTURE.md: cost accounting, the video rework, the trust boundary as drawn
-- [ ] README: how indexing works, what it costs, security answers
+- [x] ARCHITECTURE.md: cost accounting, the video rework, the trust boundary as drawn
+- [x] README: how indexing works, what it costs, security answers
 
 ---
 
