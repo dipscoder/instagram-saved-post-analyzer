@@ -25,31 +25,51 @@ import {
   usdFor,
   type ChatResult,
 } from './providers/index';
-import { CATEGORY_NAMES, classifyByRules, normalizeCategory } from '../taxonomy';
+import { classifyByRules, normalizeCategory, TAXONOMY } from '../taxonomy';
 import type { IndexProgress, PostRecord } from '../types';
 
 const TEXT_BATCH_SIZE = 25;
 const MAX_IN_FLIGHT = 3;
 const MAX_ATTEMPTS = 4;
-/** Below this a caption carries no signal worth sending as text. */
-const MIN_CAPTION_CHARS = 15;
 const CAPTION_CHAR_BUDGET = 400;
 
+/**
+ * Naming the subcategories turns a free-text field into a closed vocabulary, which is
+ * most of the accuracy win: "Recipe" and "recipes" and "cooking tutorial" stop being
+ * three different answers to the same question.
+ */
+const TAXONOMY_BLOCK = TAXONOMY.map(
+  (c) => `  ${c.name} — ${c.subcategories.join(', ')}`,
+).join('\n');
+
 const SYSTEM_PROMPT = [
-  'You categorise saved Instagram posts into a fixed taxonomy.',
+  'You file saved Instagram posts into a fixed taxonomy so they can be found again later.',
   '',
-  `Allowed categories (use exactly one, copied verbatim): ${CATEGORY_NAMES.join(', ')}.`,
+  'Categories, and the subcategories allowed under each:',
+  TAXONOMY_BLOCK,
   '',
-  'For each post return:',
+  'For each post you get the handle, the caption, its hashtags, whether it is a video,',
+  "and sometimes Instagram's own alt text describing the image.",
+  '',
+  'Return one object per post:',
   '  id          the id you were given, unchanged',
-  '  category    one allowed category, verbatim',
-  '  subcategory two or three words, or null',
-  '  tags        2-4 lowercase keywords',
-  '  summary     one sentence under 90 characters saying what the post is about.',
-  '              Write it as a note to self. No "This post shows", no hashtags.',
+  '  category    exactly one category name, copied verbatim from the list above',
+  "  subcategory one subcategory from that category's list, or null",
+  '  tags        2-4 lowercase keywords someone would actually search for',
+  '  summary     one sentence under 90 characters, written as a note to self, saying what',
+  '              this post is for. Name the specific thing — "sheet-pan harissa chicken"',
+  '              beats "a chicken recipe". No hashtags, no "This post shows".',
+  '  confidence  "high", "medium" or "low"',
+  '',
+  'Rules:',
+  '  - File by what the post is about, not by who posted it. A gym brand posting a recipe',
+  '    is Food & Recipes.',
+  '  - A promotional post gets the category of the thing being promoted.',
+  '  - If the signal is genuinely too thin to place, say confidence "low" rather than',
+  '    guessing a category to fill the field.',
   '',
   'Respond with JSON only, no prose and no code fences:',
-  '{"results":[{"id":0,"category":"…","subcategory":null,"tags":["…"],"summary":"…"}]}',
+  '{"results":[{"id":0,"category":"…","subcategory":null,"tags":["…"],"summary":"…","confidence":"high"}]}',
 ].join('\n');
 
 interface ModelResult {
@@ -58,6 +78,7 @@ interface ModelResult {
   subcategory?: string | null;
   tags?: string[];
   summary?: string;
+  confidence?: string;
 }
 
 export type ProgressFn = (p: IndexProgress) => void;
@@ -179,12 +200,8 @@ export class Categorizer {
         if (!needsModel.length) continue;
 
         // --- tiers 2 and 3 ---
-        const visionPosts = needsModel.filter(
-          (p) => p.caption.trim().length < MIN_CAPTION_CHARS,
-        );
-        const textPosts = needsModel.filter(
-          (p) => p.caption.trim().length >= MIN_CAPTION_CHARS,
-        );
+        const textPosts = needsModel.filter(hasTextSignal);
+        const visionPosts = needsModel.filter((p) => !hasTextSignal(p));
 
         const jobs: (() => Promise<void>)[] = [];
 
@@ -244,11 +261,7 @@ export class Categorizer {
     provider: ReturnType<typeof getProvider>,
     settings: { apiKey: string; model: string },
   ): Promise<void> {
-    const lines = batch.map((p, i) => {
-      const caption = p.caption.replace(/\s+/g, ' ').slice(0, CAPTION_CHAR_BUDGET);
-      const tags = p.hashtags.length ? ` | hashtags: ${p.hashtags.slice(0, 12).join(' ')}` : '';
-      return `id=${i} | ${p.handle}${tags}\ncaption: ${caption || '(none)'}`;
-    });
+    const lines = batch.map((p, i) => describe(p, i));
 
     const result = await this.callWithRetry(
       () =>
@@ -308,9 +321,7 @@ export class Categorizer {
         provider.chat(
           {
             system: SYSTEM_PROMPT,
-            user:
-              `Categorise this single post from its thumbnail. Use id=0.\n` +
-              `${post.handle}${post.altText ? `\nalt text: ${post.altText}` : ''}`,
+            user: `File this single post using its thumbnail. Use id=0.\n\n${describe(post, 0)}`,
             image,
             maxTokens: 220,
           },
@@ -384,11 +395,43 @@ export class Categorizer {
   }
 }
 
+/**
+ * One post as the model sees it. Alt text matters more than its length suggests:
+ * Instagram generates it from its own image classifier, so on a caption-less reel it is
+ * often the only real description available — and it is free, unlike a thumbnail.
+ */
+function describe(p: PostRecord, id: number): string {
+  const parts = [`id=${id} | ${p.handle}`];
+  if (p.isVideo) parts.push(p.durationSec ? `video ${Math.round(p.durationSec)}s` : 'video');
+  if (p.audioTrackName) parts.push(`audio: ${p.audioTrackName}`);
+
+  const lines = [parts.join(' | ')];
+  const caption = p.caption.replace(/\s+/g, ' ').trim().slice(0, CAPTION_CHAR_BUDGET);
+  lines.push(`caption: ${caption || '(none)'}`);
+  if (p.altText) lines.push(`alt text: ${p.altText.replace(/\s+/g, ' ').slice(0, 200)}`);
+  if (p.hashtags.length) lines.push(`hashtags: ${p.hashtags.slice(0, 12).join(' ')}`);
+  return lines.join('\n');
+}
+
+/** Enough to file from text alone. Anything else falls through to the thumbnail. */
+function hasTextSignal(p: PostRecord): boolean {
+  return (
+    p.caption.trim().length >= 15 ||
+    p.hashtags.length >= 2 ||
+    (p.altText ?? '').trim().length >= 25
+  );
+}
+
 function applyResult(post: PostRecord, r: ModelResult, model: string): PostRecord {
+  // A low-confidence answer is worse than no answer: it buries the post under a
+  // category you will never think to look in. Keep the summary, drop the guess — the
+  // post shows up under Uncategorized and is still searchable.
+  const confident = String(r.confidence ?? 'high').toLowerCase() !== 'low';
+
   return {
     ...post,
-    category: normalizeCategory(r.category),
-    subcategory: r.subcategory?.trim() || null,
+    category: confident ? normalizeCategory(r.category) : null,
+    subcategory: confident ? r.subcategory?.trim() || null : null,
     tags: (r.tags ?? []).slice(0, 4).map((t) => String(t).toLowerCase()),
     summary: r.summary?.trim() || firstLine(post.caption) || null,
     categorizedAt: Date.now(),
