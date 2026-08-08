@@ -1,4 +1,4 @@
-import { readError, type ChatRequest, type Provider } from './index';
+import { readError, type ChatRequest, type ChatResult, type Provider } from './index';
 
 const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
@@ -7,12 +7,13 @@ export const openai: Provider = {
   label: 'OpenAI',
   keyPlaceholder: 'sk-…',
   keysUrl: 'https://platform.openai.com/api-keys',
+  // List prices, USD per million tokens.
   models: [
-    { id: 'gpt-4o-mini', label: 'GPT-4o mini · fast', costPer1kPosts: 0.11, supportsVision: true },
-    { id: 'gpt-4o', label: 'GPT-4o', costPer1kPosts: 1.8, supportsVision: true },
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini · fast', inputPer1M: 0.15, outputPer1M: 0.6, supportsVision: true },
+    { id: 'gpt-4o', label: 'GPT-4o', inputPer1M: 2.5, outputPer1M: 10, supportsVision: true },
   ],
 
-  async chat(req: ChatRequest, key: string, model: string): Promise<string> {
+  async chat(req: ChatRequest, key: string, model: string): Promise<ChatResult> {
     const userContent: unknown[] = [{ type: 'text', text: req.user }];
     if (req.image) {
       userContent.push({
@@ -39,7 +40,17 @@ export const openai: Provider = {
 
     if (!res.ok) throw await readError(res);
 
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? '';
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+
+    return {
+      text: data.choices?.[0]?.message?.content ?? '',
+      usage: {
+        inputTokens: data.usage?.prompt_tokens ?? 0,
+        outputTokens: data.usage?.completion_tokens ?? 0,
+      },
+    };
   },
 };

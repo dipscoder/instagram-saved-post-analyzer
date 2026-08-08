@@ -71,14 +71,20 @@ export function toRecord(p: CapturedPost): PostRecord {
 
 export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter';
 
+/**
+ * 'overlay' is our own control bar, drawn into document.body. 'native' hands the job to
+ * the browser's control strip, which Instagram's click-catcher often sits on top of —
+ * see page/video.ts. 'thin' is the legacy name for 'overlay' and is migrated on read.
+ */
+export type VideoControls = 'overlay' | 'native';
+
 export interface Settings {
   provider: ProviderId;
   model: string;
   /** Present only in the service worker; storage.local is TRUSTED_CONTEXTS. */
   apiKey: string;
   autoIndex: boolean;
-  /** 'native' uses the browser's own controls; 'thin' uses our scrubber skin. */
-  scrubberSkin: 'native' | 'thin';
+  scrubberSkin: VideoControls;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -86,15 +92,32 @@ export const DEFAULT_SETTINGS: Settings = {
   model: 'claude-haiku-4-5',
   apiKey: '',
   autoIndex: true,
-  scrubberSkin: 'native',
+  scrubberSkin: 'overlay',
 };
 
 export type IndexPhase = 'idle' | 'running' | 'paused' | 'done' | 'error' | 'offline';
 
 export interface IndexProgress {
   phase: IndexPhase;
+  /** Posts captured into the DB. Grows as you scroll — it is not "all your saves". */
   total: number;
   categorized: number;
+  /** Captured but not yet through a tier. */
+  pending: number;
+  /** USD actually charged, summed from the token usage every provider reports back. */
+  spentUsd: number;
+  /** Upper-bound USD for `pending` at current list prices. Rules make it cheaper. */
+  estimateUsd: number;
   /** Human-readable cause when phase is 'error' — surfaced verbatim in the UI. */
   message: string | null;
 }
+
+export const IDLE_PROGRESS: IndexProgress = {
+  phase: 'idle',
+  total: 0,
+  categorized: 0,
+  pending: 0,
+  spentUsd: 0,
+  estimateUsd: 0,
+  message: null,
+};

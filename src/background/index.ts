@@ -10,21 +10,23 @@
 import * as db from './db';
 import { Categorizer } from './categorize';
 import { getProvider, PROVIDERS, redact, testKey } from './providers/index';
-import { getSafeSettings, getSettings, lockDownStorage, setSettings } from './settings';
+import { resetSpend } from './spend';
+import {
+  clearKey,
+  getSafeSettings,
+  getSettings,
+  lockDownStorage,
+  setSettings,
+} from './settings';
 import { PORT, type Broadcast, type Request, type Response, type Stats } from '../messaging';
-import { toRecord, type IndexProgress } from '../types';
+import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
 // Assert on every wake, not just install — see settings.ts.
 void lockDownStorage();
 chrome.runtime.onInstalled.addListener(() => void lockDownStorage());
 
-let lastProgress: IndexProgress = {
-  phase: 'idle',
-  total: 0,
-  categorized: 0,
-  message: null,
-};
+let lastProgress: IndexProgress = IDLE_PROGRESS;
 
 const categorizer = new Categorizer((p) => {
   lastProgress = p;
@@ -106,20 +108,29 @@ async function handle(req: Request): Promise<unknown> {
     }
 
     case 'index:start': {
+      // The page owns scrolling, so starting a run means asking whichever tab is on the
+      // saved grid to start harvesting too. A tab that isn't there simply never hears it.
+      broadcast({ type: 'harvest', action: 'start' });
       void categorizer.start().then(() => chrome.storage.local.set({ lastRunAt: Date.now() }));
       return categorizer.progress();
     }
 
     case 'index:pause':
+      broadcast({ type: 'harvest', action: 'stop' });
       categorizer.pause();
       return categorizer.progress();
 
     case 'index:reindex':
+      broadcast({ type: 'harvest', action: 'start' });
       void categorizer.reindex();
       return categorizer.progress();
 
     case 'index:progress':
       return categorizer.isRunning() ? categorizer.progress() : refreshProgress();
+
+    case 'spend:reset':
+      await resetSpend();
+      return categorizer.progress();
 
     case 'settings:get':
       return {
@@ -142,6 +153,13 @@ async function handle(req: Request): Promise<unknown> {
       return getSafeSettings();
     }
 
+    case 'settings:clear-key': {
+      // Stop first: a run that loses its key mid-flight would otherwise fail noisily.
+      categorizer.pause();
+      await clearKey();
+      return getSafeSettings();
+    }
+
     case 'settings:test-key': {
       const { provider, model, apiKey } = await getSettings();
       if (!apiKey) throw new Error('No key saved yet.');
@@ -160,13 +178,13 @@ async function handle(req: Request): Promise<unknown> {
 
 /** Progress for an idle worker: derive counts from the DB rather than stale memory. */
 async function refreshProgress(): Promise<IndexProgress> {
-  const { total, categorized } = await db.stats();
+  const fresh = await categorizer.progress();
   const phase =
     lastProgress.phase === 'running'
       ? 'paused' // the worker was killed mid-run; it is not running now
-      : total > 0 && categorized === total
+      : fresh.total > 0 && fresh.categorized === fresh.total
         ? 'done'
-        : lastProgress.phase;
-  lastProgress = { ...lastProgress, phase, total, categorized };
+        : fresh.phase;
+  lastProgress = { ...fresh, phase };
   return lastProgress;
 }

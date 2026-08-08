@@ -15,16 +15,18 @@
  * so a mutation storm costs one pass per frame rather than one per mutation.
  */
 
+import type { VideoControls } from '../types';
+
 const SEEK_STEP_SECONDS = 5;
 /** Above Instagram's click-catcher, below nothing of ours. */
 const VIDEO_Z_INDEX = '2147483000';
 
 const enhanced = new WeakSet<HTMLVideoElement>();
-let skin: 'native' | 'thin' = 'native';
+let skin: VideoControls = 'overlay';
 let scanQueued = false;
 let scrubber: ThinScrubber | null = null;
 
-export function startVideoControls(initialSkin: 'native' | 'thin'): void {
+export function startVideoControls(initialSkin: VideoControls): void {
   skin = initialSkin;
 
   scan();
@@ -37,7 +39,7 @@ export function startVideoControls(initialSkin: 'native' | 'thin'): void {
   document.addEventListener('keydown', onKeyDown, true);
 }
 
-export function setScrubberSkin(next: 'native' | 'thin'): void {
+export function setScrubberSkin(next: VideoControls): void {
   if (next === skin) return;
   skin = next;
   if (skin === 'native') {
@@ -77,7 +79,7 @@ function enhance(video: HTMLVideoElement): void {
   // Always attached, and gated at call time — a listener added only while the thin skin
   // was active would leave videos enhanced before a settings change without one.
   video.addEventListener('pointerenter', () => {
-    if (skin === 'thin') bindScrubber(video);
+    if (skin === 'overlay') bindScrubber(video);
   });
 }
 

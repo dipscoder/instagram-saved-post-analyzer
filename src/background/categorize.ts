@@ -14,7 +14,17 @@
 
 import * as db from './db';
 import { getSettings } from './settings';
-import { getProvider, parseJsonLoose, ProviderError, redact } from './providers/index';
+import { getSpend, record } from './spend';
+import {
+  estimateUsd,
+  findModel,
+  getProvider,
+  parseJsonLoose,
+  ProviderError,
+  redact,
+  usdFor,
+  type ChatResult,
+} from './providers/index';
 import { CATEGORY_NAMES, classifyByRules, normalizeCategory } from '../taxonomy';
 import type { IndexProgress, PostRecord } from '../types';
 
@@ -67,8 +77,21 @@ export class Categorizer {
   constructor(private readonly onProgress: ProgressFn) {}
 
   async progress(): Promise<IndexProgress> {
-    const { total, categorized } = await db.stats();
-    return { phase: this.phase, total, categorized, message: this.message };
+    const [{ total, categorized }, spend, settings] = await Promise.all([
+      db.stats(),
+      getSpend(),
+      getSettings(),
+    ]);
+    const pending = Math.max(0, total - categorized);
+    return {
+      phase: this.phase,
+      total,
+      categorized,
+      pending,
+      spentUsd: spend.usd,
+      estimateUsd: estimateUsd(findModel(settings.provider, settings.model), pending),
+      message: this.message,
+    };
   }
 
   isRunning(): boolean {
@@ -227,22 +250,24 @@ export class Categorizer {
       return `id=${i} | ${p.handle}${tags}\ncaption: ${caption || '(none)'}`;
     });
 
-    const text = await this.callWithRetry(() =>
-      provider.chat(
-        {
-          system: SYSTEM_PROMPT,
-          user: `Categorise these ${batch.length} posts.\n\n${lines.join('\n\n')}`,
-          maxTokens: 180 * batch.length,
-        },
-        settings.apiKey,
-        settings.model,
-      ),
+    const result = await this.callWithRetry(
+      () =>
+        provider.chat(
+          {
+            system: SYSTEM_PROMPT,
+            user: `Categorise these ${batch.length} posts.\n\n${lines.join('\n\n')}`,
+            maxTokens: 180 * batch.length,
+          },
+          settings.apiKey,
+          settings.model,
+        ),
+      provider.models.find((m) => m.id === settings.model),
     );
-    if (text === null) return;
+    if (result === null) return;
 
     let results: ModelResult[];
     try {
-      const parsed = parseJsonLoose<{ results?: ModelResult[] } | ModelResult[]>(text);
+      const parsed = parseJsonLoose<{ results?: ModelResult[] } | ModelResult[]>(result.text);
       results = Array.isArray(parsed) ? parsed : (parsed.results ?? []);
     } catch {
       // Bad JSON is not worth a retry storm; leave the batch pending for next round.
@@ -278,24 +303,26 @@ export class Categorizer {
       return this.markUnclassifiable(post);
     }
 
-    const text = await this.callWithRetry(() =>
-      provider.chat(
-        {
-          system: SYSTEM_PROMPT,
-          user:
-            `Categorise this single post from its thumbnail. Use id=0.\n` +
-            `${post.handle}${post.altText ? `\nalt text: ${post.altText}` : ''}`,
-          image,
-          maxTokens: 220,
-        },
-        settings.apiKey,
-        settings.model,
-      ),
+    const result = await this.callWithRetry(
+      () =>
+        provider.chat(
+          {
+            system: SYSTEM_PROMPT,
+            user:
+              `Categorise this single post from its thumbnail. Use id=0.\n` +
+              `${post.handle}${post.altText ? `\nalt text: ${post.altText}` : ''}`,
+            image,
+            maxTokens: 220,
+          },
+          settings.apiKey,
+          settings.model,
+        ),
+      provider.models.find((m) => m.id === settings.model),
     );
-    if (text === null) return;
+    if (result === null) return;
 
     try {
-      const parsed = parseJsonLoose<{ results?: ModelResult[] } | ModelResult[]>(text);
+      const parsed = parseJsonLoose<{ results?: ModelResult[] } | ModelResult[]>(result.text);
       const results = Array.isArray(parsed) ? parsed : (parsed.results ?? []);
       const first = results[0];
       if (!first) return;
@@ -326,12 +353,20 @@ export class Categorizer {
    * Exponential backoff with jitter on 429/5xx. Returns null when the call should be
    * abandoned — either it is a permanent failure (which sets phase to error) or the run
    * was paused mid-flight.
+   *
+   * Spend is recorded here rather than at the call sites so that a response we then fail
+   * to parse is still counted: the provider billed for it either way.
    */
-  private async callWithRetry(fn: () => Promise<string>): Promise<string | null> {
+  private async callWithRetry(
+    fn: () => Promise<ChatResult>,
+    model: Parameters<typeof usdFor>[0],
+  ): Promise<ChatResult | null> {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       if (this.cancelled) return null;
       try {
-        return await fn();
+        const result = await fn();
+        await record(result.usage, usdFor(model, result.usage));
+        return result;
       } catch (err) {
         const retryable = err instanceof ProviderError && err.retryable;
         if (!retryable || attempt === MAX_ATTEMPTS - 1) {

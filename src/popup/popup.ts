@@ -7,7 +7,7 @@
  */
 
 import { send, subscribe, type SafeSettings, type Stats } from '../messaging';
-import type { IndexProgress, ProviderId } from '../types';
+import { IDLE_PROGRESS, type IndexProgress, type ProviderId } from '../types';
 
 interface ProviderMeta {
   id: ProviderId;
@@ -26,7 +26,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
 let providers: ProviderMeta[] = [];
 let settings: SafeSettings;
 let stats: Stats = { total: 0, categorized: 0, byCategory: {}, lastRunAt: null };
-let progress: IndexProgress = { phase: 'idle', total: 0, categorized: 0, message: null };
+let progress: IndexProgress = IDLE_PROGRESS;
 
 let step = 1;
 let draftProvider: ProviderId = 'anthropic';
@@ -105,7 +105,7 @@ function wireStaticHandlers(): void {
     }).then(reloadSettings);
   });
   $('thinSkin').addEventListener('click', () => {
-    const next = settings.scrubberSkin === 'thin' ? 'native' : 'thin';
+    const next = settings.scrubberSkin === 'overlay' ? 'native' : 'overlay';
     void send<SafeSettings>({ type: 'settings:set', patch: { scrubberSkin: next } }).then(
       reloadSettings,
     );
@@ -300,7 +300,7 @@ function renderIndexing(): void {
   }
 
   $('autoIndex').classList.toggle('on', settings.autoIndex);
-  $('thinSkin').classList.toggle('on', settings.scrubberSkin === 'thin');
+  $('thinSkin').classList.toggle('on', settings.scrubberSkin === 'overlay');
 }
 
 function setStatus(id: string, kind: '' | 'ok' | 'bad', message: string): void {

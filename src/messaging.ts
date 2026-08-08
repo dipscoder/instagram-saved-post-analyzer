@@ -31,8 +31,10 @@ export type Request =
   | { type: 'index:pause' }
   | { type: 'index:reindex' }
   | { type: 'index:progress' }
+  | { type: 'spend:reset' }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<Settings> }
+  | { type: 'settings:clear-key' }
   | { type: 'settings:test-key' };
 
 export type Response =
@@ -46,9 +48,16 @@ export interface Stats {
   lastRunAt: number | null;
 }
 
-/** service worker → content script / popup (broadcast) */
+/**
+ * service worker → content script / popup (broadcast)
+ *
+ * `harvest` is a command rather than a notification: only the page can scroll, so when
+ * indexing is paused or started from the popup the worker has to ask the content script
+ * to stop or start auto-scrolling on its behalf.
+ */
 export type Broadcast =
   | { type: 'progress'; progress: IndexProgress }
+  | { type: 'harvest'; action: 'start' | 'stop' }
   | { type: 'posts:updated'; posts: PostRecord[] };
 
 /** Settings as they may safely leave the service worker — key replaced by a mask. */

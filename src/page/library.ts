@@ -11,7 +11,7 @@
 import { send, subscribe, type Broadcast, type Stats } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
-import type { IndexProgress, PostRecord } from '../types';
+import { IDLE_PROGRESS, type IndexProgress, type PostRecord } from '../types';
 import { styles } from './library.css';
 
 const NAV_RAIL_PX = 72; // Instagram's own icon rail; left visible and usable
@@ -34,7 +34,7 @@ interface State {
 const state: State = {
   posts: [],
   stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null },
-  progress: { phase: 'idle', total: 0, categorized: 0, message: null },
+  progress: IDLE_PROGRESS,
   search: '',
   selected: new Set(),
   view: 'grid',

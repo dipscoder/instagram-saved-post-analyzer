@@ -15,11 +15,23 @@ export interface ChatRequest {
   maxTokens: number;
 }
 
+/** What every provider reports back so spend can be metered rather than estimated. */
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ChatResult {
+  text: string;
+  usage: Usage;
+}
+
 export interface ModelInfo {
   id: string;
   label: string;
-  /** Rough USD for 1,000 text-only posts. Indicative, for the popup's estimate. */
-  costPer1kPosts: number;
+  /** Published list price, USD per million tokens. */
+  inputPer1M: number;
+  outputPer1M: number;
   supportsVision: boolean;
 }
 
@@ -29,7 +41,35 @@ export interface Provider {
   keyPlaceholder: string;
   keysUrl: string;
   models: ModelInfo[];
-  chat(req: ChatRequest, key: string, model: string): Promise<string>;
+  chat(req: ChatRequest, key: string, model: string): Promise<ChatResult>;
+}
+
+/**
+ * Measured against real batches: a post contributes roughly this much once the caption is
+ * clipped to 400 characters and the system prompt is amortised across a batch of 25.
+ * Used only for the pre-run estimate — actual spend comes from reported usage.
+ */
+const EST_INPUT_TOKENS_PER_POST = 145;
+const EST_OUTPUT_TOKENS_PER_POST = 50;
+
+/** Upper bound: assumes every pending post reaches the model. Rules make it cheaper. */
+export function estimateUsd(model: ModelInfo | undefined, posts: number): number {
+  if (!model || posts <= 0) return 0;
+  const input = (posts * EST_INPUT_TOKENS_PER_POST) / 1_000_000;
+  const output = (posts * EST_OUTPUT_TOKENS_PER_POST) / 1_000_000;
+  return input * model.inputPer1M + output * model.outputPer1M;
+}
+
+export function usdFor(model: ModelInfo | undefined, usage: Usage): number {
+  if (!model) return 0;
+  return (
+    (usage.inputTokens / 1_000_000) * model.inputPer1M +
+    (usage.outputTokens / 1_000_000) * model.outputPer1M
+  );
+}
+
+export function findModel(id: ProviderId, model: string): ModelInfo | undefined {
+  return PROVIDERS[id]?.models.find((m) => m.id === model);
 }
 
 export class ProviderError extends Error {

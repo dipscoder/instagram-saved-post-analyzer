@@ -1,4 +1,4 @@
-import { readError, type ChatRequest, type Provider } from './index';
+import { readError, type ChatRequest, type ChatResult, type Provider } from './index';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -8,13 +8,14 @@ export const openrouter: Provider = {
   label: 'OpenRouter',
   keyPlaceholder: 'sk-or-…',
   keysUrl: 'https://openrouter.ai/keys',
+  // OpenRouter passes the upstream model's list price through, USD per million tokens.
   models: [
-    { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', costPer1kPosts: 0.15, supportsVision: true },
-    { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash · fast', costPer1kPosts: 0.09, supportsVision: true },
-    { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B · text only', costPer1kPosts: 0.06, supportsVision: false },
+    { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5', inputPer1M: 1, outputPer1M: 5, supportsVision: true },
+    { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash · fast', inputPer1M: 0.3, outputPer1M: 2.5, supportsVision: true },
+    { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B · text only', inputPer1M: 0.12, outputPer1M: 0.3, supportsVision: false },
   ],
 
-  async chat(req: ChatRequest, key: string, model: string): Promise<string> {
+  async chat(req: ChatRequest, key: string, model: string): Promise<ChatResult> {
     const userContent: unknown[] = [{ type: 'text', text: req.user }];
     if (req.image) {
       userContent.push({
@@ -44,7 +45,17 @@ export const openrouter: Provider = {
 
     if (!res.ok) throw await readError(res);
 
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? '';
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+    };
+
+    return {
+      text: data.choices?.[0]?.message?.content ?? '',
+      usage: {
+        inputTokens: data.usage?.prompt_tokens ?? 0,
+        outputTokens: data.usage?.completion_tokens ?? 0,
+      },
+    };
   },
 };
