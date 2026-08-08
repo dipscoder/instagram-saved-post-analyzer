@@ -9,7 +9,6 @@ import { startBridge } from './capture/bridge';
 import { isLibraryMounted, mountLibrary, unmountLibrary } from './page/library';
 import { setScrubberSkin, startVideoControls } from './page/video';
 import { send, type SafeSettings } from './messaging';
-import type { VideoControls } from './types';
 
 startBridge();
 
@@ -26,15 +25,15 @@ async function boot(): Promise<void> {
     // Service worker still waking. Video controls are worth having regardless.
   }
 
-  startVideoControls(settings?.scrubberSkin ?? 'overlay');
+  startVideoControls(settings?.scrubberSkin);
   syncLibraryToRoute();
   watchRouteChanges();
 
-  // Keep the scrubber skin in step with the settings toggle without a reload.
+  // Keep the video controls in step with the settings toggle without a reload.
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes['settings']) return;
-    const next = changes['settings'].newValue as { scrubberSkin?: VideoControls } | undefined;
-    if (next?.scrubberSkin) setScrubberSkin(next.scrubberSkin);
+    const next = changes['settings'].newValue as { scrubberSkin?: string } | undefined;
+    setScrubberSkin(next?.scrubberSkin);
   });
 }
 

@@ -56,6 +56,8 @@ const state: State = {
 let host: HTMLDivElement | null = null;
 let shadow: ShadowRoot | null = null;
 let searchDebounce = 0;
+/** Dropped on unmount — leaving on/off the saved route otherwise stacks up listeners. */
+let unsubscribe: (() => void) | null = null;
 
 // Persistent shell nodes — created once, mutated thereafter.
 let elRail: HTMLElement | null = null;
@@ -81,13 +83,15 @@ export function mountLibrary(): void {
   shadow.append(sheet, buildShell());
   document.body.appendChild(host);
 
-  subscribe(onBroadcast);
+  unsubscribe = subscribe(onBroadcast);
   void refresh();
   render();
 }
 
 export function unmountLibrary(): void {
   stopHarvesting();
+  unsubscribe?.();
+  unsubscribe = null;
   host?.remove();
   host = null;
   shadow = null;

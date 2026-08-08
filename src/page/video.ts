@@ -55,8 +55,16 @@ let scanQueued = false;
 let pointerX = -1;
 let pointerY = -1;
 
-export function startVideoControls(initial: VideoControls): void {
-  mode = initial;
+/**
+ * storage.onChanged hands us the raw stored value, which on a profile that predates the
+ * rename is still 'thin'. Anything that isn't explicitly 'native' means our own bar.
+ */
+function normalize(value: string | undefined): VideoControls {
+  return value === 'native' ? 'native' : 'overlay';
+}
+
+export function startVideoControls(initial: string | undefined): void {
+  mode = normalize(initial);
   scan();
 
   new MutationObserver(queueScan).observe(document.documentElement, {
@@ -73,7 +81,8 @@ export function startVideoControls(initial: VideoControls): void {
   document.addEventListener('mouseleave', forgetPointer, { passive: true });
 }
 
-export function setScrubberSkin(next: VideoControls): void {
+export function setScrubberSkin(raw: string | undefined): void {
+  const next = normalize(raw);
   if (next === mode) return;
   mode = next;
   if (mode === 'native') {
