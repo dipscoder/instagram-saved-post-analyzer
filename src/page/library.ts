@@ -6,6 +6,12 @@
  * icon rail rather than by replacing grid nodes: React owns that subtree and re-renders
  * would tear our nodes straight back out. The visual result is the same — you see the
  * library where the grid was — without fighting the framework.
+ *
+ * The shell (header, rail frame, scroll container) is built once and mutated in place;
+ * only the rail rows and the results list are rebuilt, and the scroll position is carried
+ * across that swap. Rebuilding everything on each progress push is what made scrolling
+ * feel like it was fighting back — a batch landing mid-scroll threw the grid back to the
+ * top and dropped the caret out of the search box.
  */
 
 import { send, subscribe, type Broadcast, type Stats } from '../messaging';
@@ -22,11 +28,13 @@ interface State {
   stats: Stats;
   progress: IndexProgress;
   search: string;
+  /** One category unless you ⌘/Ctrl-click to build a comparison. */
   selected: Set<string>;
   view: 'grid' | 'list';
   visible: boolean;
   loading: boolean;
-  stripDismissed: boolean;
+  panelDismissed: boolean;
+  explainOpen: boolean;
   /** True while the page is auto-scrolling to surface more posts. */
   harvesting: boolean;
 }
@@ -40,13 +48,21 @@ const state: State = {
   view: 'grid',
   visible: true,
   loading: true,
-  stripDismissed: false,
+  panelDismissed: false,
+  explainOpen: false,
   harvesting: false,
 };
 
 let host: HTMLDivElement | null = null;
 let shadow: ShadowRoot | null = null;
 let searchDebounce = 0;
+
+// Persistent shell nodes — created once, mutated thereafter.
+let elRail: HTMLElement | null = null;
+let elMain: HTMLElement | null = null;
+let elSearch: HTMLInputElement | null = null;
+let elCount: HTMLElement | null = null;
+let elSeg: HTMLElement | null = null;
 
 export function mountLibrary(): void {
   if (host) return;
@@ -62,7 +78,7 @@ export function mountLibrary(): void {
   shadow = host.attachShadow({ mode: 'open' });
   const sheet = document.createElement('style');
   sheet.textContent = styles;
-  shadow.append(sheet, document.createElement('div'));
+  shadow.append(sheet, buildShell());
   document.body.appendChild(host);
 
   subscribe(onBroadcast);
@@ -71,9 +87,11 @@ export function mountLibrary(): void {
 }
 
 export function unmountLibrary(): void {
+  stopHarvesting();
   host?.remove();
   host = null;
   shadow = null;
+  elRail = elMain = elSearch = elCount = elSeg = null;
 }
 
 export function isLibraryMounted(): boolean {
@@ -81,15 +99,35 @@ export function isLibraryMounted(): boolean {
 }
 
 function onBroadcast(msg: Broadcast): void {
+  if (msg.type === 'harvest') {
+    // The worker cannot scroll; only this page can. A pause from the popup has to reach
+    // the harvester through here.
+    if (msg.action === 'stop') stopHarvesting();
+    else startHarvesting();
+    return;
+  }
   if (msg.type !== 'progress') return;
+
   const moved =
     msg.progress.categorized !== state.stats.categorized ||
     msg.progress.total !== state.stats.total;
   state.progress = msg.progress;
-  // Cards fill in as they're written, and newly captured posts appear as they scroll
-  // past — either count moving means the rows on screen are stale.
-  if (moved) void refresh();
+  if (moved) queueRefresh();
   else render();
+}
+
+/**
+ * A run writes in bursts — 25 rows at a time, three batches in flight. Coalescing means
+ * one query and one repaint per burst rather than one per batch.
+ */
+let refreshQueued = 0;
+
+function queueRefresh(): void {
+  if (refreshQueued) return;
+  refreshQueued = self.setTimeout(() => {
+    refreshQueued = 0;
+    void refresh();
+  }, 250);
 }
 
 async function refresh(): Promise<void> {
@@ -113,47 +151,41 @@ async function refresh(): Promise<void> {
   }
 }
 
-// --- rendering --------------------------------------------------------------
+// --- shell ------------------------------------------------------------------
 
-function render(): void {
-  if (!shadow || !host) return;
-  host.style.display = state.visible ? 'block' : 'none';
-  const root = shadow.lastElementChild as HTMLDivElement;
-  root.className = 'app';
-  root.replaceChildren(header(), body());
-}
+/** Built once. Everything here survives every render, so focus and caret survive too. */
+function buildShell(): HTMLElement {
+  const app = h('div', 'app');
 
-function header(): HTMLElement {
-  const el = h('header', 'header');
-
-  el.append(
-    h('div', 'brand', [h('span', 'dot'), h('span', 'brand-name', 'Saved Index')]),
-  );
+  const header = h('header', 'header');
+  header.append(h('div', 'brand', [h('span', 'dot'), h('span', 'brand-name', 'Saved Index')]));
 
   const search = document.createElement('input');
   search.className = 'search';
   search.placeholder = 'Search summaries, handles, captions';
-  search.value = state.search;
   search.addEventListener('input', () => {
     state.search = search.value;
     clearTimeout(searchDebounce);
     searchDebounce = self.setTimeout(() => void refresh(), 160);
   });
-  el.append(search);
+  elSearch = search;
+  header.append(search);
 
   const right = h('div', 'header-right');
-  right.append(h('span', 'mono muted', indexLabel()));
+  elCount = h('span', 'mono muted');
+  right.append(elCount);
 
-  const toggle = h('div', 'seg');
+  elSeg = h('div', 'seg');
   for (const view of ['grid', 'list'] as const) {
-    const b = h('button', `seg-btn${state.view === view ? ' on' : ''}`, cap(view));
+    const b = h('button', 'seg-btn', cap(view));
+    b.dataset['view'] = view;
     b.addEventListener('click', () => {
       state.view = view;
       render();
     });
-    toggle.append(b);
+    elSeg.append(b);
   }
-  right.append(toggle);
+  right.append(elSeg);
 
   const hide = h('button', 'ghost', 'Hide');
   hide.title = "Hide the library and show Instagram's own grid";
@@ -163,19 +195,40 @@ function header(): HTMLElement {
     showRestoreChip();
   });
   right.append(hide);
+  header.append(right);
 
-  el.append(right);
-  return el;
+  elRail = h('aside', 'rail');
+  elMain = h('main', 'main');
+
+  const body = h('div', 'body');
+  body.append(elRail, elMain);
+  app.append(header, body);
+  return app;
 }
 
-function body(): HTMLElement {
-  const el = h('div', 'body');
-  el.append(rail(), main());
-  return el;
+// --- rendering --------------------------------------------------------------
+
+function render(): void {
+  if (!host || !elRail || !elMain || !elCount || !elSeg || !elSearch) return;
+
+  host.style.display = state.visible ? 'block' : 'none';
+  if (elSearch.value !== state.search) elSearch.value = state.search;
+  elCount.textContent = indexLabel();
+  for (const btn of elSeg.children) {
+    btn.classList.toggle('on', (btn as HTMLElement).dataset['view'] === state.view);
+  }
+
+  elRail.replaceChildren(...railRows());
+
+  // Swapping the results list resets scrollTop; put it back, so writes landing
+  // mid-scroll don't throw you to the top of the grid.
+  const scrollTop = elMain.scrollTop;
+  elMain.replaceChildren(...mainRows());
+  elMain.scrollTop = scrollTop;
 }
 
-function rail(): HTMLElement {
-  const el = h('aside', 'rail');
+function railRows(): Node[] {
+  const rows: Node[] = [];
 
   const all = h('button', `rail-row${state.selected.size === 0 ? ' on' : ''}`, [
     h('span', '', 'All saved'),
@@ -185,57 +238,78 @@ function rail(): HTMLElement {
     state.selected.clear();
     void refresh();
   });
-  el.append(all, h('div', 'divider'), h('div', 'rail-label', 'Categories'));
+  rows.push(all, h('div', 'divider'), h('div', 'rail-label', 'Categories'));
 
+  let shown = 0;
   for (const name of CATEGORY_NAMES) {
     const count = state.stats.byCategory[name] ?? 0;
     if (count === 0 && !state.selected.has(name)) continue;
-    el.append(railRow(name, count));
+    rows.push(railRow(name, count));
+    shown++;
   }
+  if (shown === 0) rows.push(h('div', 'rail-hint', 'Categories appear here as posts are indexed.'));
 
   const uncat = state.stats.byCategory[UNCATEGORIZED] ?? 0;
-  if (uncat > 0) el.append(h('div', 'divider'), railRow(UNCATEGORIZED, uncat));
+  if (uncat > 0) rows.push(h('div', 'divider'), railRow(UNCATEGORIZED, uncat));
+
+  if (shown > 1) {
+    rows.push(h('div', 'rail-hint', `${modKeyLabel()}-click to compare two categories.`));
+  }
 
   const foot = h('div', 'rail-foot');
-  foot.append(h('div', 'mono muted', indexLabel()));
-
-  const action = h('button', 'link', reindexLabel());
+  const action = h('button', 'link', primaryLabel());
   action.addEventListener('click', () => void onIndexAction());
   foot.append(action);
-  el.append(foot);
+  rows.push(foot);
 
-  return el;
+  return rows;
 }
 
+/**
+ * Plain click selects exactly one category — the common case, and what a tab does.
+ * ⌘/Ctrl-click builds a comparison, because occasionally you do want two at once.
+ */
 function railRow(name: string, count: number): HTMLElement {
   const on = state.selected.has(name);
   const row = h('button', `rail-row${on ? ' on' : ''}`, [
     h('span', '', name),
     h('span', 'mono count', String(count)),
   ]);
-  row.addEventListener('click', () => {
-    if (on) state.selected.delete(name);
-    else state.selected.add(name);
+  row.addEventListener('click', (ev) => {
+    if (ev.metaKey || ev.ctrlKey) {
+      if (on) state.selected.delete(name);
+      else state.selected.add(name);
+    } else if (on && state.selected.size === 1) {
+      state.selected.clear(); // clicking the active tab again goes back to All saved
+    } else {
+      state.selected.clear();
+      state.selected.add(name);
+    }
     void refresh();
   });
   return row;
 }
 
-function main(): HTMLElement {
-  const el = h('main', 'main');
+function mainRows(): Node[] {
+  const rows: Node[] = [];
 
-  if (!state.stripDismissed && (state.progress.phase !== 'idle' || state.harvesting)) {
-    el.append(strip());
+  if (!state.panelDismissed) {
+    const panel = indexPanel();
+    if (panel) rows.push(panel);
   }
 
   const head = h('div', 'main-head');
-  const title = state.selected.size ? [...state.selected].join(', ') : 'All saved';
-  head.append(h('h1', 'title', title), h('span', 'mono muted', `${state.posts.length}`));
+  const names = [...state.selected];
+  head.append(
+    h('h1', 'title', names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved'),
+    h('span', 'mono muted', String(state.posts.length)),
+  );
 
-  if (state.selected.size) {
+  if (names.length > 1) {
     const chips = h('div', 'chips');
-    for (const name of state.selected) {
+    for (const name of names) {
       const chip = h('button', 'chip', [h('span', '', name), h('span', 'x', '×')]);
+      chip.title = `Remove ${name}`;
       chip.addEventListener('click', () => {
         state.selected.delete(name);
         void refresh();
@@ -243,42 +317,40 @@ function main(): HTMLElement {
       chips.append(chip);
     }
     const clear = h('button', 'link', 'Clear');
-    clear.addEventListener('click', () => {
-      state.selected.clear();
-      state.search = '';
-      void refresh();
-    });
+    clear.addEventListener('click', clearFilters);
     chips.append(clear);
     head.append(chips);
   }
-  el.append(head);
+  rows.push(head);
 
   if (state.loading) {
-    el.append(empty('Loading…', 'Reading what has been indexed so far.'));
-    return el;
+    rows.push(empty('Loading…', 'Reading what has been indexed so far.'));
+    return rows;
   }
 
   const blocker = blockingState();
   if (blocker) {
-    el.append(blocker);
-    return el;
+    rows.push(blocker);
+    return rows;
   }
 
   if (!state.posts.length) {
-    el.append(
+    rows.push(
       empty(
         'Nothing matches',
         'Try a shorter query, or drop a category.',
-        state.search || state.selected.size ? { label: 'Clear filters', run: clearFilters } : undefined,
+        state.search || state.selected.size
+          ? { label: 'Clear filters', run: clearFilters }
+          : undefined,
       ),
     );
-    return el;
+    return rows;
   }
 
   const list = h('div', state.view === 'grid' ? 'grid' : 'list');
   for (const post of state.posts) list.append(card(post));
-  el.append(list);
-  return el;
+  rows.push(list);
+  return rows;
 }
 
 /** The one full-panel state that outranks the grid, or null to show results. */
@@ -286,58 +358,131 @@ function blockingState(): HTMLElement | null {
   if (state.stats.total === 0) {
     return empty(
       'Nothing captured yet',
-      'Scroll your saved posts and they will be picked up automatically, or run a full pass now.',
+      'Instagram sends about a dozen posts per request, so the library fills as you scroll. ' +
+        'Index now does that scrolling for you, at a human pace, until it reaches the end.',
       { label: 'Index now', run: () => void onIndexAction() },
     );
   }
   if (state.progress.phase === 'error' && state.stats.categorized === 0) {
     return empty('Indexing stopped', state.progress.message ?? 'Something went wrong.', {
       label: 'Retry',
-      run: () => void send({ type: 'index:start' }),
+      run: () => void onIndexAction(),
     });
   }
   return null;
 }
 
-function strip(): HTMLElement {
+// --- the indexing panel -----------------------------------------------------
+
+/**
+ * Indexing is two independent halves, and the difference matters because only one of
+ * them costs money: *capture* is the page scrolling so Instagram loads more posts, and
+ * *categorise* is the service worker sending captions to your model. The panel names both
+ * and shows the money alongside the counts.
+ */
+function indexPanel(): HTMLElement | null {
   const p = state.progress;
-  const pct = p.total ? (p.categorized / p.total) * 100 : 0;
-  const running = p.phase === 'running';
+  if (p.phase === 'idle' && !state.harvesting && p.pending === 0 && p.total > 0) return null;
 
-  const el = h('div', `strip ${p.phase}`);
-  const bar = h('div', 'strip-main');
+  const el = h('div', `panel ${p.phase}`);
 
-  const top = h('div', 'strip-top');
-  top.append(
-    h('span', 'mono', `${p.categorized} of ${p.total} categorized${running ? '' : ` · ${p.phase}`}`),
-  );
-  const action = h('button', 'link', running ? 'Pause' : 'Resume');
-  action.addEventListener('click', () =>
-    void send({ type: running ? 'index:pause' : 'index:start' }),
-  );
-  top.append(action);
+  const top = h('div', 'panel-top');
+  top.append(h('span', 'panel-title', panelTitle()));
 
-  const track = h('div', 'track');
-  const fill = h('div', 'track-fill');
-  fill.style.width = `${pct}%`;
-  track.append(fill);
-  bar.append(top, track);
+  const actions = h('div', 'panel-actions');
+  const primary = h('button', 'pill', primaryLabel());
+  primary.addEventListener('click', () => void onIndexAction());
+  actions.append(primary);
 
   const dismiss = h('button', 'x-btn', '×');
   dismiss.title = 'Dismiss for this session — indexing continues';
   dismiss.addEventListener('click', () => {
-    state.stripDismissed = true;
+    state.panelDismissed = true;
     render();
   });
+  actions.append(dismiss);
+  top.append(actions);
+  el.append(top);
 
-  el.append(bar, dismiss);
+  const track = h('div', 'track');
+  const fill = h('div', 'track-fill');
+  fill.style.width = `${p.total ? (p.categorized / p.total) * 100 : 0}%`;
+  track.append(fill);
+  el.append(track);
 
-  const note = state.harvesting
-    ? 'Scrolling your saved posts to find everything — leave this tab open.'
-    : p.message;
-  if (note) el.append(h('div', 'strip-note', note));
+  const facts = h('div', 'facts');
+  facts.append(
+    fact(String(p.total), 'captured'),
+    fact(String(p.categorized), 'indexed'),
+    fact(String(p.pending), 'queued'),
+    fact(fmtUsd(p.spentUsd), 'spent'),
+    fact(fmtUsd(p.estimateUsd), 'left, at most'),
+  );
+  el.append(facts);
+
+  if (state.harvesting) {
+    el.append(
+      h('div', 'panel-note', 'Scrolling your saved posts to load more — keep this tab open.'),
+    );
+  }
+  if (p.phase === 'error' && p.message) el.append(h('div', 'panel-note bad', p.message));
+
+  const toggle = h('button', 'link', state.explainOpen ? 'Hide details' : 'How does this work?');
+  toggle.addEventListener('click', () => {
+    state.explainOpen = !state.explainOpen;
+    render();
+  });
+  el.append(toggle);
+
+  if (state.explainOpen) {
+    el.append(
+      h('div', 'explain', [
+        explainRow(
+          '1 · Capture — free',
+          'Instagram sends about a dozen posts per request, so a post can only be captured ' +
+            'once it has loaded. Scrolling captures them. Index now scrolls for you with ' +
+            'randomised pauses and stops the moment Instagram rate-limits the page. No extra ' +
+            'requests are ever made to Instagram.',
+        ),
+        explainRow(
+          '2 · Categorise — the part that costs',
+          'Hashtag and keyword rules label what they can for nothing. The rest go to your ' +
+            'model in batches of 25 captions. Only posts with no usable caption cost a look at ' +
+            'the thumbnail. Nothing is categorised twice, and a paused run resumes where it ' +
+            'stopped.',
+        ),
+        explainRow(
+          'Where it all lives',
+          'Posts sit in this extension’s own IndexedDB inside your browser. Your API key is ' +
+            'in extension storage that page scripts cannot read, and every model call is made ' +
+            'by the background worker — never by the script running on instagram.com.',
+        ),
+      ]),
+    );
+  }
+
   return el;
 }
+
+function panelTitle(): string {
+  const p = state.progress;
+  if (p.phase === 'running') return `Indexing · ${p.categorized} of ${p.total}`;
+  if (p.phase === 'error') return 'Indexing stopped';
+  if (p.phase === 'paused') return `Paused · ${p.categorized} of ${p.total}`;
+  if (state.harvesting) return 'Looking for more saved posts';
+  if (p.pending > 0) return `${p.pending} post${p.pending === 1 ? '' : 's'} waiting to be indexed`;
+  return `${p.total} post${p.total === 1 ? '' : 's'} indexed`;
+}
+
+function fact(value: string, label: string): HTMLElement {
+  return h('div', 'fact', [h('span', 'mono fact-value', value), h('span', 'cap', label)]);
+}
+
+function explainRow(title: string, body: string): HTMLElement {
+  return h('div', 'explain-row', [h('div', 'explain-title', title), h('p', '', body)]);
+}
+
+// --- cards ------------------------------------------------------------------
 
 function card(post: PostRecord): HTMLElement {
   const el = h('a', 'card');
@@ -361,7 +506,7 @@ function card(post: PostRecord): HTMLElement {
   // jumps when its summary lands.
   el.append(
     post.categorizedAt
-      ? h('div', 'summary', post.summary ?? post.caption.slice(0, 90) ?? '')
+      ? h('div', 'summary', post.summary ?? post.caption.slice(0, 90))
       : h('div', 'summary mono queued', 'in queue'),
   );
 
@@ -424,16 +569,18 @@ function showRestoreChip(): void {
 // --- actions ----------------------------------------------------------------
 
 async function onIndexAction(): Promise<void> {
-  const phase = state.progress.phase;
-
-  if (phase === 'running') {
-    harvest?.stop();
-    harvest = null;
-    return void send({ type: 'index:pause' });
+  if (state.progress.phase === 'running' || state.harvesting) {
+    stopHarvesting();
+    await send({ type: 'index:pause' });
+    return;
   }
 
-  if (phase === 'done' && state.stats.categorized === state.stats.total && state.stats.total > 0) {
-    return void send({ type: 'index:reindex' });
+  // Everything captured is already categorised, so the only useful action left is a
+  // fresh pass over the lot.
+  if (state.progress.phase === 'done' && state.progress.pending === 0 && state.stats.total > 0) {
+    startHarvesting();
+    await send({ type: 'index:reindex' });
+    return;
   }
 
   // Two halves, and they run together: the harvester scrolls the page so the capture
@@ -464,6 +611,13 @@ function startHarvesting(): void {
   render();
 }
 
+function stopHarvesting(): void {
+  harvest?.stop();
+  harvest = null;
+  state.harvesting = false;
+  render();
+}
+
 function clearFilters(): void {
   state.selected.clear();
   state.search = '';
@@ -479,18 +633,27 @@ function indexLabel(): string {
   return `${categorized} of ${total} indexed`;
 }
 
-function reindexLabel(): string {
+function primaryLabel(): string {
+  if (state.harvesting || state.progress.phase === 'running') return 'Pause';
   switch (state.progress.phase) {
-    case 'running':
-      return 'Pause indexing';
     case 'paused':
     case 'error':
-      return 'Resume indexing';
+      return 'Resume';
     case 'done':
-      return 'Re-index';
+      return state.progress.pending > 0 ? 'Continue' : 'Re-index';
     default:
-      return 'Index now';
+      return state.stats.total === 0 ? 'Index now' : 'Keep indexing';
   }
+}
+
+function modKeyLabel(): string {
+  return navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl';
+}
+
+function fmtUsd(usd: number): string {
+  if (usd <= 0) return '$0.00';
+  if (usd < 0.01) return '<$0.01';
+  return `$${usd.toFixed(2)}`;
 }
 
 /** Stable per-category hue so a chip keeps its colour across sessions. */
