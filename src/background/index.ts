@@ -9,7 +9,7 @@
 
 import * as db from './db';
 import { Categorizer } from './categorize';
-import { getProvider, PROVIDERS, redact, testKey } from './providers/index';
+import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
 import { resetSpend } from './spend';
 import {
   clearKey,
@@ -140,7 +140,9 @@ async function handle(req: Request): Promise<unknown> {
           label: p.label,
           keyPlaceholder: p.keyPlaceholder,
           keysUrl: p.keysUrl,
-          models: p.models,
+          // per1kPosts is derived here so the token-per-post assumptions live in one
+          // place rather than being re-guessed by whichever UI wants to show a price.
+          models: p.models.map((m) => ({ ...m, per1kPosts: estimateUsd(m, 1000) })),
         })),
       };
 
