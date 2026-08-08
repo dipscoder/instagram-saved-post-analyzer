@@ -1,34 +1,62 @@
 /**
  * Real seek controls on Instagram videos.
  *
- * Instagram ships videos with `controls` off, a click-catcher overlay above the player,
- * and `loop` on, so there is no way to scrub and no way to tell how long a reel is. This
- * puts that back.
+ * ## Why the first version only half-worked
  *
- * Two skins, chosen in settings:
- *   native — the browser's own control bar (default)
- *   thin   — a 3px scrubber flush to the bottom edge, per the design doc
+ * Instagram covers every player with a full-bleed click-catcher whose job is to open the
+ * post. Two consequences, and the old code tripped over both:
  *
- * React re-renders wipe our attributes within seconds, so a single pass is not enough:
- * every video gets its own attribute observer that re-applies them, and a document-level
- * observer catches videos that appear later. Both funnel through one rAF-throttled scan
- * so a mutation storm costs one pass per frame rather than one per mutation.
+ *  1. `pointerenter` on the `<video>` never fires — the pointer is over the catcher, not
+ *     the video — so anything that waited for it showed up only intermittently, if at all.
+ *  2. Clicks on the browser's own control strip land on the catcher, so the scrubber
+ *     looks live and does nothing. Raising the video's `z-index` only wins when no
+ *     ancestor has opened its own stacking context, which on Instagram is a coin flip.
+ *
+ * ## What this does instead
+ *
+ * The control bar is a plain `<div>` appended to `document.body` — a sibling of React's
+ * root, not a descendant. Two things follow for free: React's delegated event handlers
+ * never see our clicks (they are bound at its root container), and no stacking context
+ * inside their tree can trap us. Nothing about it depends on an event reaching the
+ * `<video>` element.
+ *
+ * Which player it attaches to is decided **geometrically**: a document-level
+ * `pointermove` listener in the capture phase records the cursor, and we bind to the
+ * smallest visible `<video>` whose rectangle contains it. A capture-phase listener cannot
+ * be suppressed by the page, so this works no matter what the catcher does with events.
+ *
+ * `mode: 'native'` hands the job back to the browser's control strip for anyone who wants
+ * volume sliders and picture-in-picture, and keeps the old z-index lift for it.
+ *
+ * React re-renders strip our attributes within seconds, so every video also gets its own
+ * attribute observer; a document-level observer catches players added later. Both funnel
+ * through one rAF-throttled scan, so a mutation storm costs one pass per frame.
  */
 
 import type { VideoControls } from '../types';
 
 const SEEK_STEP_SECONDS = 5;
-/** Above Instagram's click-catcher, below nothing of ours. */
-const VIDEO_Z_INDEX = '2147483000';
+const BAR_HEIGHT = 36;
+/** Above Instagram's click-catcher — only needed for the native control strip. */
+const NATIVE_Z_INDEX = '2147483000';
+const BAR_Z_INDEX = '2147483002';
+/** Instagram ships 1px tracking pixels as <video>; ignore anything that small. */
+const MIN_VIDEO_PX = 120;
+
+const ICON_PLAY = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>';
+const ICON_SOUND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+const ICON_MUTED = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9.5l4 5M19.5 9.5l-4 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 
 const enhanced = new WeakSet<HTMLVideoElement>();
-let skin: VideoControls = 'overlay';
+let mode: VideoControls = 'overlay';
+let bar: ControlBar | null = null;
 let scanQueued = false;
-let scrubber: ThinScrubber | null = null;
+let pointerX = -1;
+let pointerY = -1;
 
-export function startVideoControls(initialSkin: VideoControls): void {
-  skin = initialSkin;
-
+export function startVideoControls(initial: VideoControls): void {
+  mode = initial;
   scan();
 
   new MutationObserver(queueScan).observe(document.documentElement, {
@@ -37,19 +65,26 @@ export function startVideoControls(initialSkin: VideoControls): void {
   });
 
   document.addEventListener('keydown', onKeyDown, true);
+  // Capture phase: Instagram's click-catcher stops propagation on plenty of pointer
+  // events, and a capture listener sees them before it can.
+  document.addEventListener('pointermove', onPointerMove, { capture: true, passive: true });
+  // Fires once when the cursor leaves the document, unlike pointerleave, which fires for
+  // every element on the way out.
+  document.addEventListener('mouseleave', forgetPointer, { passive: true });
 }
 
 export function setScrubberSkin(next: VideoControls): void {
-  if (next === skin) return;
-  skin = next;
-  if (skin === 'native') {
-    scrubber?.destroy();
-    scrubber = null;
+  if (next === mode) return;
+  mode = next;
+  if (mode === 'native') {
+    bar?.destroy();
+    bar = null;
   }
-  // Re-apply to everything on screen; `enhanced` only guards observer setup.
-  for (const v of document.querySelectorAll('video')) applyFlags(v);
-  queueScan();
+  for (const video of document.querySelectorAll('video')) applyFlags(video);
+  queueRetarget();
 }
+
+// --- flags ------------------------------------------------------------------
 
 function queueScan(): void {
   if (scanQueued) return;
@@ -69,55 +104,104 @@ function enhance(video: HTMLVideoElement): void {
   if (enhanced.has(video)) return;
   enhanced.add(video);
 
-  // Per-video watch: React re-renders reset these attributes, and a one-shot pass
-  // loses that fight within seconds.
+  // React re-renders reset these attributes; a one-shot pass loses within seconds.
   new MutationObserver(() => applyFlags(video)).observe(video, {
     attributes: true,
     attributeFilter: ['controls', 'controlslist', 'disablepictureinpicture', 'loop', 'style'],
   });
-
-  // Always attached, and gated at call time — a listener added only while the thin skin
-  // was active would leave videos enhanced before a settings change without one.
-  video.addEventListener('pointerenter', () => {
-    if (skin === 'overlay') bindScrubber(video);
-  });
 }
 
 function applyFlags(video: HTMLVideoElement): void {
-  const wantControls = skin === 'native';
-  if (video.controls !== wantControls) video.controls = wantControls;
+  const wantNative = mode === 'native';
+  if (video.controls !== wantNative) video.controls = wantNative;
 
   video.removeAttribute('controlslist');
   video.removeAttribute('disablepictureinpicture');
   video.disablePictureInPicture = false;
 
-  // Looping makes it impossible to tell where the end is, and restarts under you
-  // mid-scrub.
+  // Looping hides where the end is and restarts under you mid-scrub.
   if (video.loop) video.loop = false;
 
-  // Lift the player above Instagram's click-catcher so scrubber clicks reach the
-  // video instead of opening the post.
-  if (video.style.zIndex !== VIDEO_Z_INDEX) {
-    video.style.zIndex = VIDEO_Z_INDEX;
-    if (getComputedStyle(video).position === 'static') video.style.position = 'relative';
+  if (wantNative) {
+    if (video.style.zIndex !== NATIVE_Z_INDEX) {
+      video.style.zIndex = NATIVE_Z_INDEX;
+      if (getComputedStyle(video).position === 'static') video.style.position = 'relative';
+    }
+  } else if (video.style.zIndex === NATIVE_Z_INDEX) {
+    // Our own bar sits outside their DOM, so leave their layout alone.
+    video.style.zIndex = '';
   }
 }
 
-function bindScrubber(video: HTMLVideoElement): void {
-  scrubber ??= new ThinScrubber();
-  scrubber.bind(video);
+// --- pointer tracking and targeting -----------------------------------------
+
+function onPointerMove(ev: PointerEvent): void {
+  pointerX = ev.clientX;
+  pointerY = ev.clientY;
+  queueRetarget();
+}
+
+function forgetPointer(): void {
+  pointerX = -1;
+  pointerY = -1;
+  queueRetarget();
+}
+
+/** pointermove fires far faster than we need to re-run a layout-reading hit test. */
+let retargetQueued = false;
+
+function queueRetarget(): void {
+  if (retargetQueued) return;
+  retargetQueued = true;
+  requestAnimationFrame(() => {
+    retargetQueued = false;
+    retarget();
+  });
+}
+
+/** The smallest visible player whose box contains the cursor — nested players win. */
+function videoUnderPointer(): HTMLVideoElement | null {
+  if (pointerX < 0) return null;
+
+  let best: HTMLVideoElement | null = null;
+  let bestArea = Infinity;
+
+  for (const video of document.querySelectorAll('video')) {
+    const r = video.getBoundingClientRect();
+    if (r.width < MIN_VIDEO_PX || r.height < MIN_VIDEO_PX) continue;
+    if (pointerX < r.left || pointerX > r.right) continue;
+    if (pointerY < r.top || pointerY > r.bottom) continue;
+
+    const area = r.width * r.height;
+    if (area < bestArea) {
+      bestArea = area;
+      best = video;
+    }
+  }
+  return best;
+}
+
+function retarget(): void {
+  if (mode !== 'overlay') return;
+  if (bar?.isBusy()) return; // never yank the bar out from under a drag
+
+  const video = videoUnderPointer();
+  if (!video) return void bar?.hide();
+
+  bar ??= new ControlBar();
+  bar.attach(video);
 }
 
 // --- keyboard ---------------------------------------------------------------
 
 function onKeyDown(ev: KeyboardEvent): void {
   if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
-  // Never steal arrows from a text field or Instagram's own story navigation input.
+  // Never steal arrows from a text field or Instagram's own story navigation.
   const target = ev.target as HTMLElement | null;
   if (target?.isContentEditable) return;
   if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
-  const video = activeVideo();
+  const video = videoUnderPointer() ?? largestVisibleVideo();
   if (!video || !Number.isFinite(video.duration)) return;
 
   ev.preventDefault();
@@ -126,36 +210,17 @@ function onKeyDown(ev: KeyboardEvent): void {
   video.currentTime = clamp(video.currentTime + delta, 0, video.duration);
 }
 
-/** The video under the pointer if there is one, else the largest one on screen. */
-let pointerX = 0;
-let pointerY = 0;
-document.addEventListener(
-  'pointermove',
-  (e) => {
-    pointerX = e.clientX;
-    pointerY = e.clientY;
-  },
-  { passive: true },
-);
-
-function activeVideo(): HTMLVideoElement | null {
-  const videos = [...document.querySelectorAll('video')];
+function largestVisibleVideo(): HTMLVideoElement | null {
   let best: HTMLVideoElement | null = null;
   let bestArea = 0;
 
-  for (const v of videos) {
-    const r = v.getBoundingClientRect();
-    if (r.width === 0 || r.height === 0) continue;
-    if (r.bottom < 0 || r.top > window.innerHeight) continue;
-
-    const under =
-      pointerX >= r.left && pointerX <= r.right && pointerY >= r.top && pointerY <= r.bottom;
-    if (under) return v;
-
+  for (const video of document.querySelectorAll('video')) {
+    const r = video.getBoundingClientRect();
+    if (r.width < MIN_VIDEO_PX || r.bottom < 0 || r.top > window.innerHeight) continue;
     const area = r.width * r.height;
     if (area > bestArea) {
       bestArea = area;
-      best = v;
+      best = video;
     }
   }
   return best;
@@ -165,92 +230,128 @@ function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
 
-// --- thin scrubber skin -----------------------------------------------------
+function fmt(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// --- the control bar --------------------------------------------------------
 
 /**
- * A single overlay reused across videos, positioned over whichever one you're pointing
- * at. Rendering into document.body rather than Instagram's DOM means React never sees
- * our nodes and never tears them out; the cost is tracking the video's rect each frame,
- * which we only do while bound.
+ * One reusable bar, repositioned over whichever player the cursor is on. Lives in
+ * `document.body` so React never tears it out and no stacking context can bury it; the
+ * cost is re-reading the video's rect each frame, which only happens while attached.
  */
-class ThinScrubber {
-  private readonly root: HTMLDivElement;
-  private readonly track: HTMLDivElement;
-  private readonly fill: HTMLDivElement;
-  private readonly knob: HTMLDivElement;
-  private readonly label: HTMLDivElement;
+class ControlBar {
+  private readonly root = document.createElement('div');
+  private readonly playBtn = document.createElement('button');
+  private readonly muteBtn = document.createElement('button');
+  private readonly time = document.createElement('span');
+  private readonly hit = document.createElement('div');
+  private readonly track = document.createElement('div');
+  private readonly fill = document.createElement('div');
+  private readonly knob = document.createElement('div');
 
   private video: HTMLVideoElement | null = null;
-  private hovering = false;
   private dragging = false;
+  private hovering = false;
   private raf = 0;
+  // paint() runs every frame; these keep it from rewriting markup that hasn't changed.
+  private shownPaused: boolean | null = null;
+  private shownMuted: boolean | null = null;
+  private shownTime = '';
 
   constructor() {
-    this.root = document.createElement('div');
-    this.root.setAttribute('data-saved-index', 'scrubber');
     Object.assign(this.root.style, {
       position: 'fixed',
-      zIndex: '2147483001',
-      height: '20px', // generous hit area; the bar itself stays 3px
       display: 'none',
-      cursor: 'pointer',
+      alignItems: 'center',
+      gap: '10px',
+      boxSizing: 'border-box',
+      height: `${BAR_HEIGHT}px`,
+      padding: '0 12px',
+      zIndex: BAR_Z_INDEX,
+      background: 'linear-gradient(to top, rgba(0,0,0,0.68), rgba(0,0,0,0.18))',
+      color: '#fff',
+      font: '400 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.04em',
       touchAction: 'none',
+      userSelect: 'none',
+      webkitUserSelect: 'none',
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.root.setAttribute('data-saved-index', 'video-controls');
+
+    for (const btn of [this.playBtn, this.muteBtn]) {
+      Object.assign(btn.style, {
+        all: 'unset',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '20px',
+        height: '20px',
+        flex: 'none',
+        color: '#fff',
+        cursor: 'pointer',
+        opacity: '0.9',
+      } satisfies Partial<CSSStyleDeclaration>);
+    }
+    this.playBtn.innerHTML = ICON_PLAY;
+    this.muteBtn.innerHTML = ICON_SOUND;
+
+    Object.assign(this.time.style, {
+      flex: 'none',
+      opacity: '0.85',
+      fontVariantNumeric: 'tabular-nums',
     } satisfies Partial<CSSStyleDeclaration>);
 
-    this.track = document.createElement('div');
+    // A tall invisible strip around a thin visible track: easy to grab, quiet at rest.
+    Object.assign(this.hit.style, {
+      position: 'relative',
+      flex: '1',
+      height: '18px',
+      display: 'flex',
+      alignItems: 'center',
+      cursor: 'pointer',
+    } satisfies Partial<CSSStyleDeclaration>);
+
     Object.assign(this.track.style, {
-      position: 'absolute',
-      left: '0',
-      right: '0',
-      bottom: '0',
+      position: 'relative',
+      width: '100%',
       height: '3px',
-      background: 'rgba(255,255,255,0.24)',
-      transition: 'height 120ms ease',
+      borderRadius: '2px',
+      background: 'rgba(255,255,255,0.28)',
+      transition: 'height 110ms ease',
     } satisfies Partial<CSSStyleDeclaration>);
 
-    this.fill = document.createElement('div');
     Object.assign(this.fill.style, {
       position: 'absolute',
-      left: '0',
-      top: '0',
-      bottom: '0',
+      inset: '0 auto 0 0',
       width: '0%',
-      background: 'rgba(255,255,255,0.72)',
+      borderRadius: 'inherit',
+      background: '#fff',
     } satisfies Partial<CSSStyleDeclaration>);
 
-    this.knob = document.createElement('div');
     Object.assign(this.knob.style, {
       position: 'absolute',
       top: '50%',
-      width: '9px',
-      height: '9px',
-      marginLeft: '-4.5px',
-      marginTop: '-4.5px',
+      left: '0%',
+      width: '11px',
+      height: '11px',
+      marginLeft: '-5.5px',
+      marginTop: '-5.5px',
       borderRadius: '50%',
       background: '#fff',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.5)',
       opacity: '0',
-      transition: 'opacity 120ms ease',
-      pointerEvents: 'none',
-    } satisfies Partial<CSSStyleDeclaration>);
-
-    this.label = document.createElement('div');
-    Object.assign(this.label.style, {
-      position: 'absolute',
-      bottom: '14px',
-      transform: 'translateX(-50%)',
-      padding: '2px 6px',
-      borderRadius: '4px',
-      background: 'rgba(0,0,0,0.72)',
-      color: '#fff',
-      font: '10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace',
-      letterSpacing: '0.04em',
-      whiteSpace: 'nowrap',
-      opacity: '0',
+      transition: 'opacity 110ms ease',
       pointerEvents: 'none',
     } satisfies Partial<CSSStyleDeclaration>);
 
     this.track.append(this.fill, this.knob);
-    this.root.append(this.track, this.label);
+    this.hit.append(this.track);
+    this.root.append(this.playBtn, this.time, this.hit, this.muteBtn);
     document.body.appendChild(this.root);
 
     this.root.addEventListener('pointerenter', () => {
@@ -261,14 +362,50 @@ class ThinScrubber {
       this.hovering = false;
       this.paint();
     });
-    this.root.addEventListener('pointerdown', this.onDown);
+
+    // Instagram delegates through React's root container, which is not an ancestor of
+    // this node, so its handlers never fire here. Stopping propagation anyway covers the
+    // handful of listeners they bind directly to document.
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'dblclick']) {
+      this.root.addEventListener(type, (ev) => ev.stopPropagation());
+    }
+
+    this.playBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const video = this.video;
+      if (!video) return;
+      void (video.paused ? video.play().catch(() => {}) : video.pause());
+      this.paint();
+    });
+
+    this.muteBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (!this.video) return;
+      this.video.muted = !this.video.muted;
+      this.paint();
+    });
+
+    this.hit.addEventListener('pointerdown', this.onDown);
   }
 
-  bind(video: HTMLVideoElement): void {
+  isBusy(): boolean {
+    return this.dragging || this.hovering;
+  }
+
+  attach(video: HTMLVideoElement): void {
     if (this.video === video) return;
     this.video = video;
-    this.root.style.display = 'block';
+    this.root.style.display = 'flex';
+    cancelAnimationFrame(this.raf);
     this.tick();
+  }
+
+  hide(): void {
+    if (this.dragging) return;
+    cancelAnimationFrame(this.raf);
+    this.raf = 0;
+    this.video = null;
+    this.root.style.display = 'none';
   }
 
   destroy(): void {
@@ -277,57 +414,52 @@ class ThinScrubber {
     this.video = null;
   }
 
-  /** Follow the video's rect and playhead. Only runs while a video is bound. */
+  /** Follow the player's rect and playhead. Only runs while attached. */
   private tick = (): void => {
     const video = this.video;
-    if (!video || !video.isConnected) return this.unbind();
+    if (!video || !video.isConnected) return this.hide();
 
     const r = video.getBoundingClientRect();
-    const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.width === 0;
-    const pointerAway =
-      !this.dragging &&
-      !this.hovering &&
-      (pointerX < r.left || pointerX > r.right || pointerY < r.top - 40 || pointerY > r.bottom + 40);
+    const gone = r.width < MIN_VIDEO_PX || r.bottom < 0 || r.top > window.innerHeight;
+    if (gone) return this.hide();
 
-    if (offscreen || pointerAway) return this.unbind();
-
-    // Flush to the bottom edge, inside the video's rounded corners.
+    // Sit inside the player's bottom edge, so the cursor is still within the video's
+    // rect while it is on the bar and `retarget` doesn't immediately drop it.
     this.root.style.left = `${r.left}px`;
     this.root.style.width = `${r.width}px`;
-    this.root.style.top = `${r.bottom - 20}px`;
+    this.root.style.top = `${Math.min(r.bottom - BAR_HEIGHT, window.innerHeight - BAR_HEIGHT)}px`;
 
     this.paint();
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  private unbind(): void {
-    cancelAnimationFrame(this.raf);
-    this.video = null;
-    this.root.style.display = 'none';
-  }
-
   private paint(): void {
     const video = this.video;
     if (!video) return;
 
-    const active = this.hovering || this.dragging;
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const pct = duration > 0 ? (video.currentTime / duration) * 100 : 0;
+    const pct = duration > 0 ? clamp(video.currentTime / duration, 0, 1) * 100 : 0;
+    const active = this.hovering || this.dragging;
 
-    this.track.style.height = active ? '7px' : '3px';
+    this.track.style.height = active ? '5px' : '3px';
     this.fill.style.width = `${pct}%`;
-    this.fill.style.background = this.dragging
-      ? 'oklch(0.74 0.11 150)'
-      : active
-        ? '#fff'
-        : 'rgba(255,255,255,0.72)';
     this.knob.style.left = `${pct}%`;
     this.knob.style.opacity = active ? '1' : '0';
 
-    this.label.style.left = `${pct}%`;
-    this.label.style.opacity = this.dragging ? '1' : '0';
-    if (this.dragging) {
-      this.label.textContent = `${fmt(video.currentTime)} / ${fmt(duration)}`;
+    if (this.shownPaused !== video.paused) {
+      this.shownPaused = video.paused;
+      this.playBtn.innerHTML = video.paused ? ICON_PLAY : ICON_PAUSE;
+      this.playBtn.title = video.paused ? 'Play' : 'Pause';
+    }
+    if (this.shownMuted !== video.muted) {
+      this.shownMuted = video.muted;
+      this.muteBtn.innerHTML = video.muted ? ICON_MUTED : ICON_SOUND;
+      this.muteBtn.title = video.muted ? 'Unmute' : 'Mute';
+    }
+    const label = `${fmt(video.currentTime)} / ${fmt(duration)}`;
+    if (this.shownTime !== label) {
+      this.shownTime = label;
+      this.time.textContent = label;
     }
   }
 
@@ -335,10 +467,14 @@ class ThinScrubber {
     if (!this.video) return;
     ev.preventDefault();
     ev.stopPropagation();
+
     this.dragging = true;
+    this.hit.setPointerCapture(ev.pointerId);
     this.seekTo(ev.clientX);
-    window.addEventListener('pointermove', this.onMove);
-    window.addEventListener('pointerup', this.onUp, { once: true });
+
+    this.hit.addEventListener('pointermove', this.onMove);
+    this.hit.addEventListener('pointerup', this.onUp, { once: true });
+    this.hit.addEventListener('pointercancel', this.onUp, { once: true });
   };
 
   private onMove = (ev: PointerEvent): void => {
@@ -347,23 +483,25 @@ class ThinScrubber {
 
   private onUp = (): void => {
     this.dragging = false;
-    window.removeEventListener('pointermove', this.onMove);
+    this.hit.removeEventListener('pointermove', this.onMove);
+    // A drag ends in a click. Swallow exactly one, or releasing the scrubber opens the
+    // post underneath.
+    window.addEventListener('click', swallowOnce, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener('click', swallowOnce, { capture: true }), 0);
     this.paint();
   };
 
   private seekTo(clientX: number): void {
     const video = this.video;
     if (!video || !Number.isFinite(video.duration)) return;
-    const r = this.root.getBoundingClientRect();
-    const t = clamp((clientX - r.left) / r.width, 0, 1);
-    video.currentTime = t * video.duration;
+    const r = this.track.getBoundingClientRect();
+    if (r.width === 0) return;
+    video.currentTime = clamp((clientX - r.left) / r.width, 0, 1) * video.duration;
     this.paint();
   }
 }
 
-function fmt(seconds: number): string {
-  if (!Number.isFinite(seconds)) return '0:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+function swallowOnce(ev: Event): void {
+  ev.stopPropagation();
+  ev.preventDefault();
 }
