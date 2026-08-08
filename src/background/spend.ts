@@ -38,25 +38,34 @@ export async function getSpend(): Promise<Spend> {
 }
 
 export function record(usage: Usage, usd: number): Promise<Spend> {
-  queue = queue.then(async () => {
-    const current = await getSpend();
-    const next: Spend = {
-      usd: current.usd + usd,
-      inputTokens: current.inputTokens + usage.inputTokens,
-      outputTokens: current.outputTokens + usage.outputTokens,
-      calls: current.calls + 1,
-      since: current.since ?? Date.now(),
-    };
-    await chrome.storage.local.set({ [KEY]: next });
-    return next;
-  });
+  // Recovering the chain on failure matters: a rejected link would stay rejected, and
+  // every later `.then` would be skipped — one transient storage error would silently
+  // stop all spend tracking for the rest of the session.
+  queue = queue.then(
+    () => write(usage, usd),
+    () => write(usage, usd),
+  );
   return queue;
 }
 
+async function write(usage: Usage, usd: number): Promise<Spend> {
+  const current = await getSpend();
+  const next: Spend = {
+    usd: current.usd + usd,
+    inputTokens: current.inputTokens + usage.inputTokens,
+    outputTokens: current.outputTokens + usage.outputTokens,
+    calls: current.calls + 1,
+    since: current.since ?? Date.now(),
+  };
+  await chrome.storage.local.set({ [KEY]: next });
+  return next;
+}
+
 export async function resetSpend(): Promise<void> {
-  queue = queue.then(async () => {
+  const clear = async (): Promise<Spend> => {
     await chrome.storage.local.set({ [KEY]: EMPTY });
     return EMPTY;
-  });
+  };
+  queue = queue.then(clear, clear);
   await queue;
 }

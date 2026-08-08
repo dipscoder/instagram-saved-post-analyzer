@@ -414,6 +414,9 @@ class ControlBar {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.video = null;
+    // Hiding the node means its pointerleave will never arrive; without this, `isBusy`
+    // would stay true and retarget would refuse to bind anything again.
+    this.hovering = false;
     this.root.style.display = 'none';
   }
 

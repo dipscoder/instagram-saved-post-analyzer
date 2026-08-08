@@ -134,6 +134,18 @@ function queueRefresh(): void {
   }, 250);
 }
 
+/**
+ * Set when the *query* changed rather than the data. Preserving scroll is right for a
+ * batch landing underneath you; it is wrong when you've just switched category, where
+ * you expect to be looking at the top of a new list.
+ */
+let resetScroll = false;
+
+function refreshFromTop(): void {
+  resetScroll = true;
+  void refresh();
+}
+
 async function refresh(): Promise<void> {
   try {
     const [posts, stats] = await Promise.all([
@@ -170,7 +182,7 @@ function buildShell(): HTMLElement {
   search.addEventListener('input', () => {
     state.search = search.value;
     clearTimeout(searchDebounce);
-    searchDebounce = self.setTimeout(() => void refresh(), 160);
+    searchDebounce = self.setTimeout(refreshFromTop, 160);
   });
   elSearch = search;
   header.append(search);
@@ -226,7 +238,8 @@ function render(): void {
 
   // Swapping the results list resets scrollTop; put it back, so writes landing
   // mid-scroll don't throw you to the top of the grid.
-  const scrollTop = elMain.scrollTop;
+  const scrollTop = resetScroll ? 0 : elMain.scrollTop;
+  resetScroll = false;
   elMain.replaceChildren(...mainRows());
   elMain.scrollTop = scrollTop;
 }
@@ -240,7 +253,7 @@ function railRows(): Node[] {
   ]);
   all.addEventListener('click', () => {
     state.selected.clear();
-    void refresh();
+    refreshFromTop();
   });
   rows.push(all, h('div', 'divider'), h('div', 'rail-label', 'Categories'));
 
@@ -289,7 +302,7 @@ function railRow(name: string, count: number): HTMLElement {
       state.selected.clear();
       state.selected.add(name);
     }
-    void refresh();
+    refreshFromTop();
   });
   return row;
 }
@@ -316,7 +329,7 @@ function mainRows(): Node[] {
       chip.title = `Remove ${name}`;
       chip.addEventListener('click', () => {
         state.selected.delete(name);
-        void refresh();
+        refreshFromTop();
       });
       chips.append(chip);
     }
@@ -625,7 +638,7 @@ function stopHarvesting(): void {
 function clearFilters(): void {
   state.selected.clear();
   state.search = '';
-  void refresh();
+  refreshFromTop();
 }
 
 // --- small helpers ----------------------------------------------------------
