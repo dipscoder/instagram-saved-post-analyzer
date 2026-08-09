@@ -10,6 +10,7 @@
 
 import { extractPosts } from '../src/capture/extract';
 import { classifyByRules, normalizeCategory } from '../src/taxonomy';
+import { migrate } from '../src/background/settings';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -123,6 +124,30 @@ check('case-insensitive', normalizeCategory('travel') === 'Travel');
 check('half of ampersand pair', normalizeCategory('Fitness') === 'Fitness & Health');
 check('unknown → null', normalizeCategory('Sports') === null);
 check('null-safe', normalizeCategory(null) === null);
+
+console.log('\nsettings migration');
+{
+  const fresh = migrate(undefined);
+  check('fresh install gets the overlay bar',
+    fresh.scrubberSkin === 'overlay' && fresh.settingsVersion === 2, fresh.scrubberSkin);
+
+  // The reported bug: a profile created when 'native' was the default kept it, and
+  // native controls are the ones Instagram's click-catcher swallows.
+  const legacyNative = migrate({ scrubberSkin: 'native', apiKey: 'sk-keep-me' } as never);
+  check('v1 profile on native is switched over',
+    legacyNative.scrubberSkin === 'overlay', legacyNative.scrubberSkin);
+  check('migration touches nothing else',
+    legacyNative.apiKey === 'sk-keep-me', legacyNative.apiKey);
+
+  check('legacy "thin" still maps to overlay',
+    migrate({ scrubberSkin: 'thin' } as never).scrubberSkin === 'overlay');
+
+  // Once migrated, the toggle has to win — otherwise native becomes unreachable.
+  const chosen = migrate({ scrubberSkin: 'native', settingsVersion: 2 } as never);
+  check('a deliberate native choice survives', chosen.scrubberSkin === 'native', chosen.scrubberSkin);
+
+  check('idempotent', migrate(migrate({ scrubberSkin: 'native' } as never)).scrubberSkin === 'overlay');
+}
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

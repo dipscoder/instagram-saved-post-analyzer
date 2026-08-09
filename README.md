@@ -218,10 +218,11 @@ grid is underneath, untouched. A chip in the bottom-right brings the library bac
 **Only a handful of posts show up.** That is capture working as designed — see *How
 indexing actually works* above. Press **Index now** and leave the tab open.
 
-**The video scrubber won't seek.** Check the **Extension video controls** toggle in the
-popup is on. With it off you get the browser's own control strip, which Instagram's
-click-catcher frequently swallows; our bar renders outside their DOM specifically to avoid
-that. The bar appears when the pointer is over a player.
+**The video scrubber won't seek.** You are looking at the browser's own control strip, not
+ours. Tell them apart by the buttons: Chrome's has a fullscreen icon and a `⋮` menu, ours
+has neither. Instagram's click-catcher swallows clicks on Chrome's strip, which is why our
+bar renders outside their DOM. Turn **Extension video controls** on in the popup; profiles
+created before v2 are switched over automatically on the next worker start.
 
 **Reels stop at the end instead of looping.** Deliberate: `loop` is removed, because a
 looping video restarts under you mid-scrub and hides where the end is.

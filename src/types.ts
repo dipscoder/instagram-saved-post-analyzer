@@ -78,6 +78,9 @@ export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter';
  */
 export type VideoControls = 'overlay' | 'native';
 
+/** Bump when a stored default needs revisiting. Migrations live in settings.ts. */
+export const SETTINGS_VERSION = 2;
+
 export interface Settings {
   provider: ProviderId;
   model: string;
@@ -85,6 +88,7 @@ export interface Settings {
   apiKey: string;
   autoIndex: boolean;
   scrubberSkin: VideoControls;
+  settingsVersion: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -93,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
   autoIndex: true,
   scrubberSkin: 'overlay',
+  settingsVersion: SETTINGS_VERSION,
 };
 
 export type IndexPhase = 'idle' | 'running' | 'paused' | 'done' | 'error' | 'offline';

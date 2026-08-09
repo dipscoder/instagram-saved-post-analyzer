@@ -16,6 +16,7 @@ import {
   getSafeSettings,
   getSettings,
   lockDownStorage,
+  migrateSettings,
   setSettings,
 } from './settings';
 import { PORT, type Broadcast, type Request, type Response, type Stats } from '../messaging';
@@ -24,7 +25,13 @@ import type { CapturedPost } from '../types';
 
 // Assert on every wake, not just install — see settings.ts.
 void lockDownStorage();
-chrome.runtime.onInstalled.addListener(() => void lockDownStorage());
+// Land any pending settings migration in storage, so an already-open instagram.com tab
+// hears about it through storage.onChanged rather than waiting for a reload.
+void migrateSettings();
+chrome.runtime.onInstalled.addListener(() => {
+  void lockDownStorage();
+  void migrateSettings();
+});
 
 let lastProgress: IndexProgress = IDLE_PROGRESS;
 

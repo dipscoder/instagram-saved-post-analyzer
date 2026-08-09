@@ -12,7 +12,7 @@
  * it (older build, manual reset) self-heals on the next wake.
  */
 
-import { DEFAULT_SETTINGS, type Settings } from '../types';
+import { DEFAULT_SETTINGS, SETTINGS_VERSION, type Settings } from '../types';
 import type { SafeSettings } from '../messaging';
 
 const KEY = 'settings';
@@ -31,20 +31,49 @@ export async function lockDownStorage(): Promise<void> {
   }
 }
 
+/**
+ * Pure, idempotent, and applied on every read so a stored value never reaches the rest of
+ * the code in a shape it doesn't understand.
+ *
+ * **v1 → v2 (video controls).** `'thin'` was renamed `'overlay'`. More importantly,
+ * `'native'` stopped being the default — and a profile still holding it almost certainly
+ * *inherited* it rather than chose it, because the old build shipped it as the default and
+ * wrote the whole settings object back on any unrelated change, so there is no way to tell
+ * the two apart. Native controls are precisely the ones Instagram's click-catcher swallows,
+ * which is the entire reason the overlay bar exists, so leaving those profiles alone means
+ * leaving them with controls that cannot work. Reset once; the toggle still wins afterwards
+ * because a later write carries `settingsVersion: 2`.
+ */
+export function migrate(raw: Partial<Settings> | undefined): Settings {
+  const next = { ...DEFAULT_SETTINGS, ...raw };
+
+  if ((raw?.settingsVersion ?? 1) < 2) {
+    next.scrubberSkin = DEFAULT_SETTINGS.scrubberSkin;
+  }
+  if ((next.scrubberSkin as string) === 'thin') next.scrubberSkin = 'overlay';
+
+  next.settingsVersion = SETTINGS_VERSION;
+  return next;
+}
+
 export async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(KEY);
-  const raw = stored[KEY] as Partial<Settings> | undefined;
-  const merged = { ...DEFAULT_SETTINGS, ...raw };
-  // 'thin' was the old name for the overlay control bar. Migrate on read so an existing
-  // profile doesn't end up with a value the video code no longer understands.
-  if ((merged.scrubberSkin as string) === 'thin') merged.scrubberSkin = 'overlay';
-  return merged;
+  return migrate(stored[KEY] as Partial<Settings> | undefined);
 }
 
 export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
   const next = { ...(await getSettings()), ...patch };
   await chrome.storage.local.set({ [KEY]: next });
   return next;
+}
+
+/**
+ * Persist the migrated shape. Reads are already migrated, but content scripts learn about
+ * changes through `storage.onChanged`, which reports the raw stored value — so the
+ * migration has to actually land in storage for a page that is already open to see it.
+ */
+export async function migrateSettings(): Promise<void> {
+  await setSettings({});
 }
 
 /** Wipe the key and nothing else — captured posts and their categories are untouched. */
