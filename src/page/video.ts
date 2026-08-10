@@ -49,6 +49,27 @@ const ICON_SOUND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="curren
 const ICON_MUTED = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9.5l4 5M19.5 9.5l-4 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 
 const enhanced = new WeakSet<HTMLVideoElement>();
+
+/**
+ * Players the user has explicitly unmuted through our bar.
+ *
+ * Instagram re-mutes as part of its own play/pause handling — autoplay policy only lets
+ * it start a muted video, and the same helper runs when you resume one by hand. The
+ * effect is that sound has to be turned on again after every pause. We remember the
+ * intent and put it back.
+ *
+ * Per player rather than global: scrolling from a reel you unmuted to the next one should
+ * not start playing audio you never asked for.
+ */
+const wantsSound = new WeakSet<HTMLVideoElement>();
+
+/**
+ * How long after a play/pause a mute is treated as Instagram's doing rather than yours.
+ * Without this window we would also undo a deliberate mute made mid-playback, whether
+ * through our button or theirs.
+ */
+const REASSERT_WINDOW_MS = 600;
+
 let mode: VideoControls = 'overlay';
 let bar: ControlBar | null = null;
 let scanQueued = false;
@@ -117,6 +138,36 @@ function enhance(video: HTMLVideoElement): void {
   new MutationObserver(() => applyFlags(video)).observe(video, {
     attributes: true,
     attributeFilter: ['controls', 'controlslist', 'disablepictureinpicture', 'loop', 'style'],
+  });
+
+  keepSoundOn(video);
+}
+
+/**
+ * Put the user's unmute back after Instagram's play/pause handling drops it.
+ *
+ * The ordering is either way round depending on the build — they sometimes mute before
+ * calling `play()`, sometimes just after — so both the transition itself and any
+ * `volumechange` shortly after it get a look. `muted = false` fires another
+ * `volumechange`, but by then `video.muted` is false and the guard ends the chain.
+ */
+function keepSoundOn(video: HTMLVideoElement): void {
+  let lastTransition = 0;
+
+  const restore = (): void => {
+    if (wantsSound.has(video) && video.muted) video.muted = false;
+  };
+
+  const onTransition = (): void => {
+    lastTransition = performance.now();
+    restore();
+  };
+
+  for (const type of ['play', 'playing', 'pause'] as const) {
+    video.addEventListener(type, onTransition);
+  }
+  video.addEventListener('volumechange', () => {
+    if (performance.now() - lastTransition < REASSERT_WINDOW_MS) restore();
   });
 }
 
@@ -389,8 +440,14 @@ class ControlBar {
 
     this.muteBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
-      if (!this.video) return;
-      this.video.muted = !this.video.muted;
+      const video = this.video;
+      if (!video) return;
+      // This button is the only thing that sets the intent, so muting here is final —
+      // we will not turn the sound back on behind your back.
+      const nextMuted = !video.muted;
+      video.muted = nextMuted;
+      if (nextMuted) wantsSound.delete(video);
+      else wantsSound.add(video);
       this.paint();
     });
 

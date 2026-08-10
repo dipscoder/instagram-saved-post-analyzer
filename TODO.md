@@ -120,6 +120,56 @@ Filed after using the built extension. Each phase is one commit.
 
 ---
 
+# Round 3 — second-run feedback
+
+Filed after living with it. Each phase is one commit.
+
+## Phase 19 — Sound that stays on
+- [ ] Bug: unmute, then pause/play, and Instagram re-mutes the player
+- [ ] Hold the user's unmute intent per video and re-assert it, but *only* inside the
+      play/pause window — a deliberate mute during steady playback must stand
+
+## Phase 20 — Only index what is actually saved
+- [ ] Bug: posts the user never saved were being captured and paid for. Three leaks:
+      the GraphQL URL patterns match *every* Instagram query (home feed, explore,
+      profile grids, related reels); the bridge ingests on every route, not just
+      `/saved`; and the DOM fallback scrapes `a[href^="/p/"]` across the whole document
+- [ ] Route gate — capture only while the saved grid is the page
+- [ ] Payload scope — a GraphQL body only counts inside a container named for the saved
+      feed; the REST saved/collections paths stay trusted whole
+- [ ] DOM fallback scoped to the saved grid, not the document
+- [ ] Stamp `seenInSavedFeed` on capture; after a *complete* sweep, offer to remove
+      records the feed no longer lists (strays and unsaved posts) — keeps the
+      categorisation already paid for on the genuine ones
+
+## Phase 21 — Search that finds things
+- [ ] Multi-word queries AND together instead of matching one literal substring
+- [ ] Search subcategory, hashtags, alt text and audio track too — not just summary,
+      caption, handle, category, tags
+- [ ] Return the true match count and stop silently truncating at 200
+
+## Phase 22 — Dates, and the order the library is in
+- [ ] `savedAt` is misnamed: it is the post's own timestamp. Rename to `postedAt`
+- [ ] Add `firstSeenAt` (when this extension first stored it) and show both
+- [ ] Instagram does not expose a save *timestamp*, but the feed is ordered newest-saved
+      first — capture that order as `savedRank` and make it the default sort
+- [ ] Sort control: Save order / Newest post / Oldest post
+
+## Phase 23 — The overlay is a view, not a takeover
+- [ ] One obvious segmented control: Library ↔ Instagram, replacing the quiet Hide button
+- [ ] The restore chip moves into the Shadow DOM so it shares the design system
+- [ ] `⌥/Alt + S` toggles, guarded so it never fires inside a text field
+
+## Phase 24 — Visual pass
+- [ ] Calmer type scale, one accent, more restful spacing
+- [ ] Cards carry the information the new fields make available
+
+## Phase 25 — Docs
+- [ ] ARCHITECTURE: capture scoping as a trust boundary of its own
+- [ ] README: what the search covers, what the dates mean, what save order is
+
+---
+
 ## Next, if this gets used in anger
 
 - [ ] Sort control in the library header (design shows "Recently saved"; currently fixed
