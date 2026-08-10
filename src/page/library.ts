@@ -75,12 +75,20 @@ let searchDebounce = 0;
 /** Dropped on unmount — leaving on/off the saved route otherwise stacks up listeners. */
 let unsubscribe: (() => void) | null = null;
 
-// Persistent shell nodes — created once, mutated thereafter.
+// Persistent shell nodes — created once, mutated thereafter. Anything the user can be
+// mid-interaction with belongs here: a rebuild would close an open <select>, drop the
+// caret out of the search box, or lose keyboard focus.
+let elApp: HTMLElement | null = null;
+let elRestore: HTMLElement | null = null;
 let elRail: HTMLElement | null = null;
 let elMain: HTMLElement | null = null;
 let elSearch: HTMLInputElement | null = null;
+let elIndexLabel: HTMLElement | null = null;
+let elTitle: HTMLElement | null = null;
 let elCount: HTMLElement | null = null;
+let elSort: HTMLSelectElement | null = null;
 let elSeg: HTMLElement | null = null;
+let elWhere: HTMLElement | null = null;
 
 export function mountLibrary(): void {
   if (host) return;
@@ -99,6 +107,7 @@ export function mountLibrary(): void {
   shadow.append(sheet, buildShell());
   document.body.appendChild(host);
 
+  document.addEventListener('keydown', onShortcut, true);
   unsubscribe = subscribe(onBroadcast);
   void refresh();
   render();
@@ -106,12 +115,16 @@ export function mountLibrary(): void {
 
 export function unmountLibrary(): void {
   stopHarvesting();
+  document.removeEventListener('keydown', onShortcut, true);
   unsubscribe?.();
   unsubscribe = null;
   host?.remove();
   host = null;
   shadow = null;
-  elRail = elMain = elSearch = elCount = elSeg = null;
+  elApp = elRestore = elRail = elMain = elIndexLabel = null;
+  elTitle = elCount = elSeg = elWhere = null;
+  elSearch = null;
+  elSort = null;
 }
 
 export function isLibraryMounted(): boolean {
@@ -190,14 +203,18 @@ async function refresh(): Promise<void> {
 // --- shell ------------------------------------------------------------------
 
 /** Built once. Everything here survives every render, so focus and caret survive too. */
-function buildShell(): HTMLElement {
+function buildShell(): DocumentFragment {
   const app = h('div', 'app');
+  elApp = app;
+
+  // --- header: what is true of the whole library ---
 
   const header = h('header', 'header');
   header.append(h('div', 'brand', [h('span', 'dot'), h('span', 'brand-name', 'Saved Index')]));
 
   const search = document.createElement('input');
   search.className = 'search';
+  search.type = 'search';
   search.placeholder = 'Search summaries, captions, tags, handles, alt text';
   search.title =
     'Every word has to match, in any order. Searches the summary, caption, category, ' +
@@ -211,8 +228,36 @@ function buildShell(): HTMLElement {
   header.append(search);
 
   const right = h('div', 'header-right');
+  elIndexLabel = h('span', 'mono muted');
+  elWhere = whereSwitch();
+  right.append(elIndexLabel, elWhere);
+  header.append(right);
+
+  // --- toolbar: how *this* list is presented. Persistent, so an open <select> or a
+  // focused button survives a batch of results landing underneath it. ---
+
+  const toolbar = h('div', 'toolbar');
+  elTitle = h('h1', 'title');
   elCount = h('span', 'mono muted');
-  right.append(elCount);
+  toolbar.append(elTitle, elCount);
+
+  const sortWrap = h('label', 'sort');
+  sortWrap.title =
+    'Instagram does not send a save date, only the order — newest saved first. ' +
+    'Save order preserves that; the other two use the post’s own publish date.';
+  elSort = document.createElement('select');
+  for (const key of ['saved', 'newest', 'oldest'] as const) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = SORT_LABELS[key];
+    elSort.append(opt);
+  }
+  elSort.value = state.sort;
+  elSort.addEventListener('change', () => {
+    state.sort = (elSort?.value ?? 'saved') as SortKey;
+    refreshFromTop();
+  });
+  sortWrap.append(elSort);
 
   elSeg = h('div', 'seg');
   for (const view of ['grid', 'list'] as const) {
@@ -224,35 +269,109 @@ function buildShell(): HTMLElement {
     });
     elSeg.append(b);
   }
-  right.append(elSeg);
-
-  const hide = h('button', 'ghost', 'Hide');
-  hide.title = "Hide the library and show Instagram's own grid";
-  hide.addEventListener('click', () => {
-    state.visible = false;
-    render();
-    showRestoreChip();
-  });
-  right.append(hide);
-  header.append(right);
+  toolbar.append(sortWrap, elSeg);
 
   elRail = h('aside', 'rail');
   elMain = h('main', 'main');
 
+  const col = h('div', 'col');
+  col.append(toolbar, elMain);
+
   const body = h('div', 'body');
-  body.append(elRail, elMain);
+  body.append(elRail, col);
   app.append(header, body);
-  return app;
+
+  // The chip that brings the library back. It lives in here rather than being built on
+  // demand in the page so it shares the design system, and so there is exactly one node
+  // to reason about when the route changes.
+  elRestore = h('button', 'restore', [
+    h('span', 'dot'),
+    h('span', '', 'Saved Index'),
+    h('span', 'mono restore-key', shortcutLabel()),
+  ]);
+  elRestore.title = `Show the library (${shortcutLabel()})`;
+  elRestore.addEventListener('click', () => setVisible(true));
+
+  const frag = document.createDocumentFragment();
+  frag.append(app, elRestore);
+  return frag;
+}
+
+/**
+ * Library ↔ Instagram. A two-state switch rather than a Hide button: the library is one
+ * of two ways to look at the same page, and Instagram's own grid is still underneath,
+ * untouched. "Hide" read as *dismiss*, and the way back was a chip most people missed.
+ */
+function whereSwitch(): HTMLElement {
+  const seg = h('div', 'seg seg-where');
+  for (const [key, label] of [
+    ['library', 'Library'],
+    ['instagram', 'Instagram'],
+  ] as const) {
+    const b = h('button', 'seg-btn', label);
+    b.dataset['where'] = key;
+    b.addEventListener('click', () => setVisible(key === 'library'));
+    seg.append(b);
+  }
+  seg.title = `Switch between the library and Instagram's own grid (${shortcutLabel()})`;
+  return seg;
+}
+
+function setVisible(visible: boolean): void {
+  if (state.visible === visible) return;
+  state.visible = visible;
+  render();
+}
+
+/**
+ * Alt/Option + S. Modified so it cannot collide with Instagram's own single-key
+ * shortcuts, and ignored while you are typing — on a Mac, Option+S is a real character.
+ */
+function onShortcut(ev: KeyboardEvent): void {
+  if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if ((ev.code || '') !== 'KeyS') return;
+
+  // Our own search box is inside a shadow root, and `ev.target` retargets to the host
+  // for anything in there. composedPath()[0] is the node actually focused.
+  const target = (ev.composedPath()[0] ?? ev.target) as HTMLElement | null;
+  if (target?.isContentEditable) return;
+  if (target?.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+
+  ev.preventDefault();
+  ev.stopPropagation();
+  setVisible(!state.visible);
+}
+
+function shortcutLabel(): string {
+  return navigator.userAgent.includes('Mac') ? '⌥S' : 'Alt+S';
 }
 
 // --- rendering --------------------------------------------------------------
 
 function render(): void {
-  if (!host || !elRail || !elMain || !elCount || !elSeg || !elSearch) return;
+  if (!host || !elApp || !elRestore || !elRail || !elMain) return;
+  if (!elSearch || !elIndexLabel || !elTitle || !elCount || !elSort || !elSeg || !elWhere) return;
 
-  host.style.display = state.visible ? 'block' : 'none';
+  // Hidden means *out of the way*, not unmounted: the host stays put so the chip and the
+  // keyboard shortcut keep working, and stops intercepting pointer events so Instagram's
+  // own grid underneath is fully usable.
+  host.style.pointerEvents = state.visible ? 'auto' : 'none';
+  elApp.style.display = state.visible ? 'flex' : 'none';
+  elRestore.style.display = state.visible ? 'none' : 'flex';
+  for (const btn of elWhere.children) {
+    const on = ((btn as HTMLElement).dataset['where'] === 'library') === state.visible;
+    btn.classList.toggle('on', on);
+  }
+
   if (elSearch.value !== state.search) elSearch.value = state.search;
-  elCount.textContent = indexLabel();
+  if (elSort.value !== state.sort) elSort.value = state.sort;
+  elIndexLabel.textContent = indexLabel();
+
+  const names = [...state.selected];
+  elTitle.textContent =
+    names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved';
+  elCount.textContent = countLabel();
+
   for (const btn of elSeg.children) {
     btn.classList.toggle('on', (btn as HTMLElement).dataset['view'] === state.view);
   }
@@ -341,14 +460,9 @@ function mainRows(): Node[] {
     if (panel) rows.push(panel);
   }
 
-  const head = h('div', 'main-head');
+  // The title, count, sort and view switch live in the persistent toolbar. Only the
+  // comparison chips are conditional enough to belong with the results.
   const names = [...state.selected];
-  head.append(
-    h('h1', 'title', names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved'),
-    h('span', 'mono muted', countLabel()),
-    sortControl(),
-  );
-
   if (names.length > 1) {
     const chips = h('div', 'chips');
     for (const name of names) {
@@ -363,9 +477,8 @@ function mainRows(): Node[] {
     const clear = h('button', 'link', 'Clear');
     clear.addEventListener('click', clearFilters);
     chips.append(clear);
-    head.append(chips);
+    rows.push(chips);
   }
-  rows.push(head);
 
   if (state.loading) {
     rows.push(empty('Loading…', 'Reading what has been indexed so far.'));
@@ -414,35 +527,6 @@ const SORT_LABELS: Record<SortKey, string> = {
   newest: 'Newest post',
   oldest: 'Oldest post',
 };
-
-/**
- * Save order is the default because a library of saved things should be in the order you
- * saved them. Instagram sends no save timestamp, so this is reconstructed from the order
- * the feed lists them in — exact as an ordering, which is why the option is not called
- * "Recently saved" with a date beside it.
- */
-function sortControl(): HTMLElement {
-  const wrap = h('label', 'sort');
-  wrap.title =
-    'Instagram does not send a save date, only the order — newest saved first. ' +
-    'Save order preserves that; the other two use the post’s own publish date.';
-
-  const select = document.createElement('select');
-  for (const key of ['saved', 'newest', 'oldest'] as const) {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = SORT_LABELS[key];
-    opt.selected = state.sort === key;
-    select.append(opt);
-  }
-  select.addEventListener('change', () => {
-    state.sort = select.value as SortKey;
-    refreshFromTop();
-  });
-
-  wrap.append(select);
-  return wrap;
-}
 
 /** `412` when it all fits, `200 / 412` when it doesn't — never a bare truncated count. */
 function countLabel(): string {
@@ -700,32 +784,6 @@ function empty(
     el.append(btn);
   }
   return el;
-}
-
-/** A small chip so the library can be brought back after Hide. */
-function showRestoreChip(): void {
-  const chip = document.createElement('button');
-  chip.textContent = 'Saved Index';
-  chip.setAttribute('data-saved-index', 'restore');
-  Object.assign(chip.style, {
-    position: 'fixed',
-    right: '16px',
-    bottom: '16px',
-    zIndex: '2147482001',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    border: '1px solid rgba(125,125,125,0.35)',
-    background: 'Canvas',
-    color: 'CanvasText',
-    font: '500 12px/1 system-ui, sans-serif',
-    cursor: 'pointer',
-  } satisfies Partial<CSSStyleDeclaration>);
-  chip.addEventListener('click', () => {
-    chip.remove();
-    state.visible = true;
-    render();
-  });
-  document.body.appendChild(chip);
 }
 
 // --- actions ----------------------------------------------------------------

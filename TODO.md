@@ -156,9 +156,9 @@ Filed after living with it. Each phase is one commit.
 - [x] Sort control: Save order / Newest post / Oldest post
 
 ## Phase 23 — The overlay is a view, not a takeover
-- [ ] One obvious segmented control: Library ↔ Instagram, replacing the quiet Hide button
-- [ ] The restore chip moves into the Shadow DOM so it shares the design system
-- [ ] `⌥/Alt + S` toggles, guarded so it never fires inside a text field
+- [x] One obvious segmented control: Library ↔ Instagram, replacing the quiet Hide button
+- [x] The restore chip moves into the Shadow DOM so it shares the design system
+- [x] `⌥/Alt + S` toggles, guarded so it never fires inside a text field
 
 ## Phase 24 — Visual pass
 - [ ] Calmer type scale, one accent, more restful spacing

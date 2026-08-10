@@ -219,6 +219,16 @@ function queueRetarget(): void {
   });
 }
 
+/**
+ * True when the library overlay is what the cursor is actually on. It takes no pointer
+ * events while hidden, so `elementFromPoint` answers this on its own.
+ */
+function pointerOverLibrary(): boolean {
+  if (pointerX < 0) return false;
+  const top = document.elementFromPoint(pointerX, pointerY);
+  return top?.getAttribute('data-saved-index') === 'library';
+}
+
 /** The smallest visible player whose box contains the cursor — nested players win. */
 function videoUnderPointer(): HTMLVideoElement | null {
   if (pointerX < 0) return null;
@@ -244,6 +254,10 @@ function videoUnderPointer(): HTMLVideoElement | null {
 function retarget(): void {
   if (mode !== 'overlay') return;
   if (bar?.isBusy()) return; // never yank the bar out from under a drag
+  // Targeting is geometric, so a player *behind* the library would still be "under" the
+  // cursor. Nothing back there is reachable, so a bar floating over the library would be
+  // pure artefact.
+  if (pointerOverLibrary()) return void bar?.hide();
 
   const video = videoUnderPointer();
   if (!video) return void bar?.hide();
@@ -256,10 +270,12 @@ function retarget(): void {
 
 function onKeyDown(ev: KeyboardEvent): void {
   if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
-  // Never steal arrows from a text field or Instagram's own story navigation.
-  const target = ev.target as HTMLElement | null;
+  // Never steal arrows from a text field or Instagram's own story navigation. The
+  // library's search box lives in a shadow root, where `ev.target` retargets to the host
+  // — composedPath()[0] is the node actually focused, so arrows there move the caret.
+  const target = (ev.composedPath()[0] ?? ev.target) as HTMLElement | null;
   if (target?.isContentEditable) return;
-  if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+  if (target?.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
   const video = videoUnderPointer() ?? largestVisibleVideo();
   if (!video || !Number.isFinite(video.duration)) return;

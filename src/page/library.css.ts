@@ -99,10 +99,19 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .seg-btn { padding: 5px 9px; font-size: 11px; color: var(--text-2); }
 .seg-btn + .seg-btn { border-left: 1px solid var(--line); }
 .seg-btn.on { background: var(--accent-wash); color: var(--accent); }
+.seg-btn:hover:not(.on) { background: var(--bg-sunk); color: var(--text); }
+/* The escape hatch. Reads as a place you can be, not a button that dismisses. */
+.seg-where .seg-btn { padding: 5px 11px; font-size: 11.5px; }
 
 /* --- layout --- */
 
 .body { flex: 1; display: flex; overflow: hidden; }
+.col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.toolbar {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: 18px 28px 14px;
+}
 
 .rail {
   width: 216px; flex: none; display: flex; flex-direction: column; gap: 2px;
@@ -129,10 +138,6 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 .main { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
 
-.main-head {
-  flex: none; display: flex; align-items: center; gap: 12px;
-  padding: 20px 28px 14px; flex-wrap: wrap;
-}
 .title { font-size: 20px; font-weight: 560; letter-spacing: -0.01em; margin: 0; }
 
 .sort { margin-left: auto; display: flex; align-items: center; }
@@ -148,7 +153,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .sort select:hover, .sort select:focus { border-color: var(--accent); color: var(--accent); }
 
-.chips { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.chips { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 0 28px 10px; }
 .chip {
   display: flex; align-items: center; gap: 6px; padding: 2.5px 7px;
   border: 1px solid var(--accent-line); background: var(--accent-wash);
@@ -292,11 +297,30 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .empty-title { font-size: 13px; font-weight: 520; }
 .empty-detail { font-size: 12px; line-height: 1.55; color: var(--text-2); max-width: 320px; }
 
+/* --- the way back in --- */
+
+/*
+ * Only node still alive when the library is hidden. The host keeps its box so this and
+ * the keyboard shortcut still work, but stops taking pointer events — so this has to
+ * take them back, or it would not be clickable.
+ */
+.restore {
+  position: absolute; right: 20px; bottom: 20px; pointer-events: auto;
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 14px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--bg); color: var(--text);
+  font-family: var(--sans); font-size: 12px; font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10);
+}
+.restore:hover { border-color: var(--accent); color: var(--accent); }
+.restore-key { color: var(--text-3); letter-spacing: 0.04em; }
+
 @media (max-width: 900px) {
   .rail { display: none; }
-  .header { padding: 12px 16px; }
+  .header { padding: 12px 16px; flex-wrap: wrap; }
   .grid, .list { padding: 6px 16px 24px; }
-  .main-head { padding: 16px 16px 12px; }
-  .panel { margin: 12px 16px 0; }
+  .toolbar { padding: 14px 16px 12px; }
+  .chips { padding: 0 16px 10px; }
+  .notice, .panel { margin: 12px 16px 0; }
 }
 `;
