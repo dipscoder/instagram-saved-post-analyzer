@@ -169,15 +169,13 @@ Filed after living with it. Each phase is one commit.
 - [x] Cards: softer corners, hover surface that bleeds past the content, aligned gutters
 
 ## Phase 25 — Docs
-- [ ] ARCHITECTURE: capture scoping as a trust boundary of its own
-- [ ] README: what the search covers, what the dates mean, what save order is
+- [x] ARCHITECTURE: capture scoping as a trust boundary of its own
+- [x] README: what the search covers, what the dates mean, what save order is
 
 ---
 
 ## Next, if this gets used in anger
 
-- [ ] Sort control in the library header (design shows "Recently saved"; currently fixed
-      to newest-first)
 - [ ] Post detail view — summary beside the video, "Change category" (design §05)
 - [ ] Virtualised grid: the library renders up to 200 rows at a time; past a few thousand
       posts that wants windowing

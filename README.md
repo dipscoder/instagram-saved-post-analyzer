@@ -62,6 +62,16 @@ scrolling for you: it pages to the bottom with randomised 800–2000 ms pauses a
 immediately if Instagram returns a 429. It makes no requests of its own — it reads the
 responses the page was fetching anyway.
 
+Capture only runs on your saved page, only reads the part of a response that Instagram
+names as the saved feed, and only scrapes inside the saved grid. All three matter, because
+`/graphql/query` is one endpoint for the whole site: without them, opening a saved reel
+meant the "more from this creator" strip got indexed too.
+
+**Something in your library you never saved?** Press **Index now** and let it run to the
+end. A completed sweep sees everything still saved, so anything it doesn't find is offered
+up for removal — posts you have unsaved since, and anything an older build picked up
+elsewhere. Everything genuine keeps the summary you already paid for.
+
 **2 — Categorise (the part that costs).** Hashtag and keyword rules label whatever they can
 for nothing. Everything else goes to your model in batches of 25 captions. Only posts with
 no usable caption *and* no alt text cost a look at the thumbnail. Nothing is ever
@@ -71,6 +81,32 @@ costs you at most the in-flight batch.
 
 Both halves can be paused and resumed from either the popup or the in-page panel, and a
 pause in one stops the other.
+
+---
+
+## Finding things again
+
+**Search** matches every word you type, in any order, across the summary, caption,
+category, subcategory, tags, hashtags, handle, alt text and audio track. So "pasta recipe"
+finds a post summarised *recipe for creamy pasta*, and a caption-less reel is still
+findable by Instagram's own alt text or the track playing over it. Results past the first
+200 are behind **Show more**; the header always shows the true total, so `200 / 412` means
+there are 412.
+
+**Dates.** Instagram sends no save timestamp anywhere in the saved feed, so nothing here
+claims one. What you get instead:
+
+| | |
+|---|---|
+| **Posted** | the post's own publish date, on every card |
+| **Added** | when this library first saw it — hover any date, or use the list view |
+| **Save order** | the order Instagram lists your saves in, newest first. Exact as an *order*, which is why it isn't shown as a date |
+
+Save order is the default sort, because ordering saved posts by publish date buries a 2019
+clip you saved yesterday. **Newest post** and **Oldest post** use the publish date.
+
+**Library ↔ Instagram** in the header switches between the two; `⌥S` / `Alt+S` does the
+same from the keyboard. Instagram's own grid is underneath either way, untouched.
 
 ---
 
@@ -133,6 +169,7 @@ characters, and always with the smallest available thumbnail.
 ```
 src/
   types.ts                 PostRecord schema (incl. the nullable pipeline fields)
+  routes.ts                which Instagram routes capture is allowed to run on
   taxonomy.ts              12 categories + the free rule-based pre-pass
   messaging.ts             typed contracts for all three contexts
   content.ts               ISOLATED-world entry: bridge + video + library + SPA routing
@@ -147,6 +184,7 @@ src/
     index.ts               service worker: message router, port broadcasts → background.js
     db.ts                  IndexedDB store, dedupe + gap-filling merge
     settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
+    order.ts               feed position -> save order, across visits
     spend.ts               metered tokens + dollars, survives worker restarts
     categorize.ts          the three-tier pipeline, concurrency, backoff
     providers/
@@ -155,7 +193,7 @@ src/
       openai.ts  gemini.ts  openrouter.ts
 
   page/
-    library.ts             in-page library (Shadow DOM), filters, indexing panel
+    library.ts             in-page library (Shadow DOM), filters, sort, indexing panel
     library.css.ts         its styles
     video.ts               body-level control bar, geometric targeting, observers
 
@@ -212,8 +250,13 @@ preflight fails.
 parseable JSON. Switch to a stronger model; progress is kept, so it resumes where it
 stopped.
 
-**The library covers something I need.** Press **Hide** in its header — Instagram's own
-grid is underneath, untouched. A chip in the bottom-right brings the library back.
+**The library covers something I need.** Switch to **Instagram** in the header, or press
+`⌥S` / `Alt+S`. Instagram's own grid is underneath, untouched, and a chip in the
+bottom-right switches back.
+
+**Reels keep muting themselves when I pause.** Fixed — but the fix only applies to the mute
+button on *our* control bar, which is what records that you want sound. Instagram's own
+speaker icon doesn't.
 
 **Only a handful of posts show up.** That is capture working as designed — see *How
 indexing actually works* above. Press **Index now** and leave the tab open.
@@ -234,8 +277,14 @@ looping video restarts under you mid-scrub and hides where the end is.
 - **Endpoint matching is the one brittle seam.** Everything downstream tolerates change;
   the URL patterns are a best-effort list and may need a line updated if Instagram
   reorganises its API paths. This is a deliberate trade — see `ARCHITECTURE.md` §2.
-- **`savedAt` is the post's own timestamp**, not when you saved it. Instagram does not
-  expose save time in the saved feed.
+- **There is no save date.** Instagram doesn't expose one, so the library gives you the
+  post's publish date, the date it was added here, and exact save *order* — see
+  *Finding things again*. Saving a post and returning to the grid without reloading the
+  page files it below the backlog until the next load.
+- **Capture depends on one naming assumption**: that Instagram's saved-feed GraphQL field
+  keeps the word "saved" in it, as it has through every rename so far. Everything else in
+  the pipeline is shape-driven — this one fence has to read names, because it is the only
+  thing separating your saves from the rest of the site. See `ARCHITECTURE.md` §2a.
 - **No transcription.** Instagram doesn't expose transcripts on web.
 - **`transcript`, `ocrText`, `embedding`, `perceptualHash`** are in the schema and always
   `null`. They exist so a later pipeline can backfill without a migration.

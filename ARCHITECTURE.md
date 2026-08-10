@@ -98,6 +98,42 @@ renaming either. URL matching only decides *whether to look*; shape decides *wha
 **Layer 3** reads the first screenful of `<a href="/p/...">` tiles for the case where the
 grid painted before our patch attached.
 
+### 2a. Scope — the difference between "a post" and "a post you saved"
+
+Everything above is good at finding media in a payload. None of it, on its own, knows
+whether you *saved* that media, and the first version shipped without asking. The result
+was a library full of posts the user had never saved — mostly other reels by a creator
+they had saved once, picked up when they opened a saved post and Instagram loaded the
+related strip. Wrong twice over: a library you don't recognise, and a bill for it.
+
+Three fences, because no single one of them is sufficient:
+
+| Fence | Where | Rejects |
+|---|---|---|
+| Route | `bridge.ts` via `routes.ts` | anything captured while you are not on `/saved` |
+| Payload scope | `extract.ts` (`scope: 'saved'`) | GraphQL bodies with no saved-feed container |
+| Element scope | `dom-scrape.ts` | post links outside the saved grid's `<main>` |
+
+The payload fence is the interesting one. `/graphql/query` is **one endpoint for the whole
+site** — home feed, explore, profile grids, comments, related posts — so the URL tells you
+nothing, and the old body sniff only asked "does this look like media", which they all do.
+Under `'saved'` scope the walker first collects subtrees hanging off a key that *names* the
+saved feed (`edge_saved_media`, `xdt_api__v1__feed__saved__posts`) and only then looks for
+media inside them.
+
+That is the one naming assumption in the pipeline, and it is a deliberate trade against
+§2's shape-driven principle: Instagram's codegen'd field names describe what they return,
+and have through every rename we have seen. The REST saved and collection paths still prove
+themselves by URL and are read whole, so they are unaffected either way.
+
+**Reconciliation.** Every captured record is stamped `seenInSavedFeed`. A sweep that
+reaches the end of the feed is therefore a census, and anything it did not touch is either
+unsaved since or was swept up by an older build — the library offers to remove exactly
+those, which keeps the summaries already paid for on everything genuine. Only a *completed*
+sweep may prune; an interrupted one has simply not reached the rest of the feed yet. The
+in-page dedupe cache is cleared when a sweep starts, or posts already seen this page
+session would be missing from the census and look like strays.
+
 **Harvest modes:**
 - *Passive* — everything above runs as you scroll. Zero extra requests.
 - *Active* ("Index now") — auto-scrolls with randomised **800–2000 ms** delays and halts
@@ -112,21 +148,47 @@ posts with captions blows past that. `unlimitedStorage` is requested so the brow
 doesn't evict the DB under pressure.
 
 One store, `posts`, keyed on `shortcode` (dedupe is therefore free — a re-`put` of an
-already-categorised post is skipped in `db.putIfNew`). Indexes on `category`, `savedAt`,
-`categorizedAt`.
+already-categorised post never overwrites its summary in `db.putIfNew`). Indexes on
+`category`, `postedAt`, `categorizedAt`.
 
 Record schema (`src/types.ts`) — the nullable tail exists so a later pipeline can
 backfill without a migration:
 
 ```ts
 shortcode, permalink, handle, caption, hashtags[], thumbnailUrl,
-isVideo, durationSec, audioTrackName, altText, savedAt,
+isVideo, durationSec, audioTrackName, altText,
+postedAt, firstSeenAt, savedRank, seenInSavedFeed,
 category, subcategory, tags[], summary, categorizedAt, modelUsed,
 // declared, never populated by this extension:
 transcript, ocrText, embedding, perceptualHash
 ```
 
-`schemaVersion` is stored per record so a future migration can be selective.
+`schemaVersion` is stored per record, and `db.upgrade()` is a pure function of
+`(record, fromVersion)` so `npm run verify` can exercise every migration without a browser.
+
+### 3a. Time, and what we are allowed to claim about it
+
+Instagram sends **no save timestamp** in the saved feed — not in the REST shape, not in the
+GraphQL one. Three fields carry what can honestly be said:
+
+- `postedAt` — the post's own publish time (`taken_at`). Previously misnamed `savedAt`,
+  which is exactly the confusion this split exists to end.
+- `firstSeenAt` — when this extension first stored the record. Not a save date, but for
+  anything saved while it is installed, within a browse of one.
+- `savedRank` — the feed's *order*, which Instagram does send: newest-saved first. Each
+  visit to the grid gets a session number and the rank folds session with position
+  (`session * STRIDE - index`), so one descending sort reads "latest visit first, feed
+  order within a visit". A record keeps the rank it was first given, so re-sweeping walks
+  the whole feed without shuffling anything.
+
+Save order is the library's default sort — ordering a saved library by publish date files a
+2019 clip you saved yesterday at the very bottom. The migration leaves `firstSeenAt` and
+`savedRank` null on older records rather than back-dating them from `postedAt`: a guess
+that reads like a fact is worse than a blank.
+
+**Known gap.** Saving a post and returning to the grid without a page load files it below
+the backlog until the next load, because it is still the same session. Living with that is
+cheaper than every alternative, all of which involve guessing.
 
 ---
 
@@ -252,6 +314,20 @@ Two modes, toggled in settings:
 
 Ending a drag installs a one-shot capture-phase `click` swallow, or releasing the scrubber
 would open the post underneath.
+
+**Sound has to be held down.** Unmuting a reel only lasted until the next pause. Nothing
+here sets `muted`; Instagram does, as part of its own play/pause handling — autoplay policy
+only lets it *start* a muted video, and the same helper runs when you resume one by hand.
+Our mute button therefore records the intent per player, and a `play`/`playing`/`pause`
+listener plus any `volumechange` within 600 ms of one puts it back. The window is the whole
+design: outside it, a mute is yours and stands. Per player rather than global, so scrolling
+to the next reel never starts playing audio you did not ask for.
+
+**Two boundaries worth naming.** Targeting is geometric, so a player *behind* the library
+overlay is still "under" the cursor — `elementFromPoint` is checked first, or the bar would
+draw over the library. And keyboard guards read `composedPath()[0]` rather than `ev.target`,
+because `ev.target` retargets to the shadow host for anything inside our own UI: arrow keys
+typed in the library's search box were seeking the video instead of moving the caret.
 
 ---
 
