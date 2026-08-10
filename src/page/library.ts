@@ -14,7 +14,7 @@
  * top and dropped the caret out of the search box.
  */
 
-import { send, subscribe, type Broadcast, type Stats } from '../messaging';
+import { send, subscribe, type Broadcast, type SortKey, type Stats } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
 import { IDLE_PROGRESS, type IndexProgress, type PostRecord } from '../types';
@@ -32,6 +32,7 @@ interface State {
   stats: Stats;
   progress: IndexProgress;
   search: string;
+  sort: SortKey;
   /** One category unless you ⌘/Ctrl-click to build a comparison. */
   selected: Set<string>;
   view: 'grid' | 'list';
@@ -55,6 +56,7 @@ const state: State = {
   stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null },
   progress: IDLE_PROGRESS,
   search: '',
+  sort: 'saved',
   selected: new Set(),
   view: 'grid',
   visible: true,
@@ -170,6 +172,7 @@ async function refresh(): Promise<void> {
         search: state.search,
         categories: [...state.selected],
         limit: state.limit,
+        sort: state.sort,
       }),
       send<Stats>({ type: 'posts:stats' }),
     ]);
@@ -343,6 +346,7 @@ function mainRows(): Node[] {
   head.append(
     h('h1', 'title', names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved'),
     h('span', 'mono muted', countLabel()),
+    sortControl(),
   );
 
   if (names.length > 1) {
@@ -403,6 +407,41 @@ function mainRows(): Node[] {
   }
 
   return rows;
+}
+
+const SORT_LABELS: Record<SortKey, string> = {
+  saved: 'Save order',
+  newest: 'Newest post',
+  oldest: 'Oldest post',
+};
+
+/**
+ * Save order is the default because a library of saved things should be in the order you
+ * saved them. Instagram sends no save timestamp, so this is reconstructed from the order
+ * the feed lists them in — exact as an ordering, which is why the option is not called
+ * "Recently saved" with a date beside it.
+ */
+function sortControl(): HTMLElement {
+  const wrap = h('label', 'sort');
+  wrap.title =
+    'Instagram does not send a save date, only the order — newest saved first. ' +
+    'Save order preserves that; the other two use the post’s own publish date.';
+
+  const select = document.createElement('select');
+  for (const key of ['saved', 'newest', 'oldest'] as const) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = SORT_LABELS[key];
+    opt.selected = state.sort === key;
+    select.append(opt);
+  }
+  select.addEventListener('change', () => {
+    state.sort = select.value as SortKey;
+    refreshFromTop();
+  });
+
+  wrap.append(select);
+  return wrap;
 }
 
 /** `412` when it all fits, `200 / 412` when it doesn't — never a bare truncated count. */
@@ -609,10 +648,36 @@ function card(post: PostRecord): HTMLElement {
 
   const meta = h('div', 'meta');
   meta.append(chipFor(post.category), h('span', 'mono handle', post.handle));
-  if (post.savedAt) meta.append(h('span', 'mono date', fmtDate(post.savedAt)));
+
+  // Grid cards are tight, so only the publish date is on the face of them and the rest
+  // is on hover. The list view has the room to say which date is which.
+  if (state.view === 'list' && post.firstSeenAt) {
+    meta.append(h('span', 'mono added', `added ${fmtDate(post.firstSeenAt)}`));
+  }
+  if (post.postedAt) {
+    const date = h('span', 'mono date', fmtDate(post.postedAt));
+    date.title = dateDetail(post);
+    meta.append(date);
+  }
   el.append(meta);
 
   return el;
+}
+
+/**
+ * Both dates, named, plus why there isn't a third. Saying "saved 3 days ago" would be
+ * inventing a number Instagram never sent.
+ */
+function dateDetail(post: PostRecord): string {
+  const lines: string[] = [];
+  if (post.postedAt) lines.push(`Posted ${fmtLongDate(post.postedAt)}`);
+  lines.push(
+    post.firstSeenAt
+      ? `Added to this library ${fmtLongDate(post.firstSeenAt)}`
+      : 'Added to this library before it started recording that',
+  );
+  lines.push('Instagram sends no save date — only the order, which “Save order” follows.');
+  return lines.join('\n');
 }
 
 function chipFor(category: string | null): HTMLElement {
@@ -789,8 +854,23 @@ function hueFor(name: string): number {
   return hash;
 }
 
+/** Same-year dates drop the year; older ones keep it, so "12 Mar" is never ambiguous. */
 function fmtDate(ms: number): string {
-  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+function fmtLongDate(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 function fmtDuration(sec: number): string {

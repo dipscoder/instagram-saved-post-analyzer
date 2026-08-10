@@ -52,7 +52,7 @@ function scrape(root: ParentNode): CapturedPost[] {
       durationSec: null,
       audioTrackName: null,
       altText: alt || null,
-      savedAt: null,
+      postedAt: null,
     });
   }
 

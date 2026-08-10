@@ -1,6 +1,6 @@
 /** The record shape stored in IndexedDB, keyed on `shortcode`. */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface PostRecord {
   /** Primary key. Instagram's per-post code, e.g. "C8xK2mLp3qR". */
@@ -14,8 +14,26 @@ export interface PostRecord {
   durationSec: number | null;
   audioTrackName: string | null;
   altText: string | null;
-  /** Epoch ms. Instagram exposes the post's own timestamp, not when you saved it. */
-  savedAt: number | null;
+  /** Epoch ms the post itself was published. Instagram's `taken_at`. */
+  postedAt: number | null;
+
+  /**
+   * Epoch ms this extension first stored the post. Null for records that predate the
+   * field. Not the same thing as when you saved it — but for anything saved while the
+   * extension is installed, it is within a browse of it.
+   */
+  firstSeenAt: number | null;
+
+  /**
+   * Where the post sat in the saved feed, folded with which visit saw it.
+   *
+   * Instagram does not send a save *timestamp* anywhere in the saved feed. It does send
+   * the posts newest-saved first, which answers the same question for every purpose
+   * except putting a date on it. See background/order.ts for how the number is built.
+   * Sorts descending: highest is most recently saved. Null on records captured before
+   * the field existed, which sorts them last.
+   */
+  savedRank: number | null;
 
   /**
    * Epoch ms of the last time this post was seen *in the saved feed itself*.
@@ -60,14 +78,16 @@ export type CapturedPost = Pick<
   | 'durationSec'
   | 'audioTrackName'
   | 'altText'
-  | 'savedAt'
+  | 'postedAt'
 >;
 
-export function toRecord(p: CapturedPost): PostRecord {
+export function toRecord(p: CapturedPost, savedRank: number | null = null): PostRecord {
   return {
     ...p,
     // Capture only runs on the saved route now, so reaching here is the confirmation.
     seenInSavedFeed: Date.now(),
+    firstSeenAt: Date.now(),
+    savedRank,
     category: null,
     subcategory: null,
     tags: [],

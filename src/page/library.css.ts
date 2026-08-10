@@ -135,6 +135,19 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .title { font-size: 20px; font-weight: 560; letter-spacing: -0.01em; margin: 0; }
 
+.sort { margin-left: auto; display: flex; align-items: center; }
+.sort select {
+  appearance: none; font: inherit; font-size: 11.5px; color: var(--text-2);
+  padding: 5px 24px 5px 10px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--bg) no-repeat right 8px center;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-size: 4px 4px, 4px 4px;
+  background-position: right 12px center, right 8px center;
+  cursor: pointer; outline: none;
+}
+.sort select:hover, .sort select:focus { border-color: var(--accent); color: var(--accent); }
+
 .chips { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .chip {
   display: flex; align-items: center; gap: 6px; padding: 2.5px 7px;
@@ -241,7 +254,9 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .handle {
   color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.date { margin-left: auto; color: var(--text-3); flex: none; }
+.date { margin-left: auto; color: var(--text-3); flex: none; cursor: help; }
+.added { color: var(--text-3); flex: none; }
+.list .date { margin-left: 16px; }
 
 .cat {
   flex: none; padding: 1.5px 6px; border-radius: 4px; font-size: 10.5px; line-height: 1.5;

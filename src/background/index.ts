@@ -10,6 +10,7 @@
 import * as db from './db';
 import { Categorizer } from './categorize';
 import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
+import { reserveRanks } from './order';
 import { resetSpend } from './spend';
 import {
   clearKey,
@@ -85,7 +86,12 @@ chrome.runtime.onMessage.addListener((req: Request, _sender, sendResponse) => {
 async function handle(req: Request): Promise<unknown> {
   switch (req.type) {
     case 'posts:captured': {
-      const inserted = await db.putIfNew(req.posts.map((p: CapturedPost) => toRecord(p)));
+      // Posts arrive in feed order, which is save order — see background/order.ts. Ranks
+      // are reserved for the whole batch at once so a concurrent message can't interleave.
+      const ranks = await reserveRanks(req.pageId, req.posts.length);
+      const inserted = await db.putIfNew(
+        req.posts.map((p: CapturedPost, i) => toRecord(p, ranks[i] ?? null)),
+      );
       if (inserted > 0) {
         // Push the new total straight away so the library's counts and rows update as
         // you scroll, whether or not categorisation is about to run.
@@ -106,6 +112,7 @@ async function handle(req: Request): Promise<unknown> {
         search: req.search,
         categories: req.categories,
         limit: req.limit,
+        sort: req.sort,
       });
 
     case 'posts:stats': {

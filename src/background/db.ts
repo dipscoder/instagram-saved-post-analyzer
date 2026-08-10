@@ -6,10 +6,11 @@
  * doesn't evict this DB when disk pressure rises.
  */
 
-import type { PostRecord } from '../types';
+import type { SortKey } from '../messaging';
+import { SCHEMA_VERSION, type PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'posts';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -19,37 +20,71 @@ function open(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (ev) => {
       const db = req.result;
+      const from = ev.oldVersion || 0;
 
       if (!db.objectStoreNames.contains(STORE)) {
         // Keying on shortcode makes dedupe a property of the store rather than
         // something the write path has to remember to do.
         const store = db.createObjectStore(STORE, { keyPath: 'shortcode' });
         store.createIndex('category', 'category');
-        store.createIndex('savedAt', 'savedAt');
+        store.createIndex('postedAt', 'postedAt');
         store.createIndex('categorizedAt', 'categorizedAt');
       }
 
-      // v1 → v2: `seenInSavedFeed`. Left null on purpose — these records were captured
-      // before the capture layer was fenced to the saved grid, so we genuinely do not
-      // know whether they were saved. The first full sweep re-stamps the real ones and
-      // the rest can then be offered up for removal.
-      if ((ev.oldVersion || 0) < 2) {
-        const cursorReq = req.transaction?.objectStore(STORE).openCursor();
-        if (cursorReq) {
-          cursorReq.onsuccess = () => {
-            const cursor = cursorReq.result;
-            if (!cursor) return;
-            const rec = cursor.value as Partial<PostRecord>;
-            cursor.update({ ...rec, seenInSavedFeed: null, schemaVersion: 2 });
+      const store = req.transaction?.objectStore(STORE);
+      if (!store) return;
+
+      // v2 → v3 renamed the field the index was built on.
+      if (from > 0 && from < 3) {
+        if (store.indexNames.contains('savedAt')) store.deleteIndex('savedAt');
+        if (!store.indexNames.contains('postedAt')) store.createIndex('postedAt', 'postedAt');
+      }
+
+      if (from > 0 && from < SCHEMA_VERSION) {
+        const cursorReq = store.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (cursor) {
+            cursor.update(upgrade(cursor.value as Record<string, unknown>, from));
             cursor.continue();
-          };
-        }
+          }
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
   });
   return dbPromise;
+}
+
+/**
+ * One stored record, brought up to the current schema. Pure, so `npm run verify` can
+ * exercise it without a browser.
+ *
+ * Everything a migration cannot honestly know is left null rather than invented:
+ *
+ * - **v1 → v2, `seenInSavedFeed`.** These records were captured before the capture layer
+ *   was fenced to the saved grid, so we genuinely do not know whether they were saved.
+ *   The first full sweep re-stamps the real ones; the rest are then offered for removal.
+ * - **v2 → v3, `savedAt` → `postedAt`.** A rename, not a change of meaning — the value was
+ *   always the post's own timestamp. `firstSeenAt` and `savedRank` are null because we
+ *   never recorded either, and back-dating them from `postedAt` would be a lie that reads
+ *   like a fact.
+ */
+export function upgrade(rec: Record<string, unknown>, from: number): Record<string, unknown> {
+  const next = { ...rec };
+
+  if (from < 2) next['seenInSavedFeed'] = null;
+
+  if (from < 3) {
+    next['postedAt'] = next['postedAt'] ?? next['savedAt'] ?? null;
+    delete next['savedAt'];
+    next['firstSeenAt'] = null;
+    next['savedRank'] = null;
+  }
+
+  next['schemaVersion'] = SCHEMA_VERSION;
+  return next;
 }
 
 function tx(mode: IDBTransactionMode): Promise<IDBObjectStore> {
@@ -122,7 +157,7 @@ function backfill(existing: PostRecord, incoming: PostRecord): PostRecord | null
   fill('durationSec');
   fill('audioTrackName');
   fill('altText');
-  fill('savedAt');
+  fill('postedAt');
 
   return changed ? merged : null;
 }
@@ -164,7 +199,20 @@ export interface QueryOpts {
   search: string;
   categories: string[];
   limit: number;
+  sort: SortKey;
 }
+
+/**
+ * Save order first, because a library of saved things is a list of things you saved —
+ * ordering it by when the post happened to be published files a 2019 clip you saved
+ * yesterday at the very bottom. Records with no rank predate the field and sort last;
+ * post date breaks ties within them.
+ */
+const SORTS: Record<SortKey, (a: PostRecord, b: PostRecord) => number> = {
+  saved: (a, b) => (b.savedRank ?? 0) - (a.savedRank ?? 0) || (b.postedAt ?? 0) - (a.postedAt ?? 0),
+  newest: (a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0),
+  oldest: (a, b) => (a.postedAt ?? Infinity) - (b.postedAt ?? Infinity),
+};
 
 export interface QueryResult {
   posts: PostRecord[];
@@ -185,7 +233,7 @@ export async function query(opts: QueryOpts): Promise<QueryResult> {
     return matchesSearch(r, terms);
   });
 
-  filtered.sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
+  filtered.sort(SORTS[opts.sort] ?? SORTS.saved);
   return { posts: filtered.slice(0, opts.limit), total: filtered.length };
 }
 

@@ -133,7 +133,7 @@ function toCapturedPost(o: Json): CapturedPost | null {
     durationSec: num(o['video_duration']) ?? num(o['video_duration_seconds']) ?? null,
     audioTrackName: readAudioTrack(o),
     altText: str(o['accessibility_caption']) ?? null,
-    savedAt: readTimestamp(o),
+    postedAt: readTimestamp(o),
   };
 }
 

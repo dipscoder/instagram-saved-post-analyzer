@@ -31,10 +31,23 @@ export type MainWorldMessage =
 
 export type BridgeMessage = { wire: typeof WIRE; kind: 'bridge-ready' };
 
+/**
+ * `saved` is the order Instagram lists them in, newest-saved first — the closest thing to
+ * a save date that exists. The other two are the post's own timestamp.
+ */
+export type SortKey = 'saved' | 'newest' | 'oldest';
+
 /** content script / popup → service worker */
 export type Request =
-  | { type: 'posts:captured'; posts: CapturedPost[] }
-  | { type: 'posts:query'; search: string; categories: string[]; limit: number }
+  /** `pageId` identifies the visit, which is what makes feed order into save order. */
+  | { type: 'posts:captured'; posts: CapturedPost[]; pageId: string }
+  | {
+      type: 'posts:query';
+      search: string;
+      categories: string[];
+      limit: number;
+      sort: SortKey;
+    }
   | { type: 'posts:stats' }
   /** How many records a sweep started at `since` did not re-confirm. */
   | { type: 'posts:strays'; since: number }

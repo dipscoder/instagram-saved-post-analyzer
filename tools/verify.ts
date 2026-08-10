@@ -10,7 +10,8 @@
 
 import { extractPosts } from '../src/capture/extract';
 import { classifyByRules, normalizeCategory } from '../src/taxonomy';
-import { matchesSearch, tokenize } from '../src/background/db';
+import { matchesSearch, tokenize, upgrade } from '../src/background/db';
+import { reserveRanks } from '../src/background/order';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 
@@ -59,7 +60,7 @@ check('isVideo from media_type 2', a[0]?.isVideo === true);
 check('duration', a[0]?.durationSec === 47.3);
 check('hashtags parsed', JSON.stringify(a[0]?.hashtags) === '["recipe","food"]', a[0]?.hashtags);
 check('audio track', a[0]?.audioTrackName === 'Sunset — Nils', a[0]?.audioTrackName);
-check('savedAt ms', a[0]?.savedAt === 1722200000000, a[0]?.savedAt);
+check('postedAt ms', a[0]?.postedAt === 1722200000000, a[0]?.postedAt);
 check('permalink', a[0]?.permalink === 'https://www.instagram.com/p/C8xK2mLp3qR/');
 
 console.log('\nextractPosts — GraphQL shape (renamed field)');
@@ -157,7 +158,7 @@ console.log('\nsearch');
     durationSec: 47,
     audioTrackName: 'Sunset — Nils',
     altText: 'A bowl of noodles on a wooden table',
-    savedAt: null,
+    postedAt: null,
   });
   const indexed = { ...post, summary: 'Recipe for creamy pasta', category: 'Food & Recipes', subcategory: 'Dinner', tags: ['quick'] };
 
@@ -205,6 +206,56 @@ check('case-insensitive', normalizeCategory('travel') === 'Travel');
 check('half of ampersand pair', normalizeCategory('Fitness') === 'Fitness & Health');
 check('unknown → null', normalizeCategory('Sports') === null);
 check('null-safe', normalizeCategory(null) === null);
+
+console.log('\nrecord migration');
+{
+  const v1 = {
+    shortcode: 'C8xK2mLp3qR',
+    caption: 'kept',
+    savedAt: 1722200000000,
+    category: 'Travel',
+    categorizedAt: 1722300000000,
+    schemaVersion: 1,
+  };
+  const up = upgrade(v1, 1);
+
+  check('savedAt becomes postedAt', up['postedAt'] === 1722200000000, up['postedAt']);
+  check('the old key is gone', !('savedAt' in up));
+  check('categorisation is untouched', up['category'] === 'Travel' && up['caption'] === 'kept');
+  // Nothing here may be invented: we never recorded either, and back-dating firstSeenAt
+  // from postedAt would read like a fact.
+  check('firstSeenAt is null, not guessed', up['firstSeenAt'] === null);
+  check('savedRank is null, not guessed', up['savedRank'] === null);
+  check('seenInSavedFeed is null so the next sweep decides', up['seenInSavedFeed'] === null);
+  check('stamped to current schema', up['schemaVersion'] === 3, up['schemaVersion']);
+
+  const fromV2 = upgrade({ shortcode: 'x', savedAt: 5, seenInSavedFeed: 99 }, 2);
+  check('a v2 record keeps the stamp it already earned', fromV2['seenInSavedFeed'] === 99);
+  check('idempotent', upgrade(upgrade(v1, 1), 3)['postedAt'] === 1722200000000);
+}
+
+console.log('\nsave order');
+{
+  // Feed order is save order, but only within one visit; a later visit saw newer saves.
+  // The rank folds both so a single descending sort gets it right.
+  const store: Record<string, unknown> = {};
+  (globalThis as { chrome?: unknown }).chrome = {
+    storage: {
+      local: {
+        get: async (k: string) => ({ [k]: store[k] }),
+        set: async (patch: Record<string, unknown>) => void Object.assign(store, patch),
+      },
+    },
+  };
+
+  const backlog = await reserveRanks('visit-1', 3); // newest-saved first
+  const more = await reserveRanks('visit-1', 2); // further down the same feed
+  const later = await reserveRanks('visit-2', 1); // a post saved since, seen next visit
+
+  check('within a visit, feed order descends', backlog[0]! > backlog[1]! && backlog[1]! > backlog[2]!);
+  check('resuming the same visit continues where it stopped', more[0]! < backlog[2]!);
+  check('a later visit outranks the whole backlog', later[0]! > backlog[0]!, { later, backlog });
+}
 
 console.log('\nsettings migration');
 {

@@ -20,6 +20,13 @@ const IDLE_ROUNDS_BEFORE_STOP = 3;
 let rateLimited = false;
 const seen = new Set<string>();
 
+/**
+ * Identifies this page load to the worker. Posts arrive in feed order, which is save
+ * order, but only within a single visit — the worker needs to know where one visit ends
+ * and the next begins. See background/order.ts.
+ */
+const pageId = crypto.randomUUID();
+
 export function startBridge(): void {
   window.addEventListener('message', handleMessage);
 
@@ -63,7 +70,7 @@ async function ingest(posts: CapturedPost[]): Promise<void> {
   for (const p of fresh) seen.add(p.shortcode);
 
   try {
-    await send({ type: 'posts:captured', posts: fresh });
+    await send({ type: 'posts:captured', posts: fresh, pageId });
   } catch {
     // Service worker asleep or extension reloading; the tile will come round again.
     for (const p of fresh) seen.delete(p.shortcode);

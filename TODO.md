@@ -149,11 +149,11 @@ Filed after living with it. Each phase is one commit.
 - [x] Return the true match count and stop silently truncating at 200
 
 ## Phase 22 — Dates, and the order the library is in
-- [ ] `savedAt` is misnamed: it is the post's own timestamp. Rename to `postedAt`
-- [ ] Add `firstSeenAt` (when this extension first stored it) and show both
-- [ ] Instagram does not expose a save *timestamp*, but the feed is ordered newest-saved
+- [x] `savedAt` is misnamed: it is the post's own timestamp. Rename to `postedAt`
+- [x] Add `firstSeenAt` (when this extension first stored it) and show both
+- [x] Instagram does not expose a save *timestamp*, but the feed is ordered newest-saved
       first — capture that order as `savedRank` and make it the default sort
-- [ ] Sort control: Save order / Newest post / Oldest post
+- [x] Sort control: Save order / Newest post / Oldest post
 
 ## Phase 23 — The overlay is a view, not a takeover
 - [ ] One obvious segmented control: Library ↔ Instagram, replacing the quiet Hide button
