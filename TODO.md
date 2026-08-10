@@ -161,8 +161,12 @@ Filed after living with it. Each phase is one commit.
 - [x] `⌥/Alt + S` toggles, guarded so it never fires inside a text field
 
 ## Phase 24 — Visual pass
-- [ ] Calmer type scale, one accent, more restful spacing
-- [ ] Cards carry the information the new fields make available
+- [x] Five-step type scale, 4px spacing grid — no more sizes between 9px and 14px
+- [x] Accent moves from green to a desaturated indigo, shared by popup and library
+- [x] Category hues assigned by taxonomy position, not a name hash (which gave three
+      near-identical blues and nothing in the greens)
+- [x] Visible `:focus-visible` rings — the whole library is tab-reachable
+- [x] Cards: softer corners, hover surface that bleeds past the content, aligned gutters
 
 ## Phase 25 — Docs
 - [ ] ARCHITECTURE: capture scoping as a trust boundary of its own

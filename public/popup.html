@@ -4,32 +4,41 @@
     <meta charset="utf-8" />
     <title>Saved Index</title>
     <style>
+      /* Same tokens as the in-page library — see src/page/library.css.ts. */
       :root {
         --bg: #fff;
-        --bg-sunk: oklch(0.975 0.006 150);
-        --line: oklch(0.94 0.004 150);
-        --line-strong: oklch(0.90 0.004 150);
-        --text: oklch(0.24 0.005 150);
-        --text-2: oklch(0.48 0.005 150);
-        --text-3: oklch(0.62 0.005 150);
-        --accent: oklch(0.50 0.10 150);
-        --accent-wash: oklch(0.97 0.015 150);
+        --bg-sunk: oklch(0.976 0.004 265);
+        --line: oklch(0.935 0.004 265);
+        --line-strong: oklch(0.885 0.006 265);
+        --text: oklch(0.25 0.012 265);
+        --text-2: oklch(0.50 0.010 265);
+        --text-3: oklch(0.645 0.008 265);
+        --accent: oklch(0.52 0.095 265);
+        --accent-wash: oklch(0.965 0.018 265);
         --danger: oklch(0.55 0.16 25);
         --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: oklch(0.17 0.004 150);
-          --bg-sunk: oklch(0.21 0.004 150);
-          --line: oklch(0.24 0.004 150);
-          --line-strong: oklch(0.30 0.004 150);
-          --text: oklch(0.93 0.004 150);
-          --text-2: oklch(0.70 0.005 150);
-          --text-3: oklch(0.58 0.005 150);
-          --accent: oklch(0.74 0.11 150);
-          --accent-wash: oklch(0.24 0.02 150);
+          --bg: oklch(0.165 0.008 265);
+          --bg-sunk: oklch(0.205 0.008 265);
+          --line: oklch(0.255 0.008 265);
+          --line-strong: oklch(0.315 0.010 265);
+          --text: oklch(0.94 0.006 265);
+          --text-2: oklch(0.71 0.010 265);
+          --text-3: oklch(0.575 0.010 265);
+          --accent: oklch(0.775 0.095 265);
+          --accent-wash: oklch(0.255 0.030 265);
           --danger: oklch(0.72 0.13 25);
         }
+      }
+
+      /* Keyboard focus has to be visible; a ring rather than a border swap so nothing
+         shifts by a pixel when it appears. */
+      :where(button, input, select, a):focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 6px;
       }
 
       * { box-sizing: border-box; }

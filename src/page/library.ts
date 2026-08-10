@@ -905,11 +905,19 @@ function fmtUsd(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-/** Stable per-category hue so a chip keeps its colour across sessions. */
+/**
+ * An even sweep of the hue wheel, assigned by the category's position in the taxonomy.
+ *
+ * The previous version hashed the name, which spread the twelve categories at random —
+ * three near-identical blues, nothing in the greens, and no way to predict any of it. A
+ * fixed step gives every category a distinctly different chip while keeping the whole set
+ * evenly balanced. The offset just moves the first category off pure red. Chroma is set
+ * in CSS and kept low: the chips should be scannable, not loud.
+ */
 function hueFor(name: string): number {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
-  return hash;
+  const index = CATEGORY_NAMES.indexOf(name);
+  if (index < 0) return 0; // Uncategorized draws with no chroma anyway
+  return Math.round((index * 360) / CATEGORY_NAMES.length + 15) % 360;
 }
 
 /** Same-year dates drop the year; older ones keep it, so "12 Mar" is never ambiguous. */
