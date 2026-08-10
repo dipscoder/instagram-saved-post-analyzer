@@ -9,14 +9,28 @@
  * It yields a thinner record than interception (no duration, no audio track, caption
  * limited to the img alt text), which is exactly why it is a fallback and not the
  * primary path.
+ *
+ * It is also the bluntest instrument in the pipeline — every post link on the page looks
+ * alike — so it is fenced twice: it only runs on the saved route, and only inside the
+ * `<main>` element that holds the grid. Reading the whole document meant a profile page's
+ * grid and a permalink's "more from this creator" strip were scraped as if they had been
+ * saved.
  */
 
 import type { CapturedPost } from '../types';
+import { isSavedRoute } from '../routes';
 import { parseHashtags } from './extract';
 
 const POST_HREF = /^\/(?:p|reel|tv)\/([A-Za-z0-9_-]{5,})/;
 
-export function scrapeVisibleGrid(root: ParentNode = document): CapturedPost[] {
+/** Nothing, unless the saved grid is genuinely what is on screen. */
+export function scrapeSavedGrid(): CapturedPost[] {
+  if (!isSavedRoute()) return [];
+  const main = document.querySelector('main');
+  return main ? scrape(main) : [];
+}
+
+function scrape(root: ParentNode): CapturedPost[] {
   const found = new Map<string, CapturedPost>();
 
   for (const a of root.querySelectorAll<HTMLAnchorElement>('a[href^="/p/"], a[href^="/reel/"], a[href^="/tv/"]')) {

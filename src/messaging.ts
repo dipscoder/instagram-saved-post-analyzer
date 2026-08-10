@@ -14,8 +14,17 @@ export const WIRE = 'saved-index';
  */
 export const PORT = 'saved-index-events';
 
+/**
+ * One intercepted response body, plus whether its URL alone proved it was the saved feed.
+ * An untrusted payload is read only inside its saved-feed subtree — see capture/extract.
+ */
+export interface CapturedPayload {
+  json: unknown;
+  trusted: boolean;
+}
+
 export type MainWorldMessage =
-  | { wire: typeof WIRE; kind: 'captured'; payloads: unknown[] }
+  | { wire: typeof WIRE; kind: 'captured'; payloads: CapturedPayload[] }
   | { wire: typeof WIRE; kind: 'main-ready' }
   /** Instagram answered an API call with 429. Only the MAIN world can see this. */
   | { wire: typeof WIRE; kind: 'rate-limited' };
@@ -27,6 +36,9 @@ export type Request =
   | { type: 'posts:captured'; posts: CapturedPost[] }
   | { type: 'posts:query'; search: string; categories: string[]; limit: number }
   | { type: 'posts:stats' }
+  /** How many records a sweep started at `since` did not re-confirm. */
+  | { type: 'posts:strays'; since: number }
+  | { type: 'posts:prune'; since: number }
   | { type: 'index:start' }
   | { type: 'index:pause' }
   | { type: 'index:reindex' }

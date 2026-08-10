@@ -7,7 +7,8 @@
  */
 
 import { extractPosts } from './extract';
-import { scrapeVisibleGrid } from './dom-scrape';
+import { scrapeSavedGrid } from './dom-scrape';
+import { isSavedRoute } from '../routes';
 import { WIRE, send, type BridgeMessage, type MainWorldMessage } from '../messaging';
 import type { CapturedPost } from '../types';
 
@@ -28,7 +29,7 @@ export function startBridge(): void {
   window.postMessage(ready, window.location.origin);
 
   // Cover the case where the grid painted from memory with no network call at all.
-  setTimeout(() => void ingest(scrapeVisibleGrid()), 1500);
+  setTimeout(() => void ingest(scrapeSavedGrid()), 1500);
 }
 
 function handleMessage(ev: MessageEvent): void {
@@ -42,8 +43,15 @@ function handleMessage(ev: MessageEvent): void {
   }
   if (msg.kind !== 'captured') return;
 
+  // The outermost fence. A saved-feed response can only be an answer to the saved grid
+  // being on screen; anything arriving while you are on the home feed, a profile, or an
+  // open post is about content you were shown, not content you saved.
+  if (!isSavedRoute()) return;
+
   const posts: CapturedPost[] = [];
-  for (const payload of msg.payloads) posts.push(...extractPosts(payload));
+  for (const payload of msg.payloads) {
+    posts.push(...extractPosts(payload.json, payload.trusted ? 'any' : 'saved'));
+  }
   void ingest(posts);
 }
 
@@ -77,7 +85,12 @@ export type HarvestResult = { reason: 'complete' | 'stopped' | 'rate-limited'; f
  */
 export function startHarvest(): HarvestHandle {
   let stopped = false;
-  const before = seen.size;
+
+  // A sweep is also a census: every post still in the feed gets re-confirmed, which is
+  // what lets the worker tell a genuine save from a stray afterwards. The in-page dedupe
+  // would hide posts already seen this page-session from that count, so it starts empty.
+  seen.clear();
+  const before = 0;
 
   const done = (async (): Promise<HarvestResult> => {
     let idleRounds = 0;
@@ -92,7 +105,7 @@ export function startHarvest(): HarvestHandle {
       await sleep(SCROLL_MIN_MS + Math.random() * (SCROLL_MAX_MS - SCROLL_MIN_MS));
 
       // Pick up any tiles that rendered without a network call.
-      void ingest(scrapeVisibleGrid());
+      void ingest(scrapeSavedGrid());
 
       const grew = document.documentElement.scrollHeight > heightBefore;
       const foundMore = seen.size > countBefore;

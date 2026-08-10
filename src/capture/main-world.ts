@@ -12,20 +12,24 @@
  *      would starve the page of its own data.
  */
 
-import { WIRE, type MainWorldMessage } from '../messaging';
+import { WIRE, type CapturedPayload, type MainWorldMessage } from '../messaging';
 
-const URL_PATTERNS = [
-  /\/api\/v1\/feed\/saved/i,
-  /\/api\/v1\/collections\//i,
-  /\/graphql\/query/i,
-  /\/api\/graphql/i,
-];
+/** The URL alone proves this is the saved feed. The whole body can be trusted. */
+const SAVED_ENDPOINTS = [/\/api\/v1\/feed\/saved/i, /\/api\/v1\/collections\//i];
 
-/** GraphQL is one endpoint for the whole site, so URL alone says nothing. */
-const NEEDS_BODY_SNIFF = /graphql/i;
+/**
+ * One endpoint for the entire site — the home feed, explore, a profile grid and the
+ * related-posts strip all come back through here. The body has to earn it, and even then
+ * only the saved-feed subtree of it is read downstream.
+ */
+const GRAPHQL_ENDPOINTS = [/\/graphql\/query/i, /\/api\/graphql/i];
+
+function isSavedEndpoint(url: string): boolean {
+  return SAVED_ENDPOINTS.some((re) => re.test(url));
+}
 
 function urlMatches(url: string): boolean {
-  return URL_PATTERNS.some((re) => re.test(url));
+  return isSavedEndpoint(url) || GRAPHQL_ENDPOINTS.some((re) => re.test(url));
 }
 
 /**
@@ -39,13 +43,21 @@ function looksLikeMedia(text: string): boolean {
   return hasCode && hasOwner;
 }
 
+/**
+ * A JSON key naming the saved feed, holding an object or array. Deliberately the same
+ * condition the extractor scopes on, so a payload that passes here is one it can read —
+ * this is only here to skip the parse and the postMessage for the other 95% of GraphQL
+ * traffic on the page.
+ */
+const SAVED_HINT = /"[a-z0-9_]*saved[a-z0-9_]*"\s*:\s*[[{]/i;
+
 // The ISOLATED script may attach its listener after we've already seen a response,
 // so hold anything captured before the handshake and flush on 'bridge-ready'.
 let bridgeReady = false;
-const pending: unknown[] = [];
+const pending: CapturedPayload[] = [];
 const MAX_PENDING = 40;
 
-function emit(payload: unknown): void {
+function emit(payload: CapturedPayload): void {
   if (!bridgeReady) {
     if (pending.length < MAX_PENDING) pending.push(payload);
     return;
@@ -53,7 +65,7 @@ function emit(payload: unknown): void {
   post([payload]);
 }
 
-function post(payloads: unknown[]): void {
+function post(payloads: CapturedPayload[]): void {
   const msg: MainWorldMessage = { wire: WIRE, kind: 'captured', payloads };
   window.postMessage(msg, window.location.origin);
 }
@@ -70,8 +82,9 @@ window.addEventListener('message', (ev) => {
 
 function consider(url: string, text: string): void {
   try {
-    if (NEEDS_BODY_SNIFF.test(url) && !looksLikeMedia(text)) return;
-    emit(JSON.parse(text));
+    const trusted = isSavedEndpoint(url);
+    if (!trusted && !(looksLikeMedia(text) && SAVED_HINT.test(text))) return;
+    emit({ json: JSON.parse(text), trusted });
   } catch {
     // Not JSON, or a payload we can't read. Silently ignore — this is a passive tap.
   }

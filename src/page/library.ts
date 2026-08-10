@@ -37,6 +37,11 @@ interface State {
   explainOpen: boolean;
   /** True while the page is auto-scrolling to surface more posts. */
   harvesting: boolean;
+  /** When the current sweep began — the cutoff a stray is measured against. */
+  sweepStartedAt: number;
+  /** Records the last completed sweep did not find in the feed. */
+  strays: number;
+  straysDismissed: boolean;
 }
 
 const state: State = {
@@ -51,6 +56,9 @@ const state: State = {
   panelDismissed: false,
   explainOpen: false,
   harvesting: false,
+  sweepStartedAt: 0,
+  strays: 0,
+  straysDismissed: false,
 };
 
 let host: HTMLDivElement | null = null;
@@ -310,6 +318,9 @@ function railRow(name: string, count: number): HTMLElement {
 function mainRows(): Node[] {
   const rows: Node[] = [];
 
+  const strays = strayNotice();
+  if (strays) rows.push(strays);
+
   if (!state.panelDismissed) {
     const panel = indexPanel();
     if (panel) rows.push(panel);
@@ -387,6 +398,45 @@ function blockingState(): HTMLElement | null {
     });
   }
   return null;
+}
+
+/**
+ * Shown after a sweep that reached the end of the feed and still didn't account for
+ * everything in the library. Two things end up here: posts unsaved on Instagram since
+ * they were captured, and posts an older build picked up off the home feed or a profile
+ * grid. Removing them keeps the summaries already paid for on everything genuine.
+ */
+function strayNotice(): HTMLElement | null {
+  if (state.strays <= 0 || state.straysDismissed) return null;
+
+  const n = state.strays;
+  const el = h('div', 'notice');
+  el.append(
+    h('div', 'notice-body', [
+      h('div', 'notice-title', `${n} post${n === 1 ? '' : 's'} no longer in your saved feed`),
+      h(
+        'p',
+        '',
+        'A full sweep just finished and did not find ' +
+          (n === 1 ? 'this one' : 'these') +
+          ' — either unsaved since, or picked up from elsewhere on Instagram by an ' +
+          'earlier version. Everything still saved keeps its summary.',
+      ),
+    ]),
+  );
+
+  const actions = h('div', 'notice-actions');
+  const remove = h('button', 'pill', `Remove ${n}`);
+  remove.addEventListener('click', () => void removeStrays());
+  const keep = h('button', 'link', 'Keep them');
+  keep.addEventListener('click', () => {
+    state.straysDismissed = true;
+    render();
+  });
+  actions.append(remove, keep);
+  el.append(actions);
+
+  return el;
 }
 
 // --- the indexing panel -----------------------------------------------------
@@ -612,6 +662,9 @@ let harvest: HarvestHandle | null = null;
 function startHarvesting(): void {
   if (harvest) return;
   state.harvesting = true;
+  state.sweepStartedAt = Date.now();
+  state.strays = 0;
+  state.straysDismissed = false;
   harvest = startHarvest();
   void harvest.done.then((result) => {
     harvest = null;
@@ -623,9 +676,35 @@ function startHarvesting(): void {
         message: 'Instagram rate-limited the page, so scrolling stopped. Try again shortly.',
       };
     }
+    // Only a sweep that reached the end of the feed has seen everything still saved, so
+    // only that one can say what is missing. A stopped or throttled run has simply not
+    // got there yet.
+    if (result.reason === 'complete') void countStrays();
     void refresh();
   });
   render();
+}
+
+async function countStrays(): Promise<void> {
+  try {
+    const { count } = await send<{ count: number }>({
+      type: 'posts:strays',
+      since: state.sweepStartedAt,
+    });
+    state.strays = count;
+    render();
+  } catch {
+    // Worker restarting. Nothing is lost — the next completed sweep asks again.
+  }
+}
+
+async function removeStrays(): Promise<void> {
+  try {
+    await send({ type: 'posts:prune', since: state.sweepStartedAt });
+  } finally {
+    state.strays = 0;
+    await refresh();
+  }
 }
 
 function stopHarvesting(): void {

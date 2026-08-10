@@ -114,6 +114,15 @@ async function handle(req: Request): Promise<unknown> {
       return { ...s, lastRunAt: (lastRunAt as number | undefined) ?? null } satisfies Stats;
     }
 
+    case 'posts:strays':
+      return { count: (await db.strays(req.since)).length };
+
+    case 'posts:prune': {
+      const removed = await db.prune(req.since);
+      if (removed > 0) broadcast({ type: 'progress', progress: await categorizer.progress() });
+      return { removed };
+    }
+
     case 'index:start': {
       // The page owns scrolling, so starting a run means asking whichever tab is on the
       // saved grid to start harvesting too. A tab that isn't there simply never hears it.

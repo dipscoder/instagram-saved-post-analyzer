@@ -125,20 +125,20 @@ Filed after using the built extension. Each phase is one commit.
 Filed after living with it. Each phase is one commit.
 
 ## Phase 19 — Sound that stays on
-- [ ] Bug: unmute, then pause/play, and Instagram re-mutes the player
-- [ ] Hold the user's unmute intent per video and re-assert it, but *only* inside the
+- [x] Bug: unmute, then pause/play, and Instagram re-mutes the player
+- [x] Hold the user's unmute intent per video and re-assert it, but *only* inside the
       play/pause window — a deliberate mute during steady playback must stand
 
 ## Phase 20 — Only index what is actually saved
-- [ ] Bug: posts the user never saved were being captured and paid for. Three leaks:
+- [x] Bug: posts the user never saved were being captured and paid for. Three leaks:
       the GraphQL URL patterns match *every* Instagram query (home feed, explore,
       profile grids, related reels); the bridge ingests on every route, not just
       `/saved`; and the DOM fallback scrapes `a[href^="/p/"]` across the whole document
-- [ ] Route gate — capture only while the saved grid is the page
-- [ ] Payload scope — a GraphQL body only counts inside a container named for the saved
+- [x] Route gate — capture only while the saved grid is the page
+- [x] Payload scope — a GraphQL body only counts inside a container named for the saved
       feed; the REST saved/collections paths stay trusted whole
-- [ ] DOM fallback scoped to the saved grid, not the document
-- [ ] Stamp `seenInSavedFeed` on capture; after a *complete* sweep, offer to remove
+- [x] DOM fallback scoped to the saved grid, not the document
+- [x] Stamp `seenInSavedFeed` on capture; after a *complete* sweep, offer to remove
       records the feed no longer lists (strays and unsaved posts) — keeps the
       categorisation already paid for on the genuine ones
 

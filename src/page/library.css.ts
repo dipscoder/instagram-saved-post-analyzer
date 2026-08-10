@@ -143,6 +143,18 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 }
 .chip .x { opacity: 0.7; }
 
+/* --- stray notice --- */
+
+.notice {
+  flex: none; display: flex; align-items: flex-start; gap: 16px;
+  margin: 16px 28px 0; padding: 13px 15px;
+  border: 1px solid var(--accent-line); border-radius: 9px; background: var(--accent-wash);
+}
+.notice-body { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.notice-title { font-size: 12.5px; font-weight: 560; }
+.notice p { margin: 0; font-size: 11.5px; line-height: 1.55; color: var(--text-2); max-width: 62ch; }
+.notice-actions { flex: none; display: flex; align-items: center; gap: 12px; }
+
 /* --- indexing panel --- */
 
 .panel {

@@ -97,6 +97,51 @@ check('survives cycles-free deep nest', extractPosts({ x: { y: { z: rest } } }).
 check('empty payload', extractPosts({}).length === 0);
 check('null-safe', extractPosts(null).length === 0);
 
+console.log('\nextractPosts — saved scope (the reported "it indexed posts I never saved")');
+{
+  // What a profile grid / related-reels / home-feed GraphQL answer looks like: same
+  // endpoint, same media shape, no saved-feed container anywhere in it.
+  const notSaved = {
+    data: {
+      xdt_api__v1__feed__user_timeline: {
+        edges: [
+          {
+            node: {
+              code: 'ZZnotsaved1',
+              user: { username: 'same.creator' },
+              media_type: 2,
+              caption: { text: 'another reel by someone you saved once' },
+            },
+          },
+        ],
+      },
+    },
+  };
+
+  check('unsaved GraphQL payload yields nothing under saved scope',
+    extractPosts(notSaved, 'saved').length === 0, extractPosts(notSaved, 'saved'));
+  check('…and it is the scope rejecting it, not the extractor',
+    extractPosts(notSaved, 'any').length === 1);
+
+  check('saved GraphQL container still extracts', extractPosts(gql, 'saved').length === 1);
+  check('legacy edge_saved_media container is recognised',
+    extractPosts({ data: { user: { edge_saved_media: gql.data } } }, 'saved').length === 1);
+
+  // A media node carrying a saved-ish *scalar* must not open a container.
+  const flagOnly = {
+    data: {
+      xdt_api__v1__feed__user_timeline: {
+        edges: [{ node: { code: 'ZZnotsaved2', user: { username: 'x' }, has_viewer_saved: false } }],
+      },
+    },
+  };
+  check('a boolean like has_viewer_saved is not a container',
+    extractPosts(flagOnly, 'saved').length === 0);
+
+  check('REST saved payload is unaffected (it is URL-trusted, scope any)',
+    extractPosts(rest, 'any').length === 1);
+}
+
 console.log('\nclassifyByRules');
 const food = classifyByRules({
   caption: 'Miso butter pasta, preheat the oven, 2 tbsp miso',

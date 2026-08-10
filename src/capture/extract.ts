@@ -7,6 +7,21 @@
  * route, and renames the GraphQL field periodically. Rather than track those shapes, we
  * walk the whole tree and pick out anything that looks like a media item — a node with a
  * post code and an owner. That holds across both shapes and survives renames.
+ *
+ * ## Scope
+ *
+ * Walking the whole tree is right when the payload is *known* to be the saved feed, and
+ * badly wrong otherwise: Instagram answers the home feed, explore, a profile grid and the
+ * related-posts strip on the same GraphQL endpoint, and each of those is full of media
+ * nodes the user never saved. Indexing them is wrong twice over — a library full of posts
+ * you don't recognise, paid for by the caption.
+ *
+ * So a GraphQL body is walked under `'saved'` scope: only subtrees hanging off a key that
+ * *names* the saved feed are collected. That is one narrow assumption — Instagram's
+ * codegen'd field names describe what they return, and have through every rename we have
+ * seen (`edge_saved_media`, `xdt_api__v1__feed__saved__posts`) — and it is the only place
+ * in the pipeline that assumes anything about naming. The REST saved and collection paths
+ * prove themselves by URL and are walked whole.
  */
 
 import type { CapturedPost } from '../types';
@@ -16,8 +31,56 @@ type Json = Record<string, unknown>;
 const MAX_DEPTH = 12;
 const MAX_NODES = 20_000;
 
-export function extractPosts(payload: unknown): CapturedPost[] {
+/**
+ * `'any'` — the payload is already known to be the saved feed; take every media node.
+ * `'saved'` — take only what hangs off a saved-feed container.
+ */
+export type Scope = 'any' | 'saved';
+
+/** Matches `edge_saved_media`, `xdt_api__v1__feed__saved__posts`, `saved_posts`, … */
+const SAVED_CONTAINER = /saved/i;
+
+export function extractPosts(payload: unknown, scope: Scope = 'any'): CapturedPost[] {
   const found = new Map<string, CapturedPost>();
+  for (const root of scope === 'saved' ? savedContainers(payload) : [payload]) {
+    collect(root, found);
+  }
+  return [...found.values()];
+}
+
+/**
+ * Every value held under a key naming the saved feed. Booleans like `has_viewer_saved`
+ * are skipped by the object/array test, and an id list like `saved_collection_ids` is
+ * collected but yields nothing — neither contains a media node.
+ */
+function savedContainers(payload: unknown): unknown[] {
+  const roots: unknown[] = [];
+  let visited = 0;
+
+  const walk = (node: unknown, depth: number): void => {
+    if (node === null || typeof node !== 'object' || depth > MAX_DEPTH) return;
+    if (++visited > MAX_NODES) return;
+
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+
+    for (const [key, value] of Object.entries(node as Json)) {
+      if (value !== null && typeof value === 'object' && SAVED_CONTAINER.test(key)) {
+        // Everything below a saved container counts; no need to look for another inside.
+        roots.push(value);
+        continue;
+      }
+      walk(value, depth + 1);
+    }
+  };
+
+  walk(payload, 0);
+  return roots;
+}
+
+function collect(payload: unknown, found: Map<string, CapturedPost>): void {
   let visited = 0;
 
   const walk = (node: unknown, depth: number): void => {
@@ -42,7 +105,6 @@ export function extractPosts(payload: unknown): CapturedPost[] {
   };
 
   walk(payload, 0);
-  return [...found.values()];
 }
 
 function isMediaNode(o: Json): boolean {

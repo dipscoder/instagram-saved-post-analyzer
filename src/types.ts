@@ -1,6 +1,6 @@
 /** The record shape stored in IndexedDB, keyed on `shortcode`. */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface PostRecord {
   /** Primary key. Instagram's per-post code, e.g. "C8xK2mLp3qR". */
@@ -16,6 +16,17 @@ export interface PostRecord {
   altText: string | null;
   /** Epoch ms. Instagram exposes the post's own timestamp, not when you saved it. */
   savedAt: number | null;
+
+  /**
+   * Epoch ms of the last time this post was seen *in the saved feed itself*.
+   *
+   * Every capture path is now scoped to the saved grid, so arriving at all is the
+   * confirmation. A full sweep re-stamps everything still saved, which turns "what did
+   * this sweep not touch?" into the list of posts that have been unsaved since — or that
+   * were captured by an older build that read the whole page. Null on records that
+   * predate the field.
+   */
+  seenInSavedFeed: number | null;
 
   // --- categorisation output; null until a tier has run ---
   category: string | null;
@@ -55,6 +66,8 @@ export type CapturedPost = Pick<
 export function toRecord(p: CapturedPost): PostRecord {
   return {
     ...p,
+    // Capture only runs on the saved route now, so reaching here is the confirmation.
+    seenInSavedFeed: Date.now(),
     category: null,
     subcategory: null,
     tags: [],

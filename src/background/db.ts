@@ -9,7 +9,7 @@
 import type { PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'posts';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -17,8 +17,9 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 function open(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
+
       if (!db.objectStoreNames.contains(STORE)) {
         // Keying on shortcode makes dedupe a property of the store rather than
         // something the write path has to remember to do.
@@ -26,6 +27,23 @@ function open(): Promise<IDBDatabase> {
         store.createIndex('category', 'category');
         store.createIndex('savedAt', 'savedAt');
         store.createIndex('categorizedAt', 'categorizedAt');
+      }
+
+      // v1 → v2: `seenInSavedFeed`. Left null on purpose — these records were captured
+      // before the capture layer was fenced to the saved grid, so we genuinely do not
+      // know whether they were saved. The first full sweep re-stamps the real ones and
+      // the rest can then be offered up for removal.
+      if ((ev.oldVersion || 0) < 2) {
+        const cursorReq = req.transaction?.objectStore(STORE).openCursor();
+        if (cursorReq) {
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (!cursor) return;
+            const rec = cursor.value as Partial<PostRecord>;
+            cursor.update({ ...rec, seenInSavedFeed: null, schemaVersion: 2 });
+            cursor.continue();
+          };
+        }
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -46,9 +64,10 @@ function wrap<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 /**
- * Insert records that aren't already stored. Existing records are left completely
- * alone — re-capturing a post you already categorised must never wipe its summary.
- * Returns how many were new.
+ * Insert records that aren't already stored. An existing record keeps everything it
+ * already has — re-capturing a post you already categorised must never wipe its summary —
+ * but its `seenInSavedFeed` stamp is always refreshed, because seeing it again is the
+ * evidence that it is still saved. Returns how many were new.
  */
 export async function putIfNew(records: PostRecord[]): Promise<number> {
   if (!records.length) return 0;
@@ -66,8 +85,8 @@ export async function putIfNew(records: PostRecord[]): Promise<number> {
         if (existing) {
           // Interception carries fields the DOM fallback can't see. Fill the gaps
           // without touching anything already set.
-          const merged = backfill(existing, rec);
-          if (merged) store.put(merged);
+          const merged = backfill(existing, rec) ?? existing;
+          store.put({ ...merged, seenInSavedFeed: rec.seenInSavedFeed });
           return;
         }
         store.put(rec);
@@ -182,6 +201,34 @@ export async function stats(): Promise<{
   }
 
   return { total: records.length, categorized, byCategory };
+}
+
+/**
+ * Records the saved feed did not list during a sweep that reached the end of it.
+ *
+ * Two kinds land here and both should go: posts unsaved on Instagram since they were
+ * captured, and posts an older build swept up from the home feed, a profile grid or a
+ * related-posts strip. `since` must be the moment that sweep *started*, and the caller
+ * must only ask after the sweep completed — an interrupted one has simply not reached
+ * the rest of the feed yet, and pruning on it would delete posts that are still saved.
+ */
+export async function strays(since: number): Promise<PostRecord[]> {
+  const records = await all();
+  return records.filter((r) => (r.seenInSavedFeed ?? 0) < since);
+}
+
+export async function prune(since: number): Promise<number> {
+  const doomed = await strays(since);
+  if (!doomed.length) return 0;
+
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const t = db.transaction(STORE, 'readwrite');
+    const store = t.objectStore(STORE);
+    for (const r of doomed) store.delete(r.shortcode);
+    t.oncomplete = () => resolve(doomed.length);
+    t.onerror = () => reject(t.error ?? new Error('prune failed'));
+  });
 }
 
 /** Clears categorisation so a re-index runs from scratch. Captured data is kept. */
