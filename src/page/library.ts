@@ -16,6 +16,7 @@
 
 import { send, subscribe, type Broadcast, type SortKey, type Stats } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
+import { isFullSavedFeed } from '../routes';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
 import { IDLE_PROGRESS, type IndexProgress, type PostRecord } from '../types';
 import { styles } from './library.css';
@@ -829,10 +830,11 @@ function startHarvesting(): void {
         message: 'Instagram rate-limited the page, so scrolling stopped. Try again shortly.',
       };
     }
-    // Only a sweep that reached the end of the feed has seen everything still saved, so
-    // only that one can say what is missing. A stopped or throttled run has simply not
-    // got there yet.
-    if (result.reason === 'complete') void countStrays();
+    // Two conditions, and both are load-bearing. The sweep must have reached the end of
+    // the feed — a stopped or throttled run has simply not got there yet — and it must
+    // have been sweeping the *whole* feed rather than one collection, or everything
+    // outside that collection would look unsaved.
+    if (result.reason === 'complete' && isFullSavedFeed()) void countStrays();
     void refresh();
   });
   render();

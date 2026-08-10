@@ -12,6 +12,7 @@ import { extractPosts } from '../src/capture/extract';
 import { classifyByRules, normalizeCategory } from '../src/taxonomy';
 import { matchesSearch, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
+import { isFullSavedFeed, isSavedRoute } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 
@@ -206,6 +207,24 @@ check('case-insensitive', normalizeCategory('travel') === 'Travel');
 check('half of ampersand pair', normalizeCategory('Fitness') === 'Fitness & Health');
 check('unknown → null', normalizeCategory('Sports') === null);
 check('null-safe', normalizeCategory(null) === null);
+
+console.log('\nroute fences');
+{
+  check('saved grid captures', isSavedRoute('/dips/saved/'));
+  check('a collection captures too', isSavedRoute('/dips/saved/recipes/17925/'));
+  check('home feed does not', !isSavedRoute('/'));
+  check('an open post does not', !isSavedRoute('/p/C8xK2mLp3qR/'));
+  check('a reel does not', !isSavedRoute('/reel/C8xK2mLp3qR/'));
+  check('a profile does not', !isSavedRoute('/cafe.oshi/'));
+  check('explore does not', !isSavedRoute('/explore/'));
+
+  // A census may only run where the sweep can see *everything* saved. Getting this wrong
+  // offers to delete every post outside the collection being viewed.
+  check('full feed may take a census', isFullSavedFeed('/dips/saved/'));
+  check('all-posts may take a census', isFullSavedFeed('/dips/saved/all-posts/'));
+  check('a collection may NOT', !isFullSavedFeed('/dips/saved/recipes/17925/'));
+  check('an unrecognised saved path may NOT', !isFullSavedFeed('/dips/saved/x/y/z/'));
+}
 
 console.log('\nrecord migration');
 {

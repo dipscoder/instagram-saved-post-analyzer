@@ -12,3 +12,20 @@
 export function isSavedRoute(pathname: string = location.pathname): boolean {
   return /\/saved(\/|$)/.test(pathname);
 }
+
+/**
+ * The view that lists *every* saved post, as opposed to one collection.
+ *
+ * Capturing is fine anywhere under `/saved` — a collection holds saved posts like any
+ * other. Taking a **census** is not: a sweep of one collection reaches the end of that
+ * collection, and if that counted as "I have now seen everything you saved", the rest of
+ * the library would look like it had been unsaved and be offered for deletion.
+ *
+ * So this is deliberately a whitelist of the two paths known to be the full feed, and
+ * anything unrecognised is treated as a collection. The cost of being wrong that way is
+ * that the stray notice doesn't appear; the cost of being wrong the other way is deleting
+ * posts the user still has saved.
+ */
+export function isFullSavedFeed(pathname: string = location.pathname): boolean {
+  return /\/saved\/?$/.test(pathname) || /\/saved\/all-posts\/?$/.test(pathname);
+}
