@@ -25,6 +25,10 @@ const PAGE_SIZE = 200;
 
 interface State {
   posts: PostRecord[];
+  /** Matches before the page limit. `posts.length` is only what is on screen. */
+  matches: number;
+  /** Grows by a page at a time; back to one page whenever the query changes. */
+  limit: number;
   stats: Stats;
   progress: IndexProgress;
   search: string;
@@ -46,6 +50,8 @@ interface State {
 
 const state: State = {
   posts: [],
+  matches: 0,
+  limit: PAGE_SIZE,
   stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null },
   progress: IDLE_PROGRESS,
   search: '',
@@ -151,21 +157,24 @@ let resetScroll = false;
 
 function refreshFromTop(): void {
   resetScroll = true;
+  // A new query is a new list; keeping page 3 of the old one makes no sense.
+  state.limit = PAGE_SIZE;
   void refresh();
 }
 
 async function refresh(): Promise<void> {
   try {
-    const [posts, stats] = await Promise.all([
-      send<PostRecord[]>({
+    const [result, stats] = await Promise.all([
+      send<{ posts: PostRecord[]; total: number }>({
         type: 'posts:query',
         search: state.search,
         categories: [...state.selected],
-        limit: PAGE_SIZE,
+        limit: state.limit,
       }),
       send<Stats>({ type: 'posts:stats' }),
     ]);
-    state.posts = posts;
+    state.posts = result.posts;
+    state.matches = result.total;
     state.stats = stats;
   } catch {
     // Service worker restarting; the next progress push will retry.
@@ -186,7 +195,10 @@ function buildShell(): HTMLElement {
 
   const search = document.createElement('input');
   search.className = 'search';
-  search.placeholder = 'Search summaries, handles, captions';
+  search.placeholder = 'Search summaries, captions, tags, handles, alt text';
+  search.title =
+    'Every word has to match, in any order. Searches the summary, caption, category, ' +
+    'subcategory, tags, hashtags, handle, alt text and audio track.';
   search.addEventListener('input', () => {
     state.search = search.value;
     clearTimeout(searchDebounce);
@@ -330,7 +342,7 @@ function mainRows(): Node[] {
   const names = [...state.selected];
   head.append(
     h('h1', 'title', names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved'),
-    h('span', 'mono muted', String(state.posts.length)),
+    h('span', 'mono muted', countLabel()),
   );
 
   if (names.length > 1) {
@@ -378,7 +390,25 @@ function mainRows(): Node[] {
   const list = h('div', state.view === 'grid' ? 'grid' : 'list');
   for (const post of state.posts) list.append(card(post));
   rows.push(list);
+
+  if (state.matches > state.posts.length) {
+    const more = h('div', 'more');
+    const btn = h('button', 'ghost', `Show ${Math.min(PAGE_SIZE, state.matches - state.posts.length)} more`);
+    btn.addEventListener('click', () => {
+      state.limit += PAGE_SIZE;
+      void refresh();
+    });
+    more.append(btn, h('span', 'mono muted', `${state.posts.length} of ${state.matches}`));
+    rows.push(more);
+  }
+
   return rows;
+}
+
+/** `412` when it all fits, `200 / 412` when it doesn't — never a bare truncated count. */
+function countLabel(): string {
+  if (state.matches > state.posts.length) return `${state.posts.length} / ${state.matches}`;
+  return String(state.matches);
 }
 
 /** The one full-panel state that outranks the grid, or null to show results. */

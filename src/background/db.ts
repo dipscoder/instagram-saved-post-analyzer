@@ -166,8 +166,14 @@ export interface QueryOpts {
   limit: number;
 }
 
-export async function query(opts: QueryOpts): Promise<PostRecord[]> {
-  const needle = opts.search.trim().toLowerCase();
+export interface QueryResult {
+  posts: PostRecord[];
+  /** Matches before the limit, so the UI can say "200 of 412" instead of quietly lying. */
+  total: number;
+}
+
+export async function query(opts: QueryOpts): Promise<QueryResult> {
+  const terms = tokenize(opts.search);
   const wanted = new Set(opts.categories);
   const records = await all();
 
@@ -176,13 +182,53 @@ export async function query(opts: QueryOpts): Promise<PostRecord[]> {
       const cat = r.category ?? 'Uncategorized';
       if (!wanted.has(cat)) return false;
     }
-    if (!needle) return true;
-    const hay = `${r.summary ?? ''} ${r.caption} ${r.handle} ${r.category ?? ''} ${r.tags.join(' ')}`;
-    return hay.toLowerCase().includes(needle);
+    return matchesSearch(r, terms);
   });
 
   filtered.sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
-  return filtered.slice(0, opts.limit);
+  return { posts: filtered.slice(0, opts.limit), total: filtered.length };
+}
+
+/**
+ * Every term has to appear somewhere, in any order. A single `includes` over the joined
+ * text meant "pasta recipe" missed a post summarised "recipe for creamy pasta" — which is
+ * how people actually type, so it missed constantly.
+ */
+export function tokenize(search: string): string[] {
+  return search
+    .toLowerCase()
+    .split(/\s+/)
+    // Hashtags are stored bare, so typing "#recipe" should still find them.
+    .map((t) => t.replace(/^#/, '').trim())
+    .filter(Boolean);
+}
+
+export function matchesSearch(r: PostRecord, terms: string[]): boolean {
+  if (!terms.length) return true;
+  const hay = haystack(r);
+  return terms.every((t) => hay.includes(t));
+}
+
+/**
+ * Everything a post carries that someone might plausibly remember about it. Alt text and
+ * the audio track earn their place: on a reel with no caption they are often the only
+ * text that exists, and "that one with the Nils track" is a real way to look for a post.
+ */
+function haystack(r: PostRecord): string {
+  return [
+    r.summary,
+    r.caption,
+    r.handle,
+    r.category,
+    r.subcategory,
+    r.tags.join(' '),
+    r.hashtags.join(' '),
+    r.altText,
+    r.audioTrackName,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 }
 
 export async function stats(): Promise<{

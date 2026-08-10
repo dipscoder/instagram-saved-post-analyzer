@@ -143,10 +143,10 @@ Filed after living with it. Each phase is one commit.
       categorisation already paid for on the genuine ones
 
 ## Phase 21 — Search that finds things
-- [ ] Multi-word queries AND together instead of matching one literal substring
-- [ ] Search subcategory, hashtags, alt text and audio track too — not just summary,
+- [x] Multi-word queries AND together instead of matching one literal substring
+- [x] Search subcategory, hashtags, alt text and audio track too — not just summary,
       caption, handle, category, tags
-- [ ] Return the true match count and stop silently truncating at 200
+- [x] Return the true match count and stop silently truncating at 200
 
 ## Phase 22 — Dates, and the order the library is in
 - [ ] `savedAt` is misnamed: it is the post's own timestamp. Rename to `postedAt`

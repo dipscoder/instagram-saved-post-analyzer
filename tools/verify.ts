@@ -10,7 +10,9 @@
 
 import { extractPosts } from '../src/capture/extract';
 import { classifyByRules, normalizeCategory } from '../src/taxonomy';
+import { matchesSearch, tokenize } from '../src/background/db';
 import { migrate } from '../src/background/settings';
+import { toRecord } from '../src/types';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -140,6 +142,40 @@ console.log('\nextractPosts — saved scope (the reported "it indexed posts I ne
 
   check('REST saved payload is unaffected (it is URL-trusted, scope any)',
     extractPosts(rest, 'any').length === 1);
+}
+
+console.log('\nsearch');
+{
+  const post = toRecord({
+    shortcode: 'C8xK2mLp3qR',
+    permalink: 'https://www.instagram.com/p/C8xK2mLp3qR/',
+    handle: '@cafe.oshi',
+    caption: 'Miso butter pasta in 15 minutes #recipe #weeknight',
+    hashtags: ['recipe', 'weeknight'],
+    thumbnailUrl: '',
+    isVideo: true,
+    durationSec: 47,
+    audioTrackName: 'Sunset — Nils',
+    altText: 'A bowl of noodles on a wooden table',
+    savedAt: null,
+  });
+  const indexed = { ...post, summary: 'Recipe for creamy pasta', category: 'Food & Recipes', subcategory: 'Dinner', tags: ['quick'] };
+
+  const hit = (q: string) => matchesSearch(indexed, tokenize(q));
+
+  check('single term', hit('pasta'));
+  // The old single-substring match failed this: the words are in the other order.
+  check('words match in any order', hit('pasta recipe'));
+  check('every word has to match', !hit('pasta risotto'));
+  check('finds by subcategory', hit('dinner'));
+  check('finds by hashtag, with or without the #', hit('weeknight') && hit('#weeknight'));
+  check('finds by alt text', hit('noodles'));
+  check('finds by audio track', hit('nils'));
+  check('finds by handle', hit('oshi'));
+  check('empty query matches everything', hit('') && hit('   '));
+
+  // An uncategorised post is still findable by what Instagram gave us.
+  check('works before categorisation', matchesSearch(post, tokenize('miso butter')));
 }
 
 console.log('\nclassifyByRules');

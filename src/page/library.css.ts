@@ -262,6 +262,11 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
   font-weight: 450;
 }
 
+.more {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 4px 28px 36px;
+}
+
 /* --- empty / error --- */
 
 .empty {
