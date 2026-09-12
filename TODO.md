@@ -1,11 +1,15 @@
 # TODO — Saved Index
 
-Ordered. Each phase is one commit. `[x]` = done and committed.
+Ordered delivery record. `[x]` = implemented; use Git history for exact commit boundaries.
+Start at [`PROJECT_INDEX.md`](PROJECT_INDEX.md) for the current state and file map. The
+small remaining backlog is grouped at the end of this file.
 
 ## Phase 0 — Scaffold
 - [x] `package.json`, `tsconfig.json`, `build.mjs` (esbuild, 4 entry points)
 - [x] `.gitignore`, `git init`
-- [x] `manifest.json` — MV3, two content scripts (MAIN + ISOLATED), web_accessible_resources
+- [x] `manifest.json` — MV3, two content scripts (MAIN + ISOLATED)
+      (`web_accessible_resources` was removed in Phase 30 — a manifest-declared MAIN-world
+      script does not need it, and it let instagram.com fingerprint the extension)
 
 ## Phase 1 — Schema + taxonomy
 - [x] `src/types.ts` — PostRecord incl. nullable `transcript` / `ocrText` / `embedding` / `perceptualHash`
@@ -20,7 +24,8 @@ Ordered. Each phase is one commit. `[x]` = done and committed.
 - [x] Auto-scroll harvester: randomised 800–2000 ms, halt on 429
 
 ## Phase 3 — Storage
-- [x] `src/background/db.ts` — IndexedDB, keyPath `shortcode`, indexes on category/savedAt/categorizedAt
+- [x] `src/background/db.ts` — IndexedDB, keyPath `shortcode`, indexes on
+      category/postedAt/categorizedAt (`savedAt` renamed in Phase 22)
 - [x] `putIfNew` — dedupe by shortcode, never clobber a categorised record
 - [x] `src/background/settings.ts` — storage.local + `setAccessLevel({TRUSTED_CONTEXTS})` on every SW start
 
@@ -174,16 +179,149 @@ Filed after living with it. Each phase is one commit.
 
 ---
 
+# Round 4 — hardening pass
+
+A full audit across capture, storage, categorisation, providers, both UIs and the video
+layer, plus the free-tier persistence question. Findings were verified against the code
+before being acted on.
+
+## Phase 26 — The ledger (answers "stop paying for the same post twice")
+- [x] Evaluated the managed options first. Supabase pauses free projects after a week of
+      inactivity; Turso is mid-pivot with guarantees scoped to paying customers; Cloudflare
+      D1 needs a Worker, which makes "there is no server in this project" false; Firestore
+      Spark's 20K writes/day cap is consumed by a single 20k-post first sync. None of them
+      fixed the actual leak, which was local.
+- [x] `src/background/ledger.ts` — split the store along the line that matters: `posts` is
+      a disposable view, `analysis` is work that was bought. `prune` and `resetCategories`
+      may not touch the second
+- [x] `src/hash.ts` + `inputHash` — a verdict records a digest of the exact text the model
+      was shown, so "is this still valid?" is a comparison rather than a guess
+- [x] `TAXONOMY_HASH` derived from the definitions at load, never hand-bumped, pinned in
+      `verify.ts` so a taxonomy edit that re-bills every library is a line in the diff
+- [x] `index:quote` — Re-index states what it will actually charge, then confirms
+- [x] Export / import as a JSON file, via a Blob from the popup — no new permission
+- [x] `markUnclassifiable` is no longer terminal: banked as `skipped`, which is deliberately
+      never reused, so a re-index retries what was usually just an expired thumbnail
+
+## Phase 27 — Money and correctness in the categoriser
+- [x] Resume was a no-op — `cancelled` was cleared *after* the early return
+- [x] Model-chosen `r.id` indexed the batch array unvalidated: floats, negatives and repeats
+      all accepted, so one response could file 25 posts under one neighbour's answer
+- [x] `applyResult` coerces every field — `tags: "a, b"` reached `.map` on a string, threw,
+      and ended the run with a TypeError after the batch had been paid for
+- [x] A billed response survives a storage failure; a network `TypeError` is retryable and
+      sets the `offline` phase that was declared and never used
+- [x] `retry-after` is honoured; three retries no longer burn 7s of a 60s cooldown
+- [x] Unanswered posts are bounded, so a model that answers for part of a batch cannot
+      re-bill the remainder every round
+- [x] Thumbnail fetch: CDN allowlist, size cap, timeout
+
+## Phase 28 — Capture, storage and ordering
+- [x] `isSavedRoute` was unanchored — `/explore/tags/saved/` passed both fences, so a
+      hashtag grid could be captured as saved posts *and* counted as a census of them
+- [x] A stalled load looked identical to end-of-feed; the terminal round now pays for a
+      settle before authorising deletion. Sweeps also latch their starting route
+- [x] The 429 latch is per-sweep, not per-tab — one rate-limit no longer disables Index now
+      for the life of the page
+- [x] `main-ready` closes the handshake in both directions
+- [x] Resident read cache: `getAll()` on every keystroke, every stat and every census
+      became one read per worker wake, with the haystack memoised
+- [x] `savedRank` is backfillable — every migrated record was scoring 0 and sorting last
+      forever under the default sort
+- [x] One cursor per page load, so two open saved tabs stop resetting each other's session
+      and inverting the library
+- [x] `resetCategories` runs in one transaction; the read-modify-write could revert a
+      `seenInSavedFeed` stamp and manufacture a false stray census
+- [x] Migration fills every field the schema promises; `onblocked`; promise-cached open
+
+## Phase 29 — Providers
+- [x] Claude Sonnet 5 was priced at Sonnet 4.6's $3/$15 — it is $2/$10, a 50% over-report
+      on a figure the docs sell as metered rather than estimated
+- [x] Gemini's `thoughtsTokenCount` is billed at the output rate and was never counted
+- [x] Add GPT-5.6 Luna and Terra through the reasoning-aware Responses API; keep 4o on its
+      proven Chat Completions path so existing selections do not change underneath users
+- [x] Add Gemini 3.8 Flash with low thinking and an automatic switch from its 2026
+      introductory price to the announced 2027 standard price
+- [x] Make Claude Sonnet 5's adaptive thinking explicit at low effort instead of silently
+      accepting its high-effort default for a short classification task
+- [x] A non-JSON 200 (captive portal, proxy) is a retryable ProviderError, not a raw
+      SyntaxError shown verbatim
+- [x] `redact()` runs before truncation, so a key straddling character 400 cannot survive
+      as a fragment
+- [x] Unknown provider/model ids are clamped on read — an unknown model made `usdFor`
+      return 0, so real calls were billed while the UI reported $0.00
+
+## Phase 30 — The two UIs
+- [x] **The $0.00 button.** The finished-state primary routed straight to `index:reindex`,
+      unconfirmed, under a "left, at most" readout that reads `pending` — which is 0 in
+      exactly that state. ~$7.90 on a 20k library, one click
+- [x] `[hidden]` never worked (author `display:flex` beats the UA rule), so the second key
+      field sat permanently on screen and Replace looked broken
+- [x] Toggles were `<div>`s: unfocusable, unannounced, keyboard-dead — including the one
+      that stops the extension spending money automatically
+- [x] Dark-mode primary button was white-on-lavender at 2.05:1; `--text-3` was 3.30:1 and
+      carried every money label and both destructive links
+- [x] One five-step type scale across popup and library; hit areas to 24px
+- [x] Library: worker-unreachable no longer renders as "you have nothing saved"; query
+      generation guard; list rebuilt only when it changed; Escape dismisses; Instagram
+      goes `inert` behind the overlay; `aria-live` on the counts
+- [x] Search folds diacritics, debounces past its own round trip, and skips the stats
+      request it never needed
+- [x] Video: arrow keys no longer steal story and carousel navigation; fullscreen keeps
+      controls; retarget on scroll; the bar stays clear of Instagram's reel chrome
+- [x] `web_accessible_resources` removed — unnecessary for a manifest-declared MAIN-world
+      script, and it let the page confirm the extension is installed
+
+## Phase 31 — Tests and docs
+- [x] `verify.ts` 61 → 118 checks: route anchoring, hash stability, the pinned taxonomy
+      hash, ledger freshness, migration completeness, diacritic folding, two-tab ordering
+- [x] `CLAUDE.md` — orientation for a new session: the five invariants, the trust
+      boundary, and the deliberate oddities that look like bugs
+- [x] `PROJECT_INDEX.md` — canonical reading order, code map, live-smoke checklist, and
+      concise handoff state for humans and coding agents
+- [x] ARCHITECTURE §3b — the ledger; README — corrected cost figure ($0.37 → $0.40) and
+      the honest framing that it is a typical price, not a ceiling
+
+## Phase 32 — Media resilience and visual redesign
+- [x] Fresh saved-feed captures replace expired Instagram CDN URLs without touching paid
+      summaries, categories, first-seen dates, or established save order
+- [x] Broken previews render an accessible, intentional placeholder instead of the
+      browser's broken-image icon and full alt-text spill
+- [x] DOM capture prefers the browser-selected `currentSrc`; untrusted media URLs are
+      bounded and restricted to Instagram-owned HTTPS hosts before storage or model use
+- [x] Library redesigned around a search-first header, structured navigation, responsive
+      surfaced cards, restrained category colour, and clearer detail/indexing states
+- [x] Popup redesigned with one visual hierarchy, compact setup copy, grouped statistics,
+      clearer key actions, and accessible light/dark contrast
+- [x] New reproducible indexed-bookmark icon at 16, 48, and 128 px
+
+---
+
+## Not done — needs the user
+
+- [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,
+      including an old build configuration and design artifact. It is removed from the
+      current tree; history cleanup does not make an exposed credential safe. Revoke it at
+      the provider.
+
 ## Next, if this gets used in anger
 
-- [ ] Post detail view — summary beside the video, "Change category" (design §05)
-- [ ] Virtualised grid: the library renders up to 200 rows at a time; past a few thousand
-      posts that wants windowing
-- [ ] `db.all()` is read fully on every query and every categoriser round — fine at a few
-      thousand posts, wants an index-backed cursor beyond that
-- [ ] Offline state: detect `navigator.onLine` and show the design's offline card with
-      auto-retry
-- [ ] Export the library as JSON/CSV
+- [x] Post detail view — metadata, caption, explicit Instagram link, back action, and a
+      confirmed per-post re-index that bypasses cached/rule verdicts
+- [x] Fixed indexing snapshot — a run processes exactly the pending shortcodes detected at
+      start; new posts found by auto-scroll wait for the next run, across worker restarts
+- [x] Auto-scroll lifecycle — natural completion clears worker state; quick pause/resume
+      cannot let an older sweep stop a newer one
+- [x] Verification expanded to 145 checks for carousel scoping, ambiguous rules,
+      model-output coercion, current model availability, price schedules, and request contracts
+- [ ] Virtualised grid: the library renders up to 200 rows at a time, and now skips the
+      rebuild when nothing changed — but past a few thousand rows it still wants windowing
+- [ ] The resident cache (Phase 28) removed the per-keystroke full read, at the cost of
+      holding ~30 MB for a 20k library. An index-backed cursor would trade that back
+- [ ] Offline: the `offline` phase is now set on a network failure, but nothing yet watches
+      `navigator.onLine` to resume automatically
+- [x] Export the library — done as the ledger export in Phase 26 (verdicts, not posts;
+      the posts themselves are reproducible by scrolling)
 - [ ] Collections — Instagram's saved posts can be grouped; currently flattened
 
 ## Deliberately out of scope

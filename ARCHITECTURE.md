@@ -4,6 +4,10 @@ A Chrome MV3 extension (TypeScript, unpacked) that turns Instagram's blind saved
 grid into a searchable, AI-categorised library, and gives Instagram videos real seek
 controls.
 
+For the documentation reading order, current implementation status, code ownership, and
+handoff checklist, start with [`PROJECT_INDEX.md`](PROJECT_INDEX.md). This document is the
+technical source of truth for architecture and design decisions.
+
 Two surfaces, per `design/Saved Index - Journey v2.dc.html`:
 
 - **Popup** (380×560) — connect a provider, pick a model, paste a key, run/pause indexing.
@@ -41,9 +45,9 @@ that call, any script on instagram.com in the ISOLATED world could read the key.
 called on every startup, not just install, because the setting is per-storage-area and
 cheap to re-assert.
 
-The MAIN-world script is a **declared file** in `web_accessible_resources`, never a
-`<script>` tag with a string body. A string-body injection would be blocked by
-Instagram's CSP and is a code-injection smell besides.
+The MAIN-world script is a manifest-declared `content_script` using `world: "MAIN"`, never
+a `<script>` tag with a string body. It does not need `web_accessible_resources`; avoiding
+that declaration keeps the bundle from being exposed as a page-loadable resource.
 
 ### Where the key lives, and what that does and doesn't protect against
 
@@ -57,7 +61,7 @@ the security is the access boundary, and there are three layers of it:
 |---|---|
 | Instagram's own page JS reading the key | Different world *and* different origin — page script cannot call `chrome.storage` at all |
 | Our own content script being tricked into leaking it | `setAccessLevel({ TRUSTED_CONTEXTS })` — even *we* cannot read the key from a content script |
-| A model call leaking it into a page | Every call is `fetch` from the service worker; the key is never passed over any message |
+| A model call leaking it into a page | Every call is `fetch` from the service worker; the key never enters the content script or page |
 | It appearing in a log or an error toast | `redact()` on every error path, and only `SafeSettings` (mask + boolean) ever leaves the worker |
 | Another extension reading it | Extension storage is per-extension; there is no cross-extension read |
 
@@ -67,13 +71,13 @@ print the key. That is true of every browser extension that holds a credential. 
 mitigation is the provider's own: scope the key, set a spend limit, and rotate it — the
 popup's **Remove** button clears it in one click without touching your indexed posts.
 
----
 
 ## 2. Data capture — intercept, never scrape
 
-Instagram rotates its GraphQL `doc_id` every 2–4 weeks as a deliberate anti-scraping
-measure. Calling their API directly means re-reversing it monthly. So we never call it —
-we read the responses the page fetches for itself while you scroll.
+Instagram's private GraphQL identifiers and response shapes change over time. Calling its
+private endpoints directly would make the extension depend on those changes, so we never
+manufacture an Instagram request — we read the responses the page fetches for itself while
+you scroll.
 
 **Three layers, most-reliable first:**
 
@@ -143,13 +147,19 @@ session would be missing from the census and look like strays.
 
 ## 3. Storage
 
-**IndexedDB**, not `chrome.storage.local` — the latter caps at ~10 MB, and a few thousand
-posts with captions blows past that. `unlimitedStorage` is requested so the browser
-doesn't evict the DB under pressure.
+**IndexedDB**, not `chrome.storage.local` — structured records, indexes, and transactions
+fit this workload better than one large settings object. `unlimitedStorage` covers both
+IndexedDB and extension storage and exempts them from normal quota/eviction pressure.
 
-One store, `posts`, keyed on `shortcode` (dedupe is therefore free — a re-`put` of an
-already-categorised post never overwrites its summary in `db.putIfNew`). Indexes on
-`category`, `postedAt`, `categorizedAt`.
+Three stores: `posts` (the local library), `analysis` (paid verdicts), and `indexQueue`
+(the frozen members of the current run). All are keyed on `shortcode`; the queue keeps a
+stable order, force flag, and completion flag so a worker restart resumes the same finish
+line. `posts` has indexes on `category`, `postedAt`, and `categorizedAt`.
+
+Instagram thumbnail URLs are signed and temporary, so they are treated as refreshable
+capture data rather than permanent media. Every later saved-feed capture may replace the
+stored URL while preserving the post's analysis and ordering fields. The UI hides failed
+image elements behind a neutral placeholder until a revisit or scan supplies a fresh URL.
 
 Record schema (`src/types.ts`) — the nullable tail exists so a later pipeline can
 backfill without a migration:
@@ -192,6 +202,63 @@ cheaper than every alternative, all of which involve guessing.
 
 ---
 
+### 3b. The ledger — what was paid for, kept apart from what was captured
+
+The two durable content stores in `saved-index` look alike and are governed by opposite
+rules (`indexQueue` is transient run state).
+
+`posts` is a **view of what is currently saved**. It is free to rebuild — scroll the grid
+again and the same records come back — so anything that legitimately wants to discard it
+may. `analysis` is a **record of work that was bought**: a summary and a category that cost
+tokens on the user's own key and that no amount of scrolling reproduces.
+
+Keeping the second inside the first meant every operation that correctly discarded the view
+discarded the purchase with it. `prune()` hard-deleted the records for posts you had
+unsaved, and Instagram's save button is a toggle people press twice. `reindex` nulled every
+categorisation field and re-ran the whole library, which is the honest behaviour when the
+taxonomy changed and pure waste when it had not. A cleared profile, an evicted database, or
+loading the unpacked extension from a different folder — which changes the extension id,
+and with it the origin the database is keyed to — started from zero.
+
+So verdicts live in their own store, and nothing in `db.ts` is allowed to delete from it.
+
+**Staleness is a question the ledger can answer.** Each verdict records `inputHash`, a
+digest of the exact text the model was shown, and `taxonomyHash`, identifying the
+vocabulary it was filed against. Free local-rule verdicts also carry `rulesHash`, so a rule
+tweak reevaluates those without invalidating still-correct paid model answers. "Is this
+still valid?" is then a comparison rather than a guess — which is what makes a re-index
+cost only the posts that actually changed.
+
+`TAXONOMY_HASH` is derived from the definitions at module load, never typed by hand. A
+hand-maintained generation counter is worse than none: the one time somebody forgets to
+bump it, every stored verdict claims to be current while pointing at a category that no
+longer exists. `tools/verify.ts` pins the committed value, so a taxonomy edit — which
+re-bills every affected post in every installed library — shows up as a line in the diff
+rather than as a surprise on someone's invoice.
+
+It is deliberately local. No account, no vendor, no network, no new permission, and nothing
+added to what the README promises. Portability across machines is a file: the popup builds
+a Blob and clicks its own link, which an extension page may do with no permission at all —
+`chrome.downloads` would have added a line to the install prompt for nothing.
+
+### Backend decision
+
+Keep the product local-first. Records contain text metadata and remote thumbnail URLs, not
+media blobs, and Chrome's `unlimitedStorage` permission already covers IndexedDB. A remote
+database would not preserve expiring Instagram media URLs; it would add login, row-level
+authorization, sync conflicts, and a second privacy boundary. Supabase Free may pause an
+inactive project, and Firestore's free write quota can be exhausted by a single very large
+first sync.
+
+If multi-device sync becomes a validated requirement, add it as an optional adapter rather
+than replacing IndexedDB: authenticate the user; create `posts` and `analysis` tables keyed
+by `(user_id, shortcode)`; enable row-level policies; sync metadata/verdicts only; resolve
+conflicts by `categorizedAt`; never upload provider keys or media; keep JSON export/import
+as the recovery path. Supabase is the simpler relational fit, but it is not needed for the
+current single-browser product.
+
+---
+
 ## 4. Categorisation — cheapest thing that works
 
 Three tiers, in cost order. A post that settles at tier 1 never reaches tier 2.
@@ -222,9 +289,11 @@ returns a `confidence`; a `low` answer keeps its summary but drops the category,
 unplaceable post lands in Uncategorized rather than somewhere you would never look for it.
 
 **Execution:** concurrency limit of **3** in-flight requests, exponential backoff with
-jitter on 429/5xx, and resume-on-failure — progress lives in IndexedDB, so a crashed
-service worker or closed tab loses at most the in-flight batch. Already-categorised posts
-are never re-sent (`categorizedAt != null` is the guard).
+jitter on 429/5xx, and resume-on-failure. A run snapshots the currently pending shortcodes
+before auto-scroll begins; newly captured posts wait for the next run. The snapshot lives
+in IndexedDB, so a restarted service worker keeps the original target. An individual retry
+bypasses the ledger and deterministic rules so a wrong answer gets a genuinely fresh model
+classification rather than the same cached result.
 
 ---
 
@@ -245,6 +314,12 @@ model, when in practice the free rule pre-pass takes a large share first. Spend 
 in `callWithRetry`, so a response that then fails to parse still counts — the provider
 billed for it either way.
 
+Reasoning models are deliberately constrained for this workload. GPT-5.6 Luna and Terra
+use the Responses API with low reasoning effort and non-persistent responses; Gemini 3.8
+Flash uses low `thinkingLevel`; Claude Sonnet 5 uses adaptive thinking at low effort rather
+than its high-effort default. Output-token accounting includes provider-reported reasoning
+tokens. Time-limited model prices carry their announced next rate and switch automatically.
+
 The cost of a **capture** is zero: it reads responses the page was already fetching.
 
 ---
@@ -263,7 +338,7 @@ type ChatResult = { text: string; usage: { inputTokens: number; outputTokens: nu
 | Provider | Endpoint | Note |
 |---|---|---|
 | Anthropic | `api.anthropic.com/v1/messages` | needs `anthropic-dangerous-direct-browser-access: true` or CORS fails; usage on `usage.{input,output}_tokens` |
-| OpenAI | `api.openai.com/v1/chat/completions` | usage on `usage.{prompt,completion}_tokens` |
+| OpenAI | `api.openai.com/v1/responses` for GPT-5.6; `/v1/chat/completions` for 4o | Responses usage includes reasoning/output tokens; legacy usage is `usage.{prompt,completion}_tokens` |
 | Gemini | `generativelanguage.googleapis.com/v1beta/…:generateContent` | key in the `x-goog-api-key` header, never the URL; usage on `usageMetadata` |
 | OpenRouter | `openrouter.ai/api/v1/chat/completions` | OpenAI-shaped; upstream list price passed through |
 

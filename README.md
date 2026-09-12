@@ -8,7 +8,11 @@ A Chrome extension (Manifest V3, TypeScript) that does two things to Instagram:
 2. **Gives Instagram videos real seek controls.** A scrubber, arrow-key seeking, and no
    more forced looping.
 
-Loaded unpacked. Not published. Your API key stays in your browser.
+Loaded unpacked. Not published. Your API key is stored only in your browser and is sent
+only to the model provider you choose when making an authenticated request.
+
+New contributor or maintainer? Start with [`PROJECT_INDEX.md`](PROJECT_INDEX.md) for the
+documentation map, current state, code ownership, known risks, and release checklist.
 
 ---
 
@@ -38,15 +42,32 @@ changes up.
 ## First run
 
 1. Click the extension icon. Pick a provider and model, paste a key, press **Test and
-   save** — it saves and round-trips one token so you find out immediately if the key
-   works.
+   save** — it tests first and stores the key only after the provider accepts it.
 2. Open your saved posts on Instagram: your profile → **Saved**.
-3. The library takes over the page. Scroll and posts are captured automatically, or press
-   **Index now** and it scrolls for you.
+3. The library takes over the page. Scroll and posts are captured automatically. **Index
+   now** freezes the number currently waiting, indexes exactly that set, and scans farther
+   down the feed; anything found during that scan waits for the next run.
 
-Roughly **$0.37 per 1,000 posts** on Claude Haiku 4.5 — and that is the ceiling, because
-posts caught by the free local rules never reach the model. The popup and the in-page panel
-both show what you have actually spent, metered from the token counts the provider returns.
+Roughly **$0.40 per 1,000 posts** on Claude Haiku 4.5, for the text tier. Posts caught by
+the free local rules never reach the model at all; the small minority with no usable
+caption fall through to a thumbnail, which costs several times more per post, so treat the
+figure as a typical price rather than a hard ceiling. The popup and the in-page panel both
+show what you have actually spent, metered from the token counts the provider returns.
+
+Current recommended choices are **GPT-5.6 Luna** for economical OpenAI indexing,
+**GPT-5.6 Terra** when OpenAI quality matters more than cost, **Gemini 3.8 Flash** for the
+best cross-provider price/quality balance, and **Claude Sonnet 5** for difficult posts.
+The reasoning-capable adapters explicitly use low effort: enough deliberation for a closed
+classification task without paying for long hidden reasoning. Gemini 3.8's announced 2027
+price change is encoded in the estimator, so the popup will not keep showing its 2026
+introductory rate after it expires.
+
+**You never pay for the same post twice.** Every summary is written to a separate ledger,
+keyed by a hash of the exact text the model was shown. Unsaving or re-indexing a post does
+not throw that away — the work is replayed from the ledger for nothing, and only posts
+whose input or category list genuinely changed are sent to the model again. Use **Save a
+copy** before uninstalling or moving browsers. **Re-index everything** tells you, before
+you press it, how many posts actually need the model and what they will cost.
 
 ---
 
@@ -57,10 +78,11 @@ money.
 
 **1 — Capture (free).** Instagram sends about a dozen posts per network request. A post
 cannot be captured before it has loaded, so *the library fills as you scroll*. If you have
-1,000 saved posts and 30 are on screen, 30 is what exists so far. **Index now** does the
-scrolling for you: it pages to the bottom with randomised 800–2000 ms pauses and stops
-immediately if Instagram returns a 429. It makes no requests of its own — it reads the
-responses the page was fetching anyway.
+1,000 saved posts and 30 are on screen, 30 is what exists so far. An indexing run snapshots
+those 30 before auto-scroll begins and stops after those 30; posts discovered during the
+scan are shown as waiting for the next run. Auto-scroll pages to the bottom with randomised
+800–2000 ms pauses and stops immediately if Instagram returns a 429. It makes no requests
+of its own — it reads the responses the page was fetching anyway.
 
 Capture only runs on your saved page, only reads the part of a response that Instagram
 names as the saved feed, and only scrapes inside the saved grid. All three matter, because
@@ -74,10 +96,10 @@ elsewhere. Everything genuine keeps the summary you already paid for.
 
 **2 — Categorise (the part that costs).** Hashtag and keyword rules label whatever they can
 for nothing. Everything else goes to your model in batches of 25 captions. Only posts with
-no usable caption *and* no alt text cost a look at the thumbnail. Nothing is ever
-categorised twice, and a paused run resumes exactly where it stopped — progress lives in
-the database, not in memory, so closing the tab or letting Chrome kill the service worker
-costs you at most the in-flight batch.
+no usable caption *and* no alt text cost a look at the thumbnail. The fixed run queue and
+paid-work ledger both live in the database, so a paused or restarted worker resumes the
+same set. Open any card for its details and use **Re-index this post** when a result is
+wrong; that explicit retry bypasses both the old verdict and the local rule pass.
 
 Both halves can be paused and resumed from either the popup or the in-page panel, and a
 pause in one stops the other.
@@ -118,9 +140,10 @@ rest, and encrypting it would be theatre: the decryption key would have to ship 
 bundle. The protection is the access boundary instead, and it holds in three places at
 once: page scripts can't call `chrome.storage` at all; `setAccessLevel({
 TRUSTED_CONTEXTS })` means even *our own* content script can't read it; and every model
-call is made by the background worker, so the key is never passed over a message or into a
-page. Errors run through a `redact()` that strips key-shaped strings before anything is
-logged or shown.
+call is made by the background worker. The key crosses one extension-internal message when
+you save or test it in the popup, but it never enters instagram.com or a content script.
+Errors run through a `redact()` that strips key-shaped strings before anything is logged
+or shown.
 
 It does not protect against someone at your unlocked computer opening the service-worker
 console — that is true of every extension holding a credential. Scope the key, set a spend
@@ -128,8 +151,23 @@ cap at your provider, and use **Remove** in the popup when you're done; it clear
 without touching anything you've indexed.
 
 **Your posts.** Everything captured sits in this extension's own IndexedDB, in your
-browser. Nothing is uploaded anywhere. The only outbound traffic is the caption text sent
-to the provider you chose. There is no server in this project and no telemetry.
+browser. The extension stores metadata and Instagram CDN URLs, not copies of the photos or
+videos. The only outbound analysis traffic goes to the provider you chose: post text for
+normal classification, plus a small thumbnail for a post with too little text. There is no
+server and no telemetry — **Save a copy** exports the paid-analysis ledger to your disk.
+Instagram's signed preview URLs eventually expire; revisiting or scanning the saved feed
+refreshes them without touching the summary or category you already paid for. Until then,
+the library shows a neutral placeholder instead of a broken image or exposed alt text.
+
+**Why there is no backend.** Local IndexedDB is the simpler and safer default here. Chrome's
+[`unlimitedStorage` permission](https://developer.chrome.com/docs/extensions/reference/permissions-list)
+covers IndexedDB and exempts extension storage from quota restrictions and eviction. A
+backend would add authentication, sync conflicts, a new copy of private saved-post metadata,
+and another secret/configuration surface without making Instagram's expiring CDN URLs
+permanent. Supabase Free can [pause low-activity projects](https://supabase.com/docs/guides/platform/free-project-pausing),
+while Firestore's free tier currently allows [20,000 document writes per day](https://firebase.google.com/docs/firestore/quotas),
+which a large first sync can consume. Keep the current local-first design; export the ledger
+for backup. Add remote sync only when multi-device access becomes a real requirement.
 
 **Your Instagram account.** The extension never calls Instagram's API. It reads the
 responses the page fetches for itself, which is why no `doc_id` is ever forged and no
@@ -142,10 +180,11 @@ rather than metronomic and halts on the first 429.
 
 The full design rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md). The short version:
 
-**Capture is interception, not scraping.** Instagram rotates its GraphQL `doc_id` every
-2–4 weeks specifically to break scrapers. So this never calls their API. A `MAIN`-world
-content script patches `window.fetch` and `XMLHttpRequest` at `document_start` and reads
-the responses the page fetches for itself. Rotating a `doc_id` changes nothing for us.
+**Capture is interception, not scraping.** Instagram's private GraphQL identifiers and
+response shapes change over time, so this never manufactures its own Instagram requests.
+A `MAIN`-world content script patches `window.fetch` and `XMLHttpRequest` at
+`document_start` and reads the responses the page fetches for itself. Identifier changes
+do not require a hard-coded request update.
 
 **Extraction is shape-driven, not schema-driven.** The URL matcher decides *whether* to
 look at a payload; a recursive walker decides *what counts* — any node with a post code
@@ -169,6 +208,7 @@ characters, and always with the smallest available thumbnail.
 ```
 src/
   types.ts                 PostRecord schema (incl. the nullable pipeline fields)
+  hash.ts                  short stable digest, for "is this the same input as before?"
   routes.ts                which Instagram routes capture is allowed to run on
   taxonomy.ts              12 categories + the free rule-based pre-pass
   messaging.ts             typed contracts for all three contexts
@@ -183,6 +223,7 @@ src/
   background/
     index.ts               service worker: message router, port broadcasts → background.js
     db.ts                  IndexedDB store, dedupe + gap-filling merge
+    ledger.ts              paid-for verdicts, kept apart from the disposable post cache
     settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
     order.ts               feed position -> save order, across visits
     spend.ts               metered tokens + dollars, survives worker restarts
@@ -204,9 +245,14 @@ public/
 
 tools/
   make-icons.mjs           regenerates the icons (npm run icons)
-  verify.ts                checks for the extractor + rule matcher (npm run verify)
+  verify.ts                145 regression checks across the critical flows
 
 design/                    the source design docs this was built from
+
+PROJECT_INDEX.md           maintainer entry point and file map
+ARCHITECTURE.md            technical decisions and invariants
+TODO.md                    chronological delivery record + remaining work
+CLAUDE.md                  compact coding-agent orientation
 ```
 
 ## Scripts
@@ -216,7 +262,7 @@ design/                    the source design docs this was built from
 | `npm run build` | production bundle into `dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run verify` | run the extractor / taxonomy checks |
+| `npm run verify` | run 145 pure-function regression checks |
 | `npm run icons` | regenerate `public/icons/*.png` |
 
 ## Permissions, and why
