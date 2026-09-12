@@ -3,13 +3,16 @@
  *
  * Written by hand rather than checked in as binaries so the artwork is reviewable and
  * reproducible: `node tools/make-icons.mjs` regenerates all three from this source.
- * A rounded square in the accent green with a white bookmark glyph.
+ * A violet-blue tile with a white indexed-bookmark glyph. The two small rules make the
+ * mark specific to this product rather than another generic bookmark app, while staying
+ * legible at Chrome's 16px toolbar size.
  */
 
 import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const BG = [0x28, 0x7a, 0x52]; // oklch(0.50 0.10 150), the one accent colour
+const BG_A = [0x78, 0x6d, 0xfc];
+const BG_B = [0x50, 0x6f, 0xee];
 const FG = [0xff, 0xff, 0xff];
 
 /** Signed-distance rounded rectangle, used for antialiased edges. */
@@ -30,23 +33,32 @@ function render(size) {
       const cx = x + 0.5;
       const cy = y + 0.5;
 
-      // Tile: rounded square covering most of the canvas.
-      const tile = roundedRectSDF(cx, cy, size / 2, size / 2, 60 * s, 60 * s, 16 * s);
+      // Tile: rounded square covering most of the canvas, with the same subtle diagonal
+      // shift as the brand mark used in both extension surfaces.
+      const tile = roundedRectSDF(cx, cy, size / 2, size / 2, 60 * s, 60 * s, 19 * s);
       const tileA = clamp01(0.5 - tile / aa);
+      const gradient = clamp01((cx + cy) / (size * 2));
+      const bg = mix(BG_A, BG_B, gradient);
 
-      // Bookmark: a tall rounded rect with a triangular notch cut from the bottom.
-      const body = roundedRectSDF(cx, cy, size / 2, 60 * s, 20 * s, 30 * s, 4 * s);
+      // Bookmark: a tall rounded card with a triangular notch cut from the bottom.
+      const body = roundedRectSDF(cx, cy, size / 2, 61 * s, 25 * s, 38 * s, 7 * s);
       let markA = clamp01(0.5 - body / aa);
 
       // Notch — carve a V out of the lower half.
-      const notchTop = 62 * s;
+      const notchTop = 75 * s;
       if (cy > notchTop) {
-        const halfWidthAtY = ((cy - notchTop) / (30 * s)) * (20 * s);
+        const halfWidthAtY = ((cy - notchTop) / (24 * s)) * (25 * s);
         if (Math.abs(cx - size / 2) < halfWidthAtY) markA = 0;
       }
 
+      // Two index rules, knocked back into the white mark. They remain two crisp dots at
+      // 16px and become the recognisable "index" detail at larger sizes.
+      const rule1 = roundedRectSDF(cx, cy, size / 2, 48 * s, 13 * s, 3 * s, 3 * s);
+      const rule2 = roundedRectSDF(cx, cy, size / 2, 63 * s, 13 * s, 3 * s, 3 * s);
+      const ruleA = Math.max(clamp01(0.5 - rule1 / aa), clamp01(0.5 - rule2 / aa)) * markA;
+
       const i = (y * size + x) * 4;
-      const [r, g, b] = mix(BG, FG, markA);
+      const [r, g, b] = mix(mix(bg, FG, markA), bg, ruleA);
       px[i] = r;
       px[i + 1] = g;
       px[i + 2] = b;
