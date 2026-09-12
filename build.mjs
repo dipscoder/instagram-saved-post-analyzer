@@ -41,4 +41,3 @@ if (watch) {
   await ctx.dispose();
   console.log(`\nBuilt. In chrome://extensions → Load unpacked, select:\n  ${loadPath}\n`);
 }
-
