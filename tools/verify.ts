@@ -9,12 +9,23 @@
  */
 
 import { extractPosts } from '../src/capture/extract';
-import { classifyByRules, normalizeCategory } from '../src/taxonomy';
-import { matchesSearch, tokenize, upgrade } from '../src/background/db';
+import {
+  classifyByRules,
+  normalizeCategory,
+  normalizeSubcategory,
+  RULES_HASH,
+  TAXONOMY_HASH,
+} from '../src/taxonomy';
+import { hashText } from '../src/hash';
+import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
+import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
 import { isFullSavedFeed, isSavedRoute } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
+import { applyResult } from '../src/background/categorize';
+import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
+import { usesResponsesApi } from '../src/background/providers/openai';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -97,6 +108,12 @@ console.log('\nextractPosts — noise rejection + dedupe');
 check('no false positive on country code', extractPosts({ code: 'US', user: {} }).length === 0);
 check('no match without owner', extractPosts({ code: 'C8xK2mLp3qR' }).length === 0);
 check('dedupes repeats', extractPosts({ a: rest, b: rest }).length === 1);
+check('a saved carousel stays one saved post', extractPosts({
+  code: 'PARENT1', user: { username: 'maker' }, carousel_media: [
+    { code: 'CHILD1', user: { username: 'maker' } },
+    { code: 'CHILD2', user: { username: 'maker' } },
+  ],
+}).length === 1);
 check('survives cycles-free deep nest', extractPosts({ x: { y: { z: rest } } }).length === 1);
 check('empty payload', extractPosts({}).length === 0);
 check('null-safe', extractPosts(null).length === 0);
@@ -190,6 +207,8 @@ check('clear food match', food?.category === 'Food & Recipes', food);
 
 const weak = classifyByRules({ caption: 'nice', hashtags: [], handle: '@x' });
 check('weak signal falls through to LLM', weak === null, weak);
+check('one broad hashtag still falls through',
+  classifyByRules({ caption: 'nice', hashtags: ['explore'], handle: '@x' }) === null);
 
 const ambiguous = classifyByRules({
   caption: 'meal prep for the gym',
@@ -200,6 +219,35 @@ check('near-tie falls through to LLM', ambiguous === null, ambiguous);
 
 check('word boundary: "art" not matched inside "start"',
   classifyByRules({ caption: 'start of the cardio', hashtags: [], handle: '@x' }) === null);
+check('creator handle does not decide the subject',
+  classifyByRules({ caption: 'A weekend in Kyoto', hashtags: [], handle: '@dailyrecipes' }) === null);
+
+console.log('\nmodel result validation');
+{
+  const post = toRecord({
+    shortcode: 'MODEL1', permalink: '', handle: '@x', caption: 'A useful pasta recipe',
+    hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null,
+    audioTrackName: null, altText: null, postedAt: null,
+  });
+  const missingConfidence = applyResult(
+    post,
+    { id: 0, category: 'Food & Recipes', tags: [' Pasta ', 'pasta', 'X'.repeat(80)], summary: '  Useful   pasta  ' },
+    'test-model',
+  );
+  check('missing confidence never files a guessed category', missingConfidence.category === null);
+  check('tags are normalised, deduped and bounded',
+    JSON.stringify(missingConfidence.tags) === JSON.stringify(['pasta', 'x'.repeat(48)]),
+    missingConfidence.tags);
+  check('summary whitespace is normalised', missingConfidence.summary === 'Useful pasta');
+
+  const confident = applyResult(
+    post,
+    { id: 0, category: 'food and recipes', subcategory: 'recipe', confidence: 'medium' },
+    'test-model',
+  );
+  check('medium-confidence closed vocabulary is accepted',
+    confident.category === 'Food & Recipes' && confident.subcategory === 'Recipe');
+}
 
 console.log('\nnormalizeCategory');
 check('exact', normalizeCategory('Food & Recipes') === 'Food & Recipes');
@@ -298,6 +346,292 @@ console.log('\nsettings migration');
   check('a deliberate native choice survives', chosen.scrubberSkin === 'native', chosen.scrubberSkin);
 
   check('idempotent', migrate(migrate({ scrubberSkin: 'native' } as never)).scrubberSkin === 'overlay');
+}
+
+console.log('\nroute fences');
+{
+  check('the saved grid is a saved route', isSavedRoute('/dipscoder/saved/'));
+  check('a collection is a saved route', isSavedRoute('/dipscoder/saved/travel/'));
+  // Unanchored, this matched — and a hashtag grid would have been captured as saved posts
+  // and then counted as a census of them.
+  check('a hashtag page named saved is not', !isSavedRoute('/explore/tags/saved/'));
+  check('the home feed is not', !isSavedRoute('/'));
+
+  check('all-posts is the full feed', isFullSavedFeed('/dipscoder/saved/all-posts/'));
+  check('a collection is not the full feed', !isFullSavedFeed('/dipscoder/saved/travel/'));
+  check('a hashtag page is never the full feed', !isFullSavedFeed('/explore/tags/saved/'));
+}
+
+console.log('\nhashText');
+{
+  check('stable across calls', hashText('pasta') === hashText('pasta'));
+  check('16 hex characters', /^[0-9a-f]{16}$/.test(hashText('pasta')));
+  check('sensitive to one character', hashText('pasta') !== hashText('pastb'));
+  check('empty is not special-cased', /^[0-9a-f]{16}$/.test(hashText('')));
+}
+
+console.log('\ntaxonomy hash');
+{
+  // The value at the last deliberate taxonomy change. Editing a category name, a
+  // subcategory, a hashtag or a keyword changes it — all legitimate, and all of which
+  // invalidate stored verdicts and re-bill every affected post in every installed
+  // library. Updating this line is how that decision gets made on purpose, in the diff,
+  // rather than discovered on someone's invoice.
+  const COMMITTED = '28eade380b3dc684';
+  check('matches the committed taxonomy', TAXONOMY_HASH === COMMITTED, TAXONOMY_HASH);
+}
+
+console.log('\nrules hash');
+{
+  const COMMITTED = '5adfad21b4b2f3dd';
+  check('matches the committed rule behaviour', RULES_HASH === COMMITTED, RULES_HASH);
+}
+
+console.log('\nsave order across two tabs');
+{
+  // Both tabs sweep at once when Index now is pressed, so their messages interleave. A
+  // single global cursor treated every alternation as a new visit — bumping the session
+  // by a full stride and resetting the position — so ranks grew with depth into the feed,
+  // which inverts the whole library under the default sort.
+  const a1 = await reserveRanks('tab-a', 3);
+  const b1 = await reserveRanks('tab-b', 3);
+  const a2 = await reserveRanks('tab-a', 3);
+  const b2 = await reserveRanks('tab-b', 3);
+
+  check('tab A keeps descending through the interleave', a2[0]! < a1[2]!, { a1, a2 });
+  check('tab B keeps descending through the interleave', b2[0]! < b1[2]!, { b1, b2 });
+  check('the two tabs stay in separate bands', Math.abs(a1[0]! - b1[0]!) >= 1_000_000);
+}
+
+console.log('\ncategory normalisation');
+{
+  check('exact name', normalizeCategory('Food & Recipes') === 'Food & Recipes');
+  check('case-insensitive', normalizeCategory('food & recipes') === 'Food & Recipes');
+  check('half an ampersand pair', normalizeCategory('Food') === 'Food & Recipes');
+  // Models write this about as often as the ampersand, and discarding it threw away an
+  // answer that had already been paid for.
+  check('"and" spelled out', normalizeCategory('Food and Recipes') === 'Food & Recipes', normalizeCategory('Food and Recipes'));
+  check('nonsense stays null', normalizeCategory('Blorp') === null);
+
+  check('subcategory from the right list', normalizeSubcategory('Food & Recipes', 'recipe') === 'Recipe');
+  check('subcategory from another list is refused',
+    normalizeSubcategory('Food & Recipes', 'Typography') === null);
+  check('free text is refused', normalizeSubcategory('Food & Recipes', 'cooking tutorial') === null);
+}
+
+console.log('\nledger freshness');
+{
+  const post = toRecord({
+    shortcode: 'C8xK2mLp3qR',
+    permalink: 'https://www.instagram.com/p/C8xK2mLp3qR/',
+    handle: '@cafe.oshi',
+    caption: 'Miso butter pasta',
+    hashtags: ['recipe'],
+    thumbnailUrl: 'https://cdn/small.jpg',
+    isVideo: false,
+    durationSec: null,
+    audioTrackName: null,
+    altText: null,
+    postedAt: 1722200000000,
+  });
+  const banked: Verdict = verdictFrom(
+    { ...post, category: 'Food & Recipes', summary: 'Miso butter pasta', modelUsed: 'rules', categorizedAt: 1 },
+    'signature-v1',
+  );
+
+  check('a matching verdict is reused', isFresh(banked, hashText('signature-v1')));
+  check('a changed caption is not', !isFresh(banked, hashText('signature-v2')));
+  check('a changed taxonomy is not', !isFresh({ ...banked, taxonomyHash: 'stale' }, hashText('signature-v1')));
+  check('an old rule strategy is not reused',
+    !isFresh({ ...banked, rulesHash: 'stale' }, hashText('signature-v1')));
+  check('a paid verdict survives a rule-only change',
+    isFresh({ ...banked, modelUsed: 'test-model', rulesHash: 'stale' }, hashText('signature-v1')));
+  check('nothing on file is not', !isFresh(undefined, hashText('signature-v1')));
+  // A skipped post is almost always an expired thumbnail rather than a fact about the
+  // post, so re-indexing has to be allowed to try again.
+  check('a skipped verdict is never reused',
+    !isFresh({ ...banked, modelUsed: 'skipped' }, hashText('signature-v1')));
+
+  const restored = applyVerdict(post, banked);
+  check('applying a verdict fills the categorisation', restored.category === 'Food & Recipes');
+  check('applying a verdict leaves captured fields alone',
+    restored.caption === post.caption && restored.savedRank === post.savedRank);
+}
+
+console.log('\nrecord migration completeness');
+{
+  // A v1 record as it was actually written, minus everything added since.
+  const v1 = upgrade({ shortcode: 'AAAAA', caption: 'hi', savedAt: 1722200000000 }, 1);
+  for (const field of ['tags', 'hashtags'] as const) {
+    check(`${field} is an array, not undefined`, Array.isArray(v1[field]), v1[field]);
+  }
+  for (const field of ['category', 'summary', 'categorizedAt', 'savedRank', 'seenInSavedFeed'] as const) {
+    check(`${field} is present and null`, v1[field] === null, v1[field]);
+  }
+  check('savedAt is renamed, not duplicated',
+    v1['postedAt'] === 1722200000000 && v1['savedAt'] === undefined);
+  check('idempotent', JSON.stringify(upgrade(v1, 1)) === JSON.stringify(v1));
+}
+
+console.log('\nfresh capture merge');
+{
+  const old = {
+    ...toRecord({
+      shortcode: 'REFRESH1',
+      permalink: 'https://www.instagram.com/p/REFRESH1/',
+      handle: '@maker',
+      caption: 'Original caption',
+      hashtags: ['original'],
+      thumbnailUrl: 'https://cdn/expired.jpg',
+      isVideo: false,
+      durationSec: 30,
+      audioTrackName: null,
+      altText: 'Old description',
+      postedAt: 1722200000000,
+    }),
+    category: 'Art & Design',
+    summary: 'A useful saved idea',
+    categorizedAt: 10,
+    modelUsed: 'test-model',
+    savedRank: 100,
+  };
+  const fresh = {
+    ...toRecord({
+      shortcode: 'REFRESH1',
+      permalink: 'https://www.instagram.com/reel/REFRESH1/',
+      handle: '@maker',
+      caption: 'Updated caption',
+      hashtags: ['updated'],
+      thumbnailUrl: 'https://cdn/fresh.jpg',
+      isVideo: true,
+      durationSec: 30,
+      audioTrackName: 'New track',
+      altText: 'Fresh description',
+      postedAt: 1722200000000,
+    }),
+    savedRank: 999,
+  };
+  const merged = mergeCaptured(old, fresh);
+  check('a fresh CDN URL replaces the expired one', merged?.thumbnailUrl === fresh.thumbnailUrl);
+  check('mutable captured text is refreshed',
+    merged?.caption === fresh.caption && merged.altText === fresh.altText && merged.isVideo);
+  check('paid categorisation survives media refresh',
+    merged?.category === old.category && merged.summary === old.summary && merged.modelUsed === old.modelUsed);
+  check('the original save rank is stable', merged?.savedRank === old.savedRank);
+  check('an identical capture causes no rewrite', mergeCaptured(fresh, fresh) === null);
+}
+
+console.log('\nsearch folding');
+{
+  const post = toRecord({
+    shortcode: 'B',
+    permalink: '',
+    handle: '@chef',
+    caption: 'crème brûlée, properly',
+    hashtags: [],
+    thumbnailUrl: '',
+    isVideo: false,
+    durationSec: null,
+    audioTrackName: null,
+    altText: null,
+    postedAt: null,
+  });
+  // Someone who saved this will type it without the accents, which is exactly the user
+  // whose library is not in English.
+  check('accents are optional', matchesSearch(post, tokenize('creme brulee')));
+  check('accents still match themselves', matchesSearch(post, tokenize('crème')));
+  check('every term must appear', !matchesSearch(post, tokenize('creme pasta')));
+}
+
+console.log('\ncurrent model catalogue');
+{
+  const openaiModels = PROVIDERS.openai.models.map((model) => model.id);
+  const geminiModels = PROVIDERS.gemini.models.map((model) => model.id);
+  const anthropicModels = PROVIDERS.anthropic.models.map((model) => model.id);
+  check('OpenAI includes GPT-5.6 Luna', openaiModels.includes('gpt-5.6-luna'));
+  check('OpenAI includes GPT-5.6 Terra', openaiModels.includes('gpt-5.6-terra'));
+  check('Gemini includes 3.8 Flash', geminiModels.includes('gemini-3.8-flash'));
+  check('Anthropic includes Sonnet 5', anthropicModels.includes('claude-sonnet-5'));
+  check('GPT-5.6 uses the reasoning-aware Responses API',
+    usesResponsesApi('gpt-5.6-luna') && usesResponsesApi('gpt-5.6-terra'));
+  check('GPT-4o keeps its proven Chat Completions path', !usesResponsesApi('gpt-4o-mini'));
+
+  const gemini38 = PROVIDERS.gemini.models.find((model) => model.id === 'gemini-3.8-flash');
+  check('Gemini promotional estimate is current through 2026',
+    Math.abs(estimateUsd(gemini38, 1_000, Date.UTC(2026, 11, 31)) - 0.29625) < 1e-9);
+  check('Gemini estimate automatically adopts 2027 pricing',
+    Math.abs(estimateUsd(gemini38, 1_000, Date.UTC(2027, 0, 1)) - 0.5925) < 1e-9);
+}
+
+console.log('\nreasoning-model request contracts');
+{
+  const originalFetch = globalThis.fetch;
+  const seen = new Map<string, Record<string, unknown>>();
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    seen.set(url, body);
+    if (url.endsWith('/responses')) {
+      const input = body['input'] as { content?: { type?: string; text?: string }[] }[] | undefined;
+      const userText = input?.flatMap((message) => message.content ?? [])
+        .find((part) => part.type === 'input_text')?.text ?? '';
+      // Mirror the provider's validation so this exact regression fails locally instead
+      // of waiting for a real key test to discover it.
+      if (!/json/i.test(userText)) {
+        return new Response(JSON.stringify({
+          error: { message: "Response input messages must contain the word 'json'." },
+        }), { status: 400 });
+      }
+      return new Response(JSON.stringify({
+        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+        usage: { input_tokens: 7, output_tokens: 5 },
+      }));
+    }
+    if (url.includes('generativelanguage.googleapis.com')) {
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+        usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 5, thoughtsTokenCount: 3 },
+      }));
+    }
+    return new Response(JSON.stringify({
+      content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"ok":true}' }],
+      usage: { input_tokens: 7, output_tokens: 8 },
+    }));
+  }) as typeof fetch;
+
+  try {
+    const request = { system: 'Return JSON.', user: 'Classify this.', maxTokens: 64 };
+    const [openaiResult, geminiResult, anthropicResult] = await Promise.all([
+      PROVIDERS.openai.chat(request, 'test-key', 'gpt-5.6-luna'),
+      PROVIDERS.gemini.chat(request, 'test-key', 'gemini-3.8-flash'),
+      PROVIDERS.anthropic.chat(request, 'test-key', 'claude-sonnet-5'),
+    ]);
+    const openaiBody = seen.get('https://api.openai.com/v1/responses');
+    const geminiBody = [...seen.entries()].find(([url]) =>
+      url.includes('gemini-3.8-flash:generateContent'))?.[1];
+    const anthropicBody = seen.get('https://api.anthropic.com/v1/messages');
+    const openaiReasoning = openaiBody?.['reasoning'] as Record<string, unknown> | undefined;
+    const geminiGeneration = geminiBody?.['generationConfig'] as Record<string, unknown> | undefined;
+    const geminiThinking = geminiGeneration?.['thinkingConfig'] as Record<string, unknown> | undefined;
+    const anthropicThinking = anthropicBody?.['thinking'] as Record<string, unknown> | undefined;
+    const anthropicOutput = anthropicBody?.['output_config'] as Record<string, unknown> | undefined;
+
+    check('GPT-5.6 request uses low reasoning', openaiReasoning?.['effort'] === 'low');
+    const openaiInput = openaiBody?.['input'] as { content?: { text?: string }[] }[] | undefined;
+    check('GPT-5.6 JSON mode is declared in the user input',
+      /json/i.test(openaiInput?.[0]?.content?.[0]?.text ?? ''));
+    check('GPT-5.6 response storage is disabled', openaiBody?.['store'] === false);
+    check('GPT-5.6 reserves room beyond hidden reasoning', openaiBody?.['max_output_tokens'] === 256);
+    check('GPT-5.6 output and usage are parsed',
+      openaiResult.text === '{"ok":true}' && openaiResult.usage.outputTokens === 5);
+    check('Gemini 3.8 request uses low thinking', geminiThinking?.['thinkingLevel'] === 'low');
+    check('Gemini thinking tokens are included in spend', geminiResult.usage.outputTokens === 8);
+    check('Claude Sonnet 5 uses adaptive thinking at low effort',
+      anthropicThinking?.['type'] === 'adaptive' && anthropicOutput?.['effort'] === 'low');
+    check('Claude parser ignores thinking blocks', anthropicResult.text === '{"ok":true}');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);

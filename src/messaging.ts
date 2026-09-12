@@ -3,7 +3,10 @@
  *   MAIN world  --window.postMessage-->  ISOLATED  --chrome.runtime-->  service worker
  */
 
+import type { LedgerFile } from './background/ledger';
 import type { CapturedPost, IndexProgress, PostRecord, Settings } from './types';
+
+export type { LedgerFile };
 
 /** Namespace tag on window.postMessage traffic — instagram.com posts plenty of its own. */
 export const WIRE = 'saved-index';
@@ -49,28 +52,47 @@ export type Request =
       sort: SortKey;
     }
   | { type: 'posts:stats' }
+  | { type: 'post:get'; shortcode: string }
   /** How many records a sweep started at `since` did not re-confirm. */
   | { type: 'posts:strays'; since: number }
   | { type: 'posts:prune'; since: number }
+  | { type: 'post:reindex'; shortcode: string }
   | { type: 'index:start' }
   | { type: 'index:pause' }
   | { type: 'index:reindex' }
+  /** What a re-index would actually cost, given what the ledger already holds. */
+  | { type: 'index:quote' }
+  | { type: 'ledger:export' }
+  | { type: 'ledger:import'; file: unknown }
   | { type: 'index:progress' }
+  /** The page owns scrolling and reports when a requested sweep naturally ends. */
+  | { type: 'harvest:finished'; reason: 'complete' | 'stopped' | 'rate-limited' }
   | { type: 'spend:reset' }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<Settings> }
   | { type: 'settings:clear-key' }
-  | { type: 'settings:test-key' };
+  | { type: 'settings:test-key' }
+  /** Test before persistence so an invalid replacement never becomes the active key. */
+  | { type: 'settings:test-candidate'; provider: Settings['provider']; model: string; apiKey: string };
 
 export type Response =
   | { ok: true; value: unknown }
   | { ok: false; error: string };
+
+/** The honest price of a re-index: only the posts the ledger cannot answer for. */
+export interface ReindexQuote {
+  total: number;
+  billable: number;
+  usd: number;
+}
 
 export interface Stats {
   total: number;
   categorized: number;
   byCategory: Record<string, number>;
   lastRunAt: number | null;
+  /** Verdicts on file — the work that survives a prune, a re-index or a reinstall. */
+  ledgerCount: number;
 }
 
 /**
@@ -83,7 +105,9 @@ export interface Stats {
 export type Broadcast =
   | { type: 'progress'; progress: IndexProgress }
   | { type: 'harvest'; action: 'start' | 'stop' }
-  | { type: 'posts:updated'; posts: PostRecord[] };
+  /** Captured metadata changed without changing library counts (for example a fresh CDN URL). */
+  | { type: 'posts:updated' }
+  | { type: 'settings'; settings: SafeSettings };
 
 /** Settings as they may safely leave the service worker — key replaced by a mask. */
 export type SafeSettings = Omit<Settings, 'apiKey'> & {
@@ -105,7 +129,15 @@ export function subscribe(onEvent: (msg: Broadcast) => void): () => void {
 
   const connect = (): void => {
     if (closed) return;
-    port = chrome.runtime.connect({ name: PORT });
+    try {
+      port = chrome.runtime.connect({ name: PORT });
+    } catch {
+      // "Extension context invalidated" — this content script outlived its extension
+      // after a reload or an update. Throwing here escaped into the retry timer and
+      // killed the retry with it, leaving a mounted library permanently deaf.
+      closed = true;
+      return;
+    }
     port.onMessage.addListener((msg) => onEvent(msg as Broadcast));
     // MV3 idles the worker out from under us roughly every 5 minutes; reconnect so
     // the UI keeps receiving progress instead of silently going stale.

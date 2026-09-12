@@ -1,4 +1,4 @@
-import { readError, type ChatRequest, type ChatResult, type Provider } from './index';
+import { readError, readJson, type ChatRequest, type ChatResult, type Provider } from './index';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -45,10 +45,10 @@ export const openrouter: Provider = {
 
     if (!res.ok) throw await readError(res);
 
-    const data = (await res.json()) as {
+    const data = await readJson<{
       choices?: { message?: { content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
+    }>(res);
 
     return {
       text: data.choices?.[0]?.message?.content ?? '',

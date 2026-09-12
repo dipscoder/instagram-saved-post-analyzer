@@ -142,6 +142,10 @@ export interface IndexProgress {
   categorized: number;
   /** Captured but not yet through a tier. */
   pending: number;
+  /** Posts frozen into the current/most recent run when it began. */
+  runTotal: number;
+  /** Posts from that frozen set which have reached a final verdict. */
+  runCompleted: number;
   /** USD actually charged, summed from the token usage every provider reports back. */
   spentUsd: number;
   /** Upper-bound USD for `pending` at current list prices. Rules make it cheaper. */
@@ -155,6 +159,8 @@ export const IDLE_PROGRESS: IndexProgress = {
   total: 0,
   categorized: 0,
   pending: 0,
+  runTotal: 0,
+  runCompleted: 0,
   spentUsd: 0,
   estimateUsd: 0,
   message: null,

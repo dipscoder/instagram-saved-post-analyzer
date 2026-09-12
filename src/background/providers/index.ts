@@ -32,6 +32,8 @@ export interface ModelInfo {
   /** Published list price, USD per million tokens. */
   inputPer1M: number;
   outputPer1M: number;
+  /** Optional announced price change, applied automatically at the stated UTC instant. */
+  priceAfter?: { at: number; inputPer1M: number; outputPer1M: number };
   supportsVision: boolean;
 }
 
@@ -53,19 +55,29 @@ const EST_INPUT_TOKENS_PER_POST = 145;
 const EST_OUTPUT_TOKENS_PER_POST = 50;
 
 /** Upper bound: assumes every pending post reaches the model. Rules make it cheaper. */
-export function estimateUsd(model: ModelInfo | undefined, posts: number): number {
+export function estimateUsd(
+  model: ModelInfo | undefined,
+  posts: number,
+  at = Date.now(),
+): number {
   if (!model || posts <= 0) return 0;
   const input = (posts * EST_INPUT_TOKENS_PER_POST) / 1_000_000;
   const output = (posts * EST_OUTPUT_TOKENS_PER_POST) / 1_000_000;
-  return input * model.inputPer1M + output * model.outputPer1M;
+  const price = priceAt(model, at);
+  return input * price.inputPer1M + output * price.outputPer1M;
 }
 
-export function usdFor(model: ModelInfo | undefined, usage: Usage): number {
+export function usdFor(model: ModelInfo | undefined, usage: Usage, at = Date.now()): number {
   if (!model) return 0;
+  const price = priceAt(model, at);
   return (
-    (usage.inputTokens / 1_000_000) * model.inputPer1M +
-    (usage.outputTokens / 1_000_000) * model.outputPer1M
+    (usage.inputTokens / 1_000_000) * price.inputPer1M +
+    (usage.outputTokens / 1_000_000) * price.outputPer1M
   );
+}
+
+function priceAt(model: ModelInfo, at: number): Pick<ModelInfo, 'inputPer1M' | 'outputPer1M'> {
+  return model.priceAfter && at >= model.priceAfter.at ? model.priceAfter : model;
 }
 
 export function findModel(id: ProviderId, model: string): ModelInfo | undefined {
@@ -77,6 +89,8 @@ export class ProviderError extends Error {
     message: string,
     readonly status: number,
     readonly retryable: boolean,
+    /** What the provider itself said to wait, when it said anything. */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = 'ProviderError';
@@ -97,7 +111,9 @@ export function redact(text: string): string {
 export async function readError(res: Response): Promise<ProviderError> {
   let detail = '';
   try {
-    detail = (await res.text()).slice(0, 400);
+    // Redact first, then truncate. The other order let a key that straddled character 400
+    // survive as a fragment too short for the pattern to match.
+    detail = redact(await res.text()).slice(0, 400);
   } catch {
     /* body already consumed or unreadable */
   }
@@ -110,7 +126,30 @@ export async function readError(res: Response): Promise<ProviderError> {
         ? 'Rate limited by the provider.'
         : `Provider returned ${res.status}.`;
 
-  return new ProviderError(`${friendly} ${redact(detail)}`.trim(), res.status, retryable);
+  return new ProviderError(`${friendly} ${detail}`.trim(), res.status, retryable, retryAfter(res));
+}
+
+/** `retry-after` is either seconds or an HTTP date. Both are worth more than a guess. */
+function retryAfter(res: Response): number | null {
+  const raw = res.headers.get('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds, 120) * 1000;
+  const at = Date.parse(raw);
+  return Number.isFinite(at) ? Math.max(0, Math.min(at - Date.now(), 120_000)) : null;
+}
+
+/**
+ * A 200 is not a promise of JSON. A captive portal or a proxy answers with an HTML page,
+ * and an unguarded `res.json()` turned that into a raw `SyntaxError` shown verbatim in
+ * the popup — and, being no kind of ProviderError, one that was never retried.
+ */
+export async function readJson<T>(res: Response): Promise<T> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ProviderError('Provider returned a non-JSON response.', res.status, true);
+  }
 }
 
 /** Models wrap JSON in prose or fences often enough that this is worth centralising. */
@@ -150,7 +189,9 @@ export function getProvider(id: ProviderId): Provider {
 export async function testKey(id: ProviderId, key: string, model: string): Promise<void> {
   const provider = getProvider(id);
   await provider.chat(
-    { system: 'Reply with the single word OK.', user: 'ping', maxTokens: 8 },
+    // Reasoning-capable models count hidden reasoning inside their output ceiling. A
+    // 12-token test could therefore return no visible JSON even when the key was valid.
+    { system: 'Return JSON only.', user: 'Reply with {"ok":true}.', maxTokens: 128 },
     key,
     model,
   );

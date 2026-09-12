@@ -53,12 +53,5 @@
       "world": "ISOLATED",
       "all_frames": false
     }
-  ],
-
-  "web_accessible_resources": [
-    {
-      "resources": ["capture-main.js"],
-      "matches": ["https://www.instagram.com/*"]
-    }
   ]
 }

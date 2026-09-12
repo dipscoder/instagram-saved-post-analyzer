@@ -101,7 +101,11 @@ function reportRateLimit(): void {
 }
 
 function isApiUrl(url: string): boolean {
-  return /instagram\.com\/(api|graphql)/i.test(url) || url.startsWith('/api/');
+  return (
+    /instagram\.com\/(api|graphql)/i.test(url) ||
+    url.startsWith('/api/') ||
+    url.startsWith('/graphql/')
+  );
 }
 
 // --- fetch ------------------------------------------------------------------

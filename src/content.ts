@@ -8,7 +8,8 @@
 import { startBridge } from './capture/bridge';
 import { isLibraryMounted, mountLibrary, unmountLibrary } from './page/library';
 import { setScrubberSkin, startVideoControls } from './page/video';
-import { send, type SafeSettings } from './messaging';
+import { isSavedRoute } from './routes';
+import { send, subscribe, type SafeSettings } from './messaging';
 
 startBridge();
 
@@ -30,16 +31,13 @@ async function boot(): Promise<void> {
   watchRouteChanges();
 
   // Keep the video controls in step with the settings toggle without a reload.
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes['settings']) return;
-    const next = changes['settings'].newValue as { scrubberSkin?: string } | undefined;
-    setScrubberSkin(next?.scrubberSkin);
+  //
+  // Over the port, not storage.onChanged: settings live in storage.local, which the
+  // worker locks to TRUSTED_CONTEXTS on every wake, and a closed area does not deliver
+  // change events to a content script. The listener this replaces could never fire.
+  subscribe((msg) => {
+    if (msg.type === 'settings') setScrubberSkin(msg.settings.scrubberSkin);
   });
-}
-
-/** The saved grid lives at /{username}/saved/… and sometimes /saved/…. */
-function isSavedRoute(): boolean {
-  return /\/saved(\/|$)/.test(location.pathname);
 }
 
 function syncLibraryToRoute(): void {
@@ -51,9 +49,15 @@ function syncLibraryToRoute(): void {
 }
 
 /**
- * Instagram is a single-page app, so there is no navigation event to hook. Patch the
- * history methods (they fire nothing by spec) and listen for popstate.
+ * Instagram is a single-page app, so there is no navigation event to hook.
+ *
+ * Patching `history.pushState` looks like the answer and is not: DOM wrappers are
+ * per-world, so a patch installed here is never the function Instagram's own bundle calls.
+ * `popstate` covers back and forward; the poll is what actually catches a click on
+ * Instagram's own nav, and is therefore the mechanism rather than the fallback.
  */
+const ROUTE_POLL_MS = 400;
+
 function watchRouteChanges(): void {
   let lastPath = location.pathname;
 
@@ -63,18 +67,8 @@ function watchRouteChanges(): void {
     syncLibraryToRoute();
   };
 
-  for (const method of ['pushState', 'replaceState'] as const) {
-    const original = history[method];
-    history[method] = function patched(this: History, ...args: Parameters<History['pushState']>) {
-      const result = original.apply(this, args);
-      queueMicrotask(check);
-      return result;
-    };
-  }
   window.addEventListener('popstate', check);
-
-  // Belt and braces: some client-side routes swap content without touching history.
-  setInterval(check, 1000);
+  setInterval(check, ROUTE_POLL_MS);
 }
 
 function whenBodyReady(fn: () => void): void {

@@ -10,7 +10,10 @@
  * Saved lives at `/{username}/saved/`, and a collection at `/{username}/saved/{name}/`.
  */
 export function isSavedRoute(pathname: string = location.pathname): boolean {
-  return /\/saved(\/|$)/.test(pathname);
+  // Anchored to the first path segment. Unanchored, `/explore/tags/saved/` matched — a
+  // hashtag grid would have mounted the library and been captured as saved posts, which
+  // is exactly what the scope fences exist to prevent.
+  return /^\/[^/]+\/saved(\/|$)/.test(pathname);
 }
 
 /**
@@ -27,5 +30,5 @@ export function isSavedRoute(pathname: string = location.pathname): boolean {
  * posts the user still has saved.
  */
 export function isFullSavedFeed(pathname: string = location.pathname): boolean {
-  return /\/saved\/?$/.test(pathname) || /\/saved\/all-posts\/?$/.test(pathname);
+  return /^\/[^/]+\/saved\/?$/.test(pathname) || /^\/[^/]+\/saved\/all-posts\/?$/.test(pathname);
 }

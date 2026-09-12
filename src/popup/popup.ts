@@ -12,7 +12,14 @@
  * against your provider's console.
  */
 
-import { send, subscribe, type SafeSettings, type Stats } from '../messaging';
+import {
+  send,
+  subscribe,
+  type LedgerFile,
+  type ReindexQuote,
+  type SafeSettings,
+  type Stats,
+} from '../messaging';
 import { IDLE_PROGRESS, type IndexProgress, type ProviderId, type Settings } from '../types';
 
 interface ModelMeta {
@@ -38,18 +45,45 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 let providers: ProviderMeta[] = [];
 let settings: SafeSettings;
-let stats: Stats = { total: 0, categorized: 0, byCategory: {}, lastRunAt: null };
+let stats: Stats = {
+  total: 0,
+  categorized: 0,
+  byCategory: {},
+  lastRunAt: null,
+  ledgerCount: 0,
+};
 let progress: IndexProgress = IDLE_PROGRESS;
+let harvesting = false;
 
 let screen: 'setup' | 'home' = 'setup';
 let replacing = false;
+/**
+ * What a re-index would really cost, fetched whenever the library goes quiet.
+ *
+ * The finished-state primary button used to send `index:reindex` on the first click,
+ * beside a "$0.00 left, at most" readout that was literally true and completely
+ * misleading — the estimate is computed from `pending`, and re-index is only ever offered
+ * when `pending` is zero. Now the button says the price and asks twice.
+ */
+let quote: ReindexQuote | null = null;
+let confirming: 'reindex' | 'remove' | 'reset' | null = null;
 
 void init();
 
 async function init(): Promise<void> {
-  const res = await send<{ settings: SafeSettings; providers: ProviderMeta[] }>({
-    type: 'settings:get',
-  });
+  let res: { settings: SafeSettings; providers: ProviderMeta[] };
+  try {
+    res = await send<{ settings: SafeSettings; providers: ProviderMeta[] }>({
+      type: 'settings:get',
+    });
+  } catch {
+    // Nothing below can run without settings, and both sections are `display: none`
+    // until one of them is switched on — so an unguarded throw here left a blank
+    // 380x560 box with no message and no way out.
+    $('setup').classList.add('on');
+    $('footLabel').textContent = 'extension not responding — reopen this popup';
+    return;
+  }
   settings = res.settings;
   providers = res.providers;
   screen = settings.hasKey ? 'home' : 'setup';
@@ -57,9 +91,15 @@ async function init(): Promise<void> {
   wire();
   await refresh();
   subscribe((msg) => {
-    if (msg.type !== 'progress') return;
-    progress = msg.progress;
-    render();
+    if (msg.type === 'harvest') harvesting = msg.action === 'start';
+    else if (msg.type === 'progress') {
+      progress = msg.progress;
+      if (progress.phase === 'running' || progress.pending > 0) confirming = null;
+    }
+    else return;
+    // Through refresh, not render: `stats.lastRunAt` and the ledger count come from a
+    // separate request, so rendering alone left the footer quoting a stale run.
+    void refresh();
   });
 }
 
@@ -69,10 +109,31 @@ async function refresh(): Promise<void> {
       send<Stats>({ type: 'posts:stats' }),
       send<IndexProgress>({ type: 'index:progress' }),
     ]);
+    // Only meaningful once there is nothing left to do — which is exactly when the
+    // primary button turns into "Re-index" and needs a price to show.
+    quote =
+      progress.pending === 0 && progress.total > 0 && progress.phase !== 'running' && !harvesting
+        ? await send<ReindexQuote>({ type: 'index:quote' })
+        : null;
+    setStatus('homeStatus', '', statusLine());
   } catch {
-    /* worker waking; the next push will land */
+    // Silence here made a broken worker and an empty library render identically: both
+    // showed "Nothing captured yet · 0 · 0 · $0.00" with no way to tell them apart.
+    setStatus('homeStatus', 'bad', 'Could not reach the extension worker — reopen this popup.');
   }
   render();
+}
+
+function statusLine(): string {
+  if (progress.phase === 'error' && progress.message) return progress.message;
+  if (progress.phase === 'offline' && progress.message) return progress.message;
+  if (progress.phase === 'running' && progress.runTotal > 0) {
+    return `Indexing ${progress.runTotal} posts detected at the start of this run.`;
+  }
+  if (harvesting) return 'Scanning the saved feed. New finds wait for the next run.';
+  if (progress.phase === 'paused') return 'Paused. Progress is saved.';
+  if (!settings.hasKey) return 'Connect a model to index — press Setup above.';
+  return stats.lastRunAt ? `Last run ${timeAgo(stats.lastRunAt)}.` : '';
 }
 
 // --- wiring -----------------------------------------------------------------
@@ -82,14 +143,31 @@ function wire(): void {
   for (const id of ['provider', 'provider2']) {
     $<HTMLSelectElement>(id).addEventListener('change', (e) => {
       const next = (e.target as HTMLSelectElement).value as ProviderId;
+      if (settings.hasKey && next !== settings.provider) {
+        (e.target as HTMLSelectElement).value = settings.provider;
+        setStatus(
+          screen === 'setup' ? 'setupStatus' : 'keyStatus',
+          '',
+          'Remove the current key before switching providers; keys are provider-specific.',
+        );
+        return;
+      }
       const first = providers.find((p) => p.id === next)?.models[0]?.id;
       void save({ provider: next, ...(first ? { model: first } : {}) });
+      setStatus(
+        screen === 'setup' ? 'setupStatus' : 'keyStatus',
+        '',
+        'Not tested — this provider needs its own key.',
+      );
     });
   }
   for (const id of ['model', 'model2']) {
     $<HTMLSelectElement>(id).addEventListener('change', (e) => {
       void save({ model: (e.target as HTMLSelectElement).value });
-      setStatus('keyStatus', '', 'Not tested since the model changed.');
+      // Onto whichever status the user can actually see. Writing to keyStatus from the
+      // setup screen put the warning inside a `display: none` section while the visible
+      // one still read "Connected".
+      setStatus(screen === 'setup' ? 'setupStatus' : 'keyStatus', '', 'Not tested since the model changed.');
     });
   }
 
@@ -111,24 +189,105 @@ function wire(): void {
     if (replacing) $<HTMLInputElement>('key2').focus();
   });
   $('saveKey2').addEventListener('click', () => void onReplaceSave());
-  $('remove').addEventListener('click', () => void onRemove());
+  $('remove').addEventListener('click', () => {
+    if (confirming !== 'remove') return arm('remove');
+    confirming = null;
+    void onRemove();
+  });
 
   $('resetSpend').addEventListener('click', () => {
-    void send<IndexProgress>({ type: 'spend:reset' }).then((p) => {
-      progress = p;
-      render();
-    });
+    // The spend counter is the only record of what this extension has charged. Erasing
+    // it on one unconfirmed click, from a link styled exactly like every other link,
+    // was the wrong weight for the action.
+    if (confirming !== 'reset') return arm('reset');
+    confirming = null;
+    void send<IndexProgress>({ type: 'spend:reset' })
+      .then((p) => {
+        progress = p;
+        render();
+      })
+      .catch(fail('homeStatus'));
   });
 
   $('autoIndex').addEventListener('click', () => void save({ autoIndex: !settings.autoIndex }));
   $('overlay').addEventListener('click', () => {
     void save({ scrubberSkin: settings.scrubberSkin === 'overlay' ? 'native' : 'overlay' });
   });
+
+  $('exportLedger').addEventListener('click', () => void onExport());
+  $('importLedger').addEventListener('click', () => $<HTMLInputElement>('importFile').click());
+  $<HTMLInputElement>('importFile').addEventListener('change', (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) void onImport(file);
+  });
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
-  settings = await send<SafeSettings>({ type: 'settings:set', patch });
+  try {
+    settings = await send<SafeSettings>({ type: 'settings:set', patch });
+  } catch (err) {
+    // A `void`-ed rejection here left a toggle that simply never moved.
+    return fail(screen === 'setup' ? 'setupStatus' : 'keyStatus')(err);
+  }
   await refresh();
+}
+
+/** First click arms a destructive action, second performs it. */
+function arm(what: NonNullable<typeof confirming>): void {
+  confirming = what;
+  render();
+}
+
+function fail(statusId: string): (err: unknown) => void {
+  return (err) => setStatus(statusId, 'bad', err instanceof Error ? err.message : String(err));
+}
+
+// --- the ledger -------------------------------------------------------------
+
+/**
+ * Hand the file straight to the browser. An extension page can make an object URL and
+ * click its own link, so portability costs no permission at all — `chrome.downloads`
+ * would have added a "Manage your downloads" line to the install prompt for nothing.
+ */
+async function onExport(): Promise<void> {
+  try {
+    const file = await send<LedgerFile>({ type: 'ledger:export' });
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(file)], { type: 'application/json' }),
+    );
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `saved-index-ledger-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus('ledgerStatus', 'ok', `Saved ${file.verdicts.length} summaries.`);
+  } catch (err) {
+    fail('ledgerStatus')(err);
+  }
+}
+
+async function onImport(file: File): Promise<void> {
+  setStatus('ledgerStatus', '', 'Reading…');
+  try {
+    const parsed: unknown = JSON.parse(await file.text());
+    const { imported, skipped } = await send<{ imported: number; skipped: number }>({
+      type: 'ledger:import',
+      file: parsed,
+    });
+    setStatus(
+      'ledgerStatus',
+      'ok',
+      imported === 0
+        ? 'Nothing new — everything in that file was already here.'
+        : `Restored ${imported} summaries${skipped ? `, skipped ${skipped} already on file` : ''}.`,
+    );
+    await refresh();
+  } catch (err) {
+    fail('ledgerStatus')(err);
+  } finally {
+    // Let the same file be chosen twice in a row.
+    $<HTMLInputElement>('importFile').value = '';
+  }
 }
 
 // --- actions ----------------------------------------------------------------
@@ -160,10 +319,15 @@ async function onReplaceSave(): Promise<void> {
  * indexing would fail much later with no obvious cause — so the two are one action.
  */
 async function saveAndTest(apiKey: string, statusId: string, onOk: () => void): Promise<void> {
-  setStatus(statusId, '', 'Saving and testing…');
+  setStatus(statusId, '', 'Testing…');
   try {
+    const r = await send<{ ms: number; model: string }>({
+      type: 'settings:test-candidate',
+      provider: settings.provider,
+      model: settings.model,
+      apiKey,
+    });
     settings = await send<SafeSettings>({ type: 'settings:set', patch: { apiKey } });
-    const r = await send<{ ms: number; model: string }>({ type: 'settings:test-key' });
     setStatus(statusId, 'ok', `Connected · ${r.model} answered in ${r.ms}ms`);
     onOk();
   } catch (err) {
@@ -195,13 +359,30 @@ async function onPrimary(): Promise<void> {
     screen = 'setup';
     return render();
   }
+
+  const active = progress.phase === 'running' || harvesting;
+  const finished = progress.pending === 0 && progress.total > 0 && !active;
+  if (!active && finished && confirming !== 'reindex') {
+    return arm('reindex');
+  }
+  confirming = null;
+
   const type =
-    progress.phase === 'running'
-      ? 'index:pause'
-      : progress.pending === 0 && progress.total > 0
-        ? 'index:reindex'
-        : 'index:start';
-  progress = await send<IndexProgress>({ type });
+    active ? 'index:pause' : finished ? 'index:reindex' : 'index:start';
+
+  try {
+    progress = await send<IndexProgress>({ type });
+  } catch (err) {
+    return fail('homeStatus')(err);
+  }
+
+  if (type === 'index:start' && progress.total === 0) {
+    setStatus(
+      'homeStatus',
+      '',
+      'Open your saved posts on Instagram — there is nothing captured to index yet.',
+    );
+  }
   render();
 }
 
@@ -210,7 +391,10 @@ async function onPrimary(): Promise<void> {
 function render(): void {
   $('setup').classList.toggle('on', screen === 'setup');
   $('home').classList.toggle('on', screen === 'home');
-  $<HTMLButtonElement>('navBtn').hidden = !settings.hasKey;
+  // Always available from the home screen. Hiding it when there was no key meant a user
+  // who pressed "Skip" had no route back to setup at all — and the disabled primary
+  // button's own recovery branch was unreachable for the same reason.
+  $<HTMLButtonElement>('navBtn').hidden = screen === 'setup' && !settings.hasKey;
   $('navBtn').textContent = screen === 'home' ? 'Setup' : 'Done';
 
   renderSelects();
@@ -222,17 +406,27 @@ function render(): void {
     : 'no key connected';
 }
 
+/**
+ * Rebuilt only when the options actually changed.
+ *
+ * `render()` runs on every progress push — several a second during a run — and an
+ * unconditional `replaceChildren` closed the Model dropdown the moment the user opened it
+ * to check what they were paying for.
+ */
 function renderSelects(): void {
-  for (const id of ['provider', 'provider2']) {
-    $<HTMLSelectElement>(id).replaceChildren(
-      ...providers.map((p) => option(p.id, p.label, p.id === settings.provider)),
-    );
-  }
+  sync(['provider', 'provider2'], providers.map((p) => [p.id, p.label]), settings.provider);
   const models = currentProvider()?.models ?? [];
-  for (const id of ['model', 'model2']) {
-    $<HTMLSelectElement>(id).replaceChildren(
-      ...models.map((m) => option(m.id, m.label, m.id === settings.model)),
-    );
+  sync(['model', 'model2'], models.map((m) => [m.id, m.label]), settings.model);
+}
+
+function sync(ids: string[], items: [string, string][], selected: string): void {
+  for (const id of ids) {
+    const el = $<HTMLSelectElement>(id);
+    const same =
+      el.options.length === items.length &&
+      items.every(([value], i) => el.options[i]?.value === value);
+    if (!same) el.replaceChildren(...items.map(([v, label]) => option(v, label, v === selected)));
+    el.value = selected;
   }
 }
 
@@ -265,61 +459,93 @@ function renderSetup(): void {
 
 function renderHome(): void {
   const { total, categorized, pending, spentUsd, estimateUsd } = progress;
+  const running = progress.phase === 'running';
+  const active = running || harvesting;
 
   $('fCaptured').textContent = String(total);
   $('fIndexed').textContent = String(categorized);
-  $('fQueued').textContent = String(pending);
+  $('fQueued').textContent = String(
+    progress.phase === 'running'
+      ? Math.max(0, progress.runTotal - progress.runCompleted)
+      : pending,
+  );
+  $('fQueuedCap').textContent = progress.phase === 'running' ? 'this run' : 'waiting';
   $('fSpent').textContent = fmtUsd(spentUsd);
-  $('fLeft').textContent = fmtUsd(estimateUsd);
-  $('fill').style.width = `${total ? (categorized / total) * 100 : 0}%`;
 
-  const running = progress.phase === 'running';
+  // When there is nothing pending, "left, at most" is $0.00 and the button beside it
+  // starts a full re-index. Show what that button would cost instead.
+  const finished = pending === 0 && total > 0 && !active;
+  $('fLeft').textContent = fmtUsd(finished && quote ? quote.usd : estimateUsd);
+  $('fLeftCap').textContent = finished ? 'to re-index' : 'left, at most';
+  const progressTotal = progress.runTotal || total;
+  const progressDone = progress.runTotal ? progress.runCompleted : categorized;
+  const percent = Math.round(progressTotal ? (progressDone / progressTotal) * 100 : 0);
+  $('fill').style.width = `${percent}%`;
+  $('track').setAttribute('aria-valuenow', String(percent));
+
   $('homeTitle').textContent =
-    total === 0
+    harvesting && total === 0
+      ? 'Scanning saved posts'
+      : total === 0
       ? 'Nothing captured yet'
       : running
-        ? 'Indexing'
-        : pending > 0
-          ? `${pending} post${pending === 1 ? '' : 's'} waiting`
-          : 'Everything captured is indexed';
+        ? `Indexing ${progress.runTotal} detected posts`
+        : harvesting
+          ? 'Scanning saved posts'
+          : pending > 0
+            ? `${pending} post${pending === 1 ? '' : 's'} waiting`
+            : 'Everything captured is indexed';
 
   $('homeBody').textContent =
-    total === 0
+    harvesting && total === 0
+      ? 'Keep the Instagram tab open. Posts found in this scan will wait for the next indexing run.'
+      : total === 0
       ? 'Open your saved posts on Instagram. Posts are captured as they load, so the ' +
         'library fills as you scroll — or press the button below and it scrolls for you.'
       : running
-        ? 'Running in the background. You can close this popup.'
-        : pending > 0
-          ? 'Captured but not summarised yet. Indexing always resumes where it stopped.'
-          : 'New saves are captured as you scroll and categorised in the background.';
+        ? `This run stops after its starting set. New posts found while scanning wait for the next run.`
+        : harvesting
+          ? 'Keep the Instagram tab open. Scanning does not send extra Instagram requests.'
+          : pending > 0
+            ? 'Captured but not summarised yet. Indexing always resumes where it stopped.'
+            : 'New saves are captured as you scroll and categorised in the background.';
 
   const primary = $<HTMLButtonElement>('primary');
-  primary.textContent = running
-    ? 'Pause indexing'
+  primary.classList.toggle('danger', confirming === 'reindex');
+  primary.textContent = active
+    ? 'Pause'
     : pending > 0
       ? `Index ${pending} post${pending === 1 ? '' : 's'}`
       : total > 0
-        ? 'Re-index everything'
+        ? confirming === 'reindex'
+          ? `Confirm — re-index ${total} posts`
+          : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
         : 'Index now';
   primary.disabled = !settings.hasKey;
 
-  if (progress.phase === 'error' && progress.message) {
-    setStatus('homeStatus', 'bad', progress.message);
-  } else if (running) {
-    setStatus('homeStatus', 'ok', 'Running in the background.');
-  } else if (progress.phase === 'paused') {
-    setStatus('homeStatus', '', 'Paused. Progress is saved.');
-  } else {
-    setStatus('homeStatus', '', stats.lastRunAt ? `Last run ${timeAgo(stats.lastRunAt)}.` : '');
+  if (confirming === 'reindex' && quote) {
+    setStatus(
+      'homeStatus',
+      'bad',
+      quote.billable === 0
+        ? 'Every summary is already on file, so this costs nothing. Press again to run it.'
+        : `${quote.billable} of ${quote.total} posts would be sent to the model again — about ${fmtUsd(quote.usd)}. Press again to confirm.`,
+    );
   }
 
+  $('ledgerState').textContent = `${stats.ledgerCount} on file`;
+  $('remove').textContent = confirming === 'remove' ? 'Remove the key?' : 'Remove';
+  $('resetSpend').textContent =
+    confirming === 'reset' ? 'Erase the spend record?' : 'Reset the spend counter';
   $('keyMask').textContent = settings.keyMask || 'none';
   $('keyState').textContent = settings.hasKey ? 'saved in this browser' : 'not set';
   $('replace').textContent = replacing ? 'Cancel' : 'Replace';
   $<HTMLElement>('replaceBox').hidden = !replacing;
 
-  $('autoIndex').classList.toggle('on', settings.autoIndex);
-  $('overlay').classList.toggle('on', settings.scrubberSkin === 'overlay');
+  // aria-checked drives the visual state as well as the announced one, so the two can
+  // never disagree — see the [aria-checked="true"] rules in popup.html.
+  $('autoIndex').setAttribute('aria-checked', String(settings.autoIndex));
+  $('overlay').setAttribute('aria-checked', String(settings.scrubberSkin === 'overlay'));
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -333,11 +559,26 @@ function currentModel(): ModelMeta | undefined {
   return provider?.models.find((m) => m.id === settings.model) ?? provider?.models[0];
 }
 
+function reindexPrice(q: ReindexQuote): string {
+  return q.billable === 0 ? 'free — all on file' : `~${fmtUsd(q.usd)}`;
+}
+
+/**
+ * Provider errors carry a friendly sentence followed by up to 400 characters of raw
+ * body. Showing the whole thing at 11.5px in a 380px column buried the actionable half
+ * and jumped the layout, so the tail moves to the tooltip.
+ */
 function setStatus(id: string, kind: '' | 'ok' | 'bad', message: string): void {
   const el = $(id);
   el.className = `status${kind ? ` ${kind}` : ''}`;
+  const cut = message.search(/[{\n]/);
+  const head = cut > 0 ? message.slice(0, cut).trim() : message;
   const msg = el.querySelector('.msg');
-  if (msg) msg.textContent = message;
+  if (msg) {
+    msg.textContent = head;
+    if (head !== message) el.title = message;
+    else el.removeAttribute('title');
+  }
 }
 
 function providerLabel(id: ProviderId): string {

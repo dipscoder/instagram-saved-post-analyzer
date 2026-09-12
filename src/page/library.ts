@@ -14,7 +14,14 @@
  * top and dropped the caret out of the search box.
  */
 
-import { send, subscribe, type Broadcast, type SortKey, type Stats } from '../messaging';
+import {
+  send,
+  subscribe,
+  type Broadcast,
+  type ReindexQuote,
+  type SortKey,
+  type Stats,
+} from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed } from '../routes';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
@@ -48,13 +55,30 @@ interface State {
   /** Records the last completed sweep did not find in the feed. */
   strays: number;
   straysDismissed: boolean;
+  /**
+   * Whether the sweep in progress began on the *full* saved feed.
+   *
+   * Captured when the sweep starts, not read when it ends. `isFullSavedFeed()` reads the
+   * current path, and walking from a collection into All posts mid-sweep never unmounts
+   * the library — so a sweep of 140 recipes could finish while the path said "all posts"
+   * and offer the rest of the library for deletion.
+   */
+  sweepWasFullFeed: boolean;
+  /** Why the last refresh failed, if it did. Distinguishes broken from empty. */
+  error: string | null;
+  /** Post opened inside the library; Instagram itself stays one explicit action away. */
+  detail: PostRecord | null;
+  confirmingReindexAll: boolean;
+  reindexQuote: ReindexQuote | null;
+  confirmingPost: string | null;
+  actionMessage: string | null;
 }
 
 const state: State = {
   posts: [],
   matches: 0,
   limit: PAGE_SIZE,
-  stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null },
+  stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null, ledgerCount: 0 },
   progress: IDLE_PROGRESS,
   search: '',
   sort: 'saved',
@@ -68,11 +92,19 @@ const state: State = {
   sweepStartedAt: 0,
   strays: 0,
   straysDismissed: false,
+  sweepWasFullFeed: false,
+  error: null,
+  detail: null,
+  confirmingReindexAll: false,
+  reindexQuote: null,
+  confirmingPost: null,
+  actionMessage: null,
 };
 
 let host: HTMLDivElement | null = null;
 let shadow: ShadowRoot | null = null;
 let searchDebounce = 0;
+const SEARCH_DEBOUNCE_MS = 240;
 /** Dropped on unmount — leaving on/off the saved route otherwise stacks up listeners. */
 let unsubscribe: (() => void) | null = null;
 
@@ -90,6 +122,7 @@ let elCount: HTMLElement | null = null;
 let elSort: HTMLSelectElement | null = null;
 let elSeg: HTMLElement | null = null;
 let elWhere: HTMLElement | null = null;
+let elBack: HTMLButtonElement | null = null;
 
 export function mountLibrary(): void {
   if (host) return;
@@ -109,14 +142,39 @@ export function mountLibrary(): void {
   document.body.appendChild(host);
 
   document.addEventListener('keydown', onShortcut, true);
+  setPageInert(true);
   unsubscribe = subscribe(onBroadcast);
   void refresh();
   render();
 }
 
 export function unmountLibrary(): void {
+  if (harvest) void send({ type: 'harvest:finished', reason: 'stopped' }).catch(() => {});
   stopHarvesting();
+  setPageInert(false);
   document.removeEventListener('keydown', onShortcut, true);
+  window.clearTimeout(searchDebounce);
+  window.clearTimeout(refreshQueued);
+  refreshQueued = 0;
+
+  // State is a module singleton, so anything not reset here is replayed on the next
+  // mount: a remount would paint the previous visit's stale cards, ask for its 2,000-row
+  // page again, and — if the user had switched to Instagram's own grid before leaving —
+  // come back invisible, with a 12px chip as the only clue where the library went.
+  state.posts = [];
+  state.matches = 0;
+  state.limit = PAGE_SIZE;
+  state.loading = true;
+  state.visible = true;
+  state.panelDismissed = false;
+  state.straysDismissed = false;
+  state.strays = 0;
+  state.error = null;
+  state.detail = null;
+  state.confirmingReindexAll = false;
+  state.reindexQuote = null;
+  state.confirmingPost = null;
+  state.actionMessage = null;
   unsubscribe?.();
   unsubscribe = null;
   host?.remove();
@@ -124,6 +182,7 @@ export function unmountLibrary(): void {
   shadow = null;
   elApp = elRestore = elRail = elMain = elIndexLabel = null;
   elTitle = elCount = elSeg = elWhere = null;
+  elBack = null;
   elSearch = null;
   elSort = null;
 }
@@ -132,7 +191,25 @@ export function isLibraryMounted(): boolean {
   return host !== null;
 }
 
+/**
+ * Take Instagram out of the tab order and the accessibility tree while we cover it.
+ *
+ * An opaque overlay hides the page visually and from nobody else: Tab walked into
+ * Instagram's nav and grid links behind it, and a screen reader read both interfaces
+ * interleaved as one document. `inert` is the one attribute that fixes both at once.
+ */
+function setPageInert(on: boolean): void {
+  for (const el of document.body.children) {
+    if (el === host) continue;
+    (el as HTMLElement).inert = on && state.visible;
+  }
+}
+
 function onBroadcast(msg: Broadcast): void {
+  if (msg.type === 'posts:updated') {
+    queueRefresh();
+    return;
+  }
   if (msg.type === 'harvest') {
     // The worker cannot scroll; only this page can. A pause from the popup has to reach
     // the harvester through here.
@@ -142,10 +219,22 @@ function onBroadcast(msg: Broadcast): void {
   }
   if (msg.type !== 'progress') return;
 
+  if (msg.progress.phase === 'running' || msg.progress.pending > 0) {
+    state.confirmingReindexAll = false;
+    state.reindexQuote = null;
+  }
+
   const moved =
     msg.progress.categorized !== state.stats.categorized ||
     msg.progress.total !== state.stats.total;
-  state.progress = msg.progress;
+
+  // Scrolling having stopped is something only this page knows. A worker push carrying
+  // `phase: 'running', message: null` used to overwrite it about 250ms after it appeared,
+  // leaving the user waiting for a capture that was never coming.
+  const stalled = !state.harvesting && state.progress.phase === 'paused' && state.progress.message;
+  state.progress = stalled
+    ? { ...msg.progress, phase: 'paused', message: state.progress.message }
+    : msg.progress;
   if (moved) queueRefresh();
   else render();
 }
@@ -171,16 +260,30 @@ function queueRefresh(): void {
  */
 let resetScroll = false;
 
-function refreshFromTop(): void {
+function refreshFromTop(withStats = true): void {
   resetScroll = true;
   // A new query is a new list; keeping page 3 of the old one makes no sense.
   state.limit = PAGE_SIZE;
-  void refresh();
+  void refresh(withStats);
 }
 
-async function refresh(): Promise<void> {
+/**
+ * Which query is current. Every refresh is fire-and-forget, and at 20,000 posts they take
+ * long enough to overlap — so without this, typing "pas" then "pasta" could paint the
+ * *broader* result set last, growing the grid while the search box said "pasta".
+ */
+let generation = 0;
+
+/**
+ * `withStats` is false on the search path. Counts do not depend on the query, and asking
+ * for them on every keystroke doubled the number of full-store reads for a number that
+ * had not changed.
+ */
+async function refresh(withStats = true): Promise<void> {
+  const gen = ++generation;
   try {
-    const [result, stats] = await Promise.all([
+    const detailShortcode = state.detail?.shortcode ?? null;
+    const [result, stats, detail] = await Promise.all([
       send<{ posts: PostRecord[]; total: number }>({
         type: 'posts:query',
         search: state.search,
@@ -188,16 +291,28 @@ async function refresh(): Promise<void> {
         limit: state.limit,
         sort: state.sort,
       }),
-      send<Stats>({ type: 'posts:stats' }),
+      withStats ? send<Stats>({ type: 'posts:stats' }) : Promise.resolve(null),
+      detailShortcode
+        ? send<PostRecord | null>({ type: 'post:get', shortcode: detailShortcode })
+        : Promise.resolve(null),
     ]);
+    if (gen !== generation) return;
     state.posts = result.posts;
     state.matches = result.total;
-    state.stats = stats;
-  } catch {
-    // Service worker restarting; the next progress push will retry.
+    if (stats) state.stats = stats;
+    if (detailShortcode) state.detail = detail;
+    state.error = null;
+  } catch (err) {
+    if (gen !== generation) return;
+    // Not silence. An unreachable worker left `stats.total` at 0, which is also what an
+    // empty library looks like — so a user with 18,000 indexed posts was told they had
+    // none, above an "Index now" button that then did nothing.
+    state.error = err instanceof Error ? err.message : String(err);
   } finally {
-    state.loading = false;
-    render();
+    if (gen === generation) {
+      state.loading = false;
+      render();
+    }
   }
 }
 
@@ -211,25 +326,31 @@ function buildShell(): DocumentFragment {
   // --- header: what is true of the whole library ---
 
   const header = h('header', 'header');
-  header.append(h('div', 'brand', [h('span', 'dot'), h('span', 'brand-name', 'Saved Index')]));
+  header.append(
+    h('div', 'brand', [h('span', 'brand-mark'), h('span', 'brand-name', 'Saved Index')]),
+  );
 
   const search = document.createElement('input');
   search.className = 'search';
   search.type = 'search';
-  search.placeholder = 'Search summaries, captions, tags, handles, alt text';
+  search.placeholder = 'Search your saved posts';
   search.title =
     'Every word has to match, in any order. Searches the summary, caption, category, ' +
     'subcategory, tags, hashtags, handle, alt text and audio track.';
   search.addEventListener('input', () => {
     state.search = search.value;
     clearTimeout(searchDebounce);
-    searchDebounce = self.setTimeout(refreshFromTop, 160);
+    // 160ms was shorter than the query it was protecting, so at 20,000 posts two or three
+    // were permanently in flight. Counts don't depend on the query, so this path skips
+    // the stats request entirely.
+    searchDebounce = self.setTimeout(() => refreshFromTop(false), SEARCH_DEBOUNCE_MS);
   });
   elSearch = search;
   header.append(search);
 
   const right = h('div', 'header-right');
   elIndexLabel = h('span', 'mono muted');
+  elIndexLabel.setAttribute('aria-live', 'polite');
   elWhere = whereSwitch();
   right.append(elIndexLabel, elWhere);
   header.append(right);
@@ -238,8 +359,13 @@ function buildShell(): DocumentFragment {
   // focused button survives a batch of results landing underneath it. ---
 
   const toolbar = h('div', 'toolbar');
+  elBack = h('button', 'back', '← Back');
+  elBack.addEventListener('click', closeDetail);
+  toolbar.append(elBack);
   elTitle = h('h1', 'title');
   elCount = h('span', 'mono muted');
+  // Announced, because a search that returns nothing is otherwise completely silent.
+  elCount.setAttribute('aria-live', 'polite');
   toolbar.append(elTitle, elCount);
 
   const sortWrap = h('label', 'sort');
@@ -286,7 +412,7 @@ function buildShell(): DocumentFragment {
   // demand in the page so it shares the design system, and so there is exactly one node
   // to reason about when the route changes.
   elRestore = h('button', 'restore', [
-    h('span', 'dot'),
+    h('span', 'brand-mark'),
     h('span', '', 'Saved Index'),
     h('span', 'mono restore-key', shortcutLabel()),
   ]);
@@ -321,6 +447,9 @@ function whereSwitch(): HTMLElement {
 function setVisible(visible: boolean): void {
   if (state.visible === visible) return;
   state.visible = visible;
+  // Hidden means Instagram is usable again — by keyboard and screen reader too, not just
+  // by mouse. `setPageInert` reads `state.visible`, so this has to follow the assignment.
+  setPageInert(true);
   render();
 }
 
@@ -329,6 +458,12 @@ function setVisible(visible: boolean): void {
  * shortcuts, and ignored while you are typing — on a Mac, Option+S is a real character.
  */
 function onShortcut(ev: KeyboardEvent): void {
+  // Escape is the first thing anyone tries on a full-viewport overlay. Getting out of the
+  // way is not the same as unmounting: the chip and Alt+S bring it straight back.
+  if (ev.key === 'Escape' && state.visible && host) {
+    setVisible(false);
+    return;
+  }
   if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
   if ((ev.code || '') !== 'KeyS') return;
 
@@ -351,7 +486,7 @@ function shortcutLabel(): string {
 
 function render(): void {
   if (!host || !elApp || !elRestore || !elRail || !elMain) return;
-  if (!elSearch || !elIndexLabel || !elTitle || !elCount || !elSort || !elSeg || !elWhere) return;
+  if (!elSearch || !elIndexLabel || !elTitle || !elCount || !elSort || !elSeg || !elWhere || !elBack) return;
 
   // Hidden means *out of the way*, not unmounted: the host stays put so the chip and the
   // keyboard shortcut keep working, and stops intercepting pointer events so Instagram's
@@ -369,22 +504,83 @@ function render(): void {
   elIndexLabel.textContent = indexLabel();
 
   const names = [...state.selected];
-  elTitle.textContent =
-    names.length === 1 ? names[0]! : names.length ? 'Comparing' : 'All saved';
-  elCount.textContent = countLabel();
+  elTitle.textContent = state.detail
+    ? 'Post details'
+    : names.length === 1
+      ? names[0]!
+      : names.length
+        ? 'Comparing'
+        : 'All saved';
+  elCount.textContent = state.detail ? '' : countLabel();
+  elBack.hidden = !state.detail;
+  elSort.parentElement!.style.display = state.detail ? 'none' : 'flex';
+  elSeg.style.display = state.detail ? 'none' : 'flex';
 
   for (const btn of elSeg.children) {
     btn.classList.toggle('on', (btn as HTMLElement).dataset['view'] === state.view);
   }
+
+  // `replaceChildren` destroys whatever had focus, and both containers hold real
+  // controls — the rail rows and "Show more". Without this, activating a category threw
+  // focus back to <body>, so the next Tab restarted from the top of instagram.com.
+  const root = shadow;
+  const focusKey = (root?.activeElement as HTMLElement | null)?.dataset['focus'] ?? null;
 
   elRail.replaceChildren(...railRows());
 
   // Swapping the results list resets scrollTop; put it back, so writes landing
   // mid-scroll don't throw you to the top of the grid.
   const scrollTop = resetScroll ? 0 : elMain.scrollTop;
+  const key = listKey();
+  if (resetScroll || key !== renderedListKey) {
+    renderedListKey = key;
+    elMain.replaceChildren(...mainRows());
+    elMain.scrollTop = scrollTop;
+  }
   resetScroll = false;
-  elMain.replaceChildren(...mainRows());
-  elMain.scrollTop = scrollTop;
+
+  if (focusKey && root) {
+    root.querySelector<HTMLElement>(`[data-focus="${CSS.escape(focusKey)}"]`)?.focus();
+  }
+}
+
+/**
+ * Cheap identity for the rendered list.
+ *
+ * A run emits progress several times a second, and every one of those used to tear down
+ * and rebuild every card — 1,800 elements and 200 images at the default page size, four
+ * times a second, each followed by a forced layout from restoring scrollTop. Only the
+ * cards whose categorisation actually flipped need a repaint.
+ */
+let renderedListKey = '';
+
+function listKey(): string {
+  // Include controls rendered *around* the cards as well as the cards themselves. The
+  // earlier key ignored these, so Dismiss, How does this work?, a stray notice, and the
+  // re-index confirmation all changed state correctly and then left identical DOM on
+  // screen because the list rebuild was skipped.
+  let key = [
+    state.detail?.shortcode ?? '',
+    state.detail?.thumbnailUrl ?? '',
+    state.view,
+    state.matches,
+    state.search,
+    state.sort,
+    [...state.selected].join(','),
+    state.progress.phase,
+    state.harvesting,
+    state.panelDismissed,
+    state.explainOpen,
+    state.strays,
+    state.straysDismissed,
+    state.confirmingReindexAll,
+    state.actionMessage ?? '',
+    state.error ?? '',
+  ].join('|') + '|';
+  for (const p of state.posts) {
+    key += `${p.shortcode}:${p.category ?? ''}:${p.categorizedAt ?? 0}:${p.thumbnailUrl},`;
+  }
+  return key;
 }
 
 function railRows(): Node[] {
@@ -394,6 +590,7 @@ function railRows(): Node[] {
     h('span', '', 'All saved'),
     h('span', 'mono count', String(state.stats.total)),
   ]);
+  all.dataset['focus'] = 'rail:all';
   all.addEventListener('click', () => {
     state.selected.clear();
     refreshFromTop();
@@ -435,6 +632,8 @@ function railRow(name: string, count: number): HTMLElement {
     h('span', '', name),
     h('span', 'mono count', String(count)),
   ]);
+  row.dataset['focus'] = `rail:${name}`;
+  row.setAttribute('aria-pressed', String(on));
   row.addEventListener('click', (ev) => {
     if (ev.metaKey || ev.ctrlKey) {
       if (on) state.selected.delete(name);
@@ -452,6 +651,11 @@ function railRow(name: string, count: number): HTMLElement {
 
 function mainRows(): Node[] {
   const rows: Node[] = [];
+
+  if (state.detail) {
+    rows.push(detailView(state.detail));
+    return rows;
+  }
 
   const strays = strayNotice();
   if (strays) rows.push(strays);
@@ -512,6 +716,7 @@ function mainRows(): Node[] {
   if (state.matches > state.posts.length) {
     const more = h('div', 'more');
     const btn = h('button', 'ghost', `Show ${Math.min(PAGE_SIZE, state.matches - state.posts.length)} more`);
+    btn.dataset['focus'] = 'more';
     btn.addEventListener('click', () => {
       state.limit += PAGE_SIZE;
       void refresh();
@@ -537,6 +742,23 @@ function countLabel(): string {
 
 /** The one full-panel state that outranks the grid, or null to show results. */
 function blockingState(): HTMLElement | null {
+  // Ahead of the empty state deliberately: an unreachable worker also reports zero posts,
+  // and telling someone with a full library that they have nothing saved is worse than
+  // telling them the extension is not answering.
+  if (state.error) {
+    return empty(
+      "Can't reach the extension",
+      'The background worker did not answer. This usually clears on its own; if the ' +
+        'extension was just reloaded or updated, reload this tab.',
+      { label: 'Try again', run: () => void refresh() },
+    );
+  }
+  if (state.progress.phase === 'error') {
+    return empty('Indexing stopped', state.progress.message ?? 'Something went wrong.', {
+      label: 'Retry',
+      run: () => void onIndexAction(),
+    });
+  }
   if (state.stats.total === 0) {
     return empty(
       'Nothing captured yet',
@@ -544,12 +766,6 @@ function blockingState(): HTMLElement | null {
         'Index now does that scrolling for you, at a human pace, until it reaches the end.',
       { label: 'Index now', run: () => void onIndexAction() },
     );
-  }
-  if (state.progress.phase === 'error' && state.stats.categorized === 0) {
-    return empty('Indexing stopped', state.progress.message ?? 'Something went wrong.', {
-      label: 'Retry',
-      run: () => void onIndexAction(),
-    });
   }
   return null;
 }
@@ -627,7 +843,9 @@ function indexPanel(): HTMLElement | null {
 
   const track = h('div', 'track');
   const fill = h('div', 'track-fill');
-  fill.style.width = `${p.total ? (p.categorized / p.total) * 100 : 0}%`;
+  const progressTotal = p.runTotal || p.total;
+  const progressDone = p.runTotal ? p.runCompleted : p.categorized;
+  fill.style.width = `${progressTotal ? (progressDone / progressTotal) * 100 : 0}%`;
   track.append(fill);
   el.append(track);
 
@@ -635,7 +853,8 @@ function indexPanel(): HTMLElement | null {
   facts.append(
     fact(String(p.total), 'captured'),
     fact(String(p.categorized), 'indexed'),
-    fact(String(p.pending), 'queued'),
+    fact(String(Math.max(0, p.runTotal - p.runCompleted)), 'in this run'),
+    fact(String(p.pending), 'waiting total'),
     fact(fmtUsd(p.spentUsd), 'spent'),
     fact(fmtUsd(p.estimateUsd), 'left, at most'),
   );
@@ -643,10 +862,26 @@ function indexPanel(): HTMLElement | null {
 
   if (state.harvesting) {
     el.append(
-      h('div', 'panel-note', 'Scrolling your saved posts to load more — keep this tab open.'),
+      h(
+        'div',
+        'panel-note',
+        'Scanning your saved feed — posts found after this run started wait for the next run.',
+      ),
     );
   }
   if (p.phase === 'error' && p.message) el.append(h('div', 'panel-note bad', p.message));
+  if (state.confirmingReindexAll && state.reindexQuote) {
+    const q = state.reindexQuote;
+    el.append(
+      h(
+        'div',
+        'panel-note bad',
+        q.billable === 0
+          ? 'Every answer is already in the ledger, so this pass is free. Press confirm to continue.'
+          : `${q.billable} of ${q.total} posts may be sent to the model again (about ${fmtUsd(q.usd)}).`,
+      ),
+    );
+  }
 
   const toggle = h('button', 'link', state.explainOpen ? 'Hide details' : 'How does this work?');
   toggle.addEventListener('click', () => {
@@ -669,8 +904,8 @@ function indexPanel(): HTMLElement | null {
           '2 · Categorise — the part that costs',
           'Hashtag and keyword rules label what they can for nothing. The rest go to your ' +
             'model in batches of 25 captions. Only posts with no usable caption cost a look at ' +
-            'the thumbnail. Nothing is categorised twice, and a paused run resumes where it ' +
-            'stopped.',
+            'the thumbnail. Each run freezes its post count when it starts, so newly found ' +
+            'posts wait for the next run instead of moving the finish line.',
         ),
         explainRow(
           'Where it all lives',
@@ -687,9 +922,9 @@ function indexPanel(): HTMLElement | null {
 
 function panelTitle(): string {
   const p = state.progress;
-  if (p.phase === 'running') return `Indexing · ${p.categorized} of ${p.total}`;
+  if (p.phase === 'running') return `Indexing · ${p.runCompleted} of ${p.runTotal}`;
   if (p.phase === 'error') return 'Indexing stopped';
-  if (p.phase === 'paused') return `Paused · ${p.categorized} of ${p.total}`;
+  if (p.phase === 'paused') return `Paused · ${p.runCompleted} of ${p.runTotal}`;
   if (state.harvesting) return 'Looking for more saved posts';
   if (p.pending > 0) return `${p.pending} post${p.pending === 1 ? '' : 's'} waiting to be indexed`;
   return `${p.total} post${p.total === 1 ? '' : 's'} indexed`;
@@ -710,15 +945,21 @@ function card(post: PostRecord): HTMLElement {
   (el as HTMLAnchorElement).href = post.permalink;
   (el as HTMLAnchorElement).target = '_blank';
   (el as HTMLAnchorElement).rel = 'noopener';
+  el.dataset['focus'] = `post:${post.shortcode}`;
+  el.title = 'View details';
+  el.addEventListener('click', (ev) => {
+    // Preserve the browser's expected modified-click behaviour for opening Instagram.
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    ev.preventDefault();
+    state.detail = post;
+    state.confirmingPost = null;
+    state.actionMessage = null;
+    resetScroll = true;
+    render();
+    elBack?.focus();
+  });
 
-  const thumb = h('div', 'thumb');
-  if (post.thumbnailUrl) {
-    const img = document.createElement('img');
-    img.src = post.thumbnailUrl;
-    img.loading = 'lazy';
-    img.alt = post.altText ?? '';
-    thumb.append(img);
-  }
+  const thumb = mediaPreview(post, 'thumb', true);
   if (post.isVideo) thumb.append(h('span', 'mono kind', 'REEL'));
   if (post.durationSec) thumb.append(h('span', 'mono dur', fmtDuration(post.durationSec)));
   el.append(thumb);
@@ -747,6 +988,159 @@ function card(post: PostRecord): HTMLElement {
   el.append(meta);
 
   return el;
+}
+
+function detailView(post: PostRecord): HTMLElement {
+  const page = h('article', 'detail');
+  const media = mediaPreview(post, 'detail-media', false);
+
+  const info = h('div', 'detail-info');
+  info.append(
+    h('div', 'detail-heading', [chipFor(post.category), h('span', 'mono handle', post.handle)]),
+    h(
+      'p',
+      'detail-summary',
+      post.categorizedAt
+        ? post.summary || 'No summary was available.'
+        : 'Waiting to be indexed.',
+    ),
+  );
+
+  const facts = h('dl', 'detail-facts');
+  appendFact(facts, 'Subcategory', post.subcategory || '—');
+  appendFact(facts, 'Tags', post.tags.length ? post.tags.join(' · ') : '—');
+  appendFact(facts, 'Type', post.isVideo ? 'Video' : 'Image');
+  if (post.audioTrackName) appendFact(facts, 'Audio', post.audioTrackName);
+  if (post.postedAt) appendFact(facts, 'Posted', fmtLongDate(post.postedAt));
+  if (post.firstSeenAt) appendFact(facts, 'Added here', fmtLongDate(post.firstSeenAt));
+  appendFact(facts, 'Classified by', post.modelUsed || 'Not yet indexed');
+  info.append(facts);
+
+  if (post.caption) {
+    info.append(h('div', 'detail-label', 'Caption'), h('p', 'detail-caption', post.caption));
+  }
+
+  if (state.actionMessage) {
+    const status = h('div', 'detail-status', state.actionMessage);
+    status.setAttribute('role', 'status');
+    info.append(status);
+  }
+
+  const actions = h('div', 'detail-actions');
+  const open = h('a', 'pill', 'Open on Instagram ↗');
+  open.setAttribute('href', post.permalink);
+  open.setAttribute('target', '_blank');
+  open.setAttribute('rel', 'noopener');
+  const retry = h(
+    'button',
+    state.confirmingPost === post.shortcode ? 'pill danger' : 'ghost',
+    state.confirmingPost === post.shortcode ? 'Confirm re-index' : 'Re-index this post',
+  );
+  retry.addEventListener('click', () => void reindexPost(post));
+  actions.append(open, retry);
+  info.append(actions);
+
+  page.append(media, info);
+  return page;
+}
+
+/**
+ * A media frame that fails gracefully.
+ *
+ * Instagram CDN URLs are signed and eventually expire. A failed `<img>` normally paints
+ * its alt text at full size — the wall of captions shown in the bug report. The alt text
+ * remains available on the frame for assistive technology, while the visual state is a
+ * quiet, intentional placeholder until the next saved-feed scan refreshes the URL.
+ */
+function mediaPreview(post: PostRecord, className: string, lazy: boolean): HTMLElement {
+  const frame = h('div', className);
+  frame.setAttribute('role', 'img');
+  frame.setAttribute('aria-label', post.altText || `Saved post by ${post.handle || 'Instagram'}`);
+  frame.title = post.thumbnailUrl
+    ? 'Post preview'
+    : 'Preview unavailable. Scan your saved posts to refresh it.';
+
+  frame.append(
+    h('div', 'media-fallback', [
+      h('span', 'media-fallback-mark'),
+      h('span', 'media-fallback-label', 'Preview unavailable'),
+    ]),
+  );
+
+  if (!post.thumbnailUrl) {
+    frame.classList.add('media-missing');
+    return frame;
+  }
+
+  const img = document.createElement('img');
+  img.alt = '';
+  img.decoding = 'async';
+  if (lazy) img.loading = 'lazy';
+  img.addEventListener('load', () => frame.classList.add('media-ready'), { once: true });
+  img.addEventListener(
+    'error',
+    () => {
+      img.remove();
+      frame.classList.add('media-missing');
+      frame.title = 'Instagram preview expired. Scan your saved posts to refresh it.';
+    },
+    { once: true },
+  );
+  // Set after listeners: cached failures may dispatch immediately.
+  img.src = post.thumbnailUrl;
+  frame.append(img);
+  return frame;
+}
+
+function appendFact(list: HTMLDListElement, label: string, value: string): void {
+  list.append(h('dt', '', label), h('dd', '', value));
+}
+
+function closeDetail(): void {
+  const shortcode = state.detail?.shortcode ?? null;
+  state.detail = null;
+  state.confirmingPost = null;
+  state.actionMessage = null;
+  resetScroll = true;
+  render();
+  if (shortcode) {
+    shadow
+      ?.querySelector<HTMLElement>(`[data-focus="${CSS.escape(`post:${shortcode}`)}"]`)
+      ?.focus();
+  }
+}
+
+async function reindexPost(post: PostRecord): Promise<void> {
+  if (state.confirmingPost !== post.shortcode) {
+    state.confirmingPost = post.shortcode;
+    state.actionMessage =
+      'This will ignore the saved answer and ask the current model to classify this post again.';
+    renderedListKey = '';
+    return render();
+  }
+
+  state.confirmingPost = null;
+  state.actionMessage = 'Queued for re-indexing…';
+  renderedListKey = '';
+  render();
+  try {
+    const result = await send<{ post: PostRecord; progress: IndexProgress }>({
+      type: 'post:reindex',
+      shortcode: post.shortcode,
+    });
+    state.detail = result.post;
+    state.progress = result.progress;
+    state.actionMessage =
+      result.progress.phase === 'paused'
+        ? 'Queued. Resume indexing when you are ready.'
+        : 'Re-indexing this post now. You can keep browsing.';
+    renderedListKey = '';
+    queueRefresh();
+  } catch (err) {
+    state.actionMessage = err instanceof Error ? err.message : String(err);
+    renderedListKey = '';
+    render();
+  }
 }
 
 /**
@@ -791,24 +1185,52 @@ function empty(
 
 async function onIndexAction(): Promise<void> {
   if (state.progress.phase === 'running' || state.harvesting) {
+    state.confirmingReindexAll = false;
     stopHarvesting();
     await send({ type: 'index:pause' });
     return;
   }
 
+  if (state.progress.pending > 0) {
+    state.confirmingReindexAll = false;
+    state.reindexQuote = null;
+  }
+
   // Everything captured is already categorised, so the only useful action left is a
   // fresh pass over the lot.
   if (state.progress.phase === 'done' && state.progress.pending === 0 && state.stats.total > 0) {
-    startHarvesting();
-    await send({ type: 'index:reindex' });
-    return;
+    if (!state.confirmingReindexAll) {
+      try {
+        state.reindexQuote = await send<ReindexQuote>({ type: 'index:quote' });
+        state.confirmingReindexAll = true;
+        render();
+      } catch (err) {
+        state.error = err instanceof Error ? err.message : String(err);
+        render();
+      }
+      return;
+    }
+    state.confirmingReindexAll = false;
   }
 
   // Two halves, and they run together: the harvester scrolls the page so the capture
   // layer sees every saved post, while the worker categorises whatever has landed.
   // Only the page can scroll, so the harvester has to live here, not in the worker.
-  startHarvesting();
-  await send({ type: 'index:start' });
+  try {
+    await send({
+      type:
+        state.progress.phase === 'done' && state.progress.pending === 0
+          ? 'index:reindex'
+          : 'index:start',
+    });
+  } catch (err) {
+    state.progress = {
+      ...state.progress,
+      phase: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+    render();
+  }
 }
 
 let harvest: HarvestHandle | null = null;
@@ -817,10 +1239,15 @@ function startHarvesting(): void {
   if (harvest) return;
   state.harvesting = true;
   state.sweepStartedAt = Date.now();
+  state.sweepWasFullFeed = isFullSavedFeed();
   state.strays = 0;
   state.straysDismissed = false;
-  harvest = startHarvest();
-  void harvest.done.then((result) => {
+  const current = startHarvest();
+  harvest = current;
+  void current.done.then((result) => {
+    // Pause followed quickly by Resume can leave the old sweep finishing after the new
+    // one starts. Only the sweep that still owns the slot may change the visible state.
+    if (harvest !== current) return;
     harvest = null;
     state.harvesting = false;
     if (result.reason === 'rate-limited') {
@@ -834,7 +1261,8 @@ function startHarvesting(): void {
     // the feed — a stopped or throttled run has simply not got there yet — and it must
     // have been sweeping the *whole* feed rather than one collection, or everything
     // outside that collection would look unsaved.
-    if (result.reason === 'complete' && isFullSavedFeed()) void countStrays();
+    if (result.reason === 'complete' && state.sweepWasFullFeed) void countStrays();
+    void send({ type: 'harvest:finished', reason: result.reason }).catch(() => {});
     void refresh();
   });
   render();
@@ -891,7 +1319,11 @@ function primaryLabel(): string {
     case 'error':
       return 'Resume';
     case 'done':
-      return state.progress.pending > 0 ? 'Continue' : 'Re-index';
+      if (state.progress.pending > 0) return `Index ${state.progress.pending}`;
+      if (state.confirmingReindexAll) return 'Confirm re-index';
+      return state.reindexQuote
+        ? `Re-index · ${fmtUsd(state.reindexQuote.usd)}`
+        : 'Re-index';
     default:
       return state.stats.total === 0 ? 'Index now' : 'Keep indexing';
   }

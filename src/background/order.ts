@@ -28,12 +28,28 @@ const KEY = 'captureCursor';
 /** Positions available per visit. A million saved posts is not a real number. */
 const STRIDE = 1_000_000;
 
-interface Cursor {
-  /** Identifies the visit. The content script mints one per page load. */
-  pageId: string;
+interface Visit {
   session: number;
   seq: number;
 }
+
+/**
+ * One entry per recent page load, rather than one global cursor.
+ *
+ * A single cursor keyed on "the last pageId I saw" looked right with one tab and inverted
+ * the whole library with two: pressing Index now broadcasts to every open saved tab, both
+ * sweep at once, and their messages interleave. Each alternation counted as a new visit —
+ * bumping the session by a full STRIDE and resetting the position to zero — so ranks grew
+ * with depth into the feed, which is precisely backwards. Keeping a handful of visits
+ * addressable at once makes interleaving a non-event.
+ */
+interface Cursor {
+  visits: Record<string, Visit>;
+  lastSession: number;
+}
+
+/** Enough for a couple of tabs plus the one before them. Old entries are just dropped. */
+const MAX_TRACKED_VISITS = 4;
 
 /**
  * Reservations have to be serialised: two capture messages landing together would
@@ -52,18 +68,29 @@ export function reserveRanks(pageId: string, count: number): Promise<number[]> {
 async function reserve(pageId: string, count: number): Promise<number[]> {
   if (count <= 0) return [];
 
-  const stored = (await chrome.storage.local.get(KEY))[KEY] as Cursor | undefined;
-  const cursor: Cursor =
-    stored?.pageId === pageId
-      ? { ...stored }
-      : { pageId, session: (stored?.session ?? 0) + 1, seq: 0 };
+  const stored = (await chrome.storage.local.get(KEY))[KEY] as Partial<Cursor> | undefined;
+  const visits: Record<string, Visit> = { ...stored?.visits };
+  let lastSession = stored?.lastSession ?? 0;
+
+  let visit = visits[pageId];
+  if (!visit) {
+    visit = { session: ++lastSession, seq: 0 };
+    visits[pageId] = visit;
+  }
 
   const ranks: number[] = [];
   for (let i = 0; i < count; i++) {
-    ranks.push(cursor.session * STRIDE - Math.min(cursor.seq + i, STRIDE - 1));
+    ranks.push(visit.session * STRIDE - Math.min(visit.seq + i, STRIDE - 1));
   }
+  visit.seq = Math.min(visit.seq + count, STRIDE - 1);
 
-  cursor.seq = Math.min(cursor.seq + count, STRIDE - 1);
-  await chrome.storage.local.set({ [KEY]: cursor });
+  // Keep only the most recent few, newest session first, so the record stays small.
+  const kept = Object.entries(visits)
+    .sort(([, a], [, b]) => b.session - a.session)
+    .slice(0, MAX_TRACKED_VISITS);
+
+  await chrome.storage.local.set({
+    [KEY]: { visits: Object.fromEntries(kept), lastSession } satisfies Cursor,
+  });
   return ranks;
 }

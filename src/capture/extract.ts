@@ -95,10 +95,12 @@ function collect(payload: unknown, found: Map<string, CapturedPost>): void {
     const obj = node as Json;
     if (isMediaNode(obj)) {
       const post = toCapturedPost(obj);
-      // First writer wins: an outer node carries richer fields than a nested repost stub.
       if (post && !found.has(post.shortcode)) found.set(post.shortcode, post);
-      // Keep descending regardless — carousels nest children that are media too, and a
-      // saved-feed envelope nests the real item under `media`.
+      // The saved item is the parent. Descending into a recognised media record turns
+      // carousel slides and embedded/reposted originals into extra "saved posts" even
+      // though the user saved only the outer post. Envelopes are still traversed until
+      // the first actual media node is reached.
+      return;
     }
 
     for (const key in obj) walk(obj[key], depth + 1);

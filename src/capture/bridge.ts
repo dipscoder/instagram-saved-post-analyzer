@@ -16,6 +16,8 @@ const SCROLL_MIN_MS = 800;
 const SCROLL_MAX_MS = 2000;
 /** Give up after this many scrolls that surface nothing new — we've hit the end. */
 const IDLE_ROUNDS_BEFORE_STOP = 3;
+/** One last chance for a slow page before a quiet sweep counts as a finished one. */
+const SETTLE_MS = 5000;
 
 let rateLimited = false;
 const seen = new Set<string>();
@@ -27,16 +29,20 @@ const seen = new Set<string>();
  */
 const pageId = crypto.randomUUID();
 
+const SHORTCODE = /^[A-Za-z0-9_-]{5,30}$/;
+
 export function startBridge(): void {
   window.addEventListener('message', handleMessage);
 
-  // Tell the MAIN world we're listening so it can flush anything captured before this
-  // script ran. Both scripts are document_start; their relative order isn't guaranteed.
-  const ready: BridgeMessage = { wire: WIRE, kind: 'bridge-ready' };
-  window.postMessage(ready, window.location.origin);
+  announceReady();
 
   // Cover the case where the grid painted from memory with no network call at all.
   setTimeout(() => void ingest(scrapeSavedGrid()), 1500);
+}
+
+function announceReady(): void {
+  const ready: BridgeMessage = { wire: WIRE, kind: 'bridge-ready' };
+  window.postMessage(ready, window.location.origin);
 }
 
 function handleMessage(ev: MessageEvent): void {
@@ -48,7 +54,17 @@ function handleMessage(ev: MessageEvent): void {
     rateLimited = true;
     return;
   }
-  if (msg.kind !== 'captured') return;
+  if (msg.kind === 'main-ready') {
+    // Both scripts run at document_start with no guaranteed order. We announce once on
+    // load, which covers "bridge started late"; this covers the other direction — the
+    // patch installed after our announcement and would otherwise buffer every payload
+    // forever, leaving the library silently empty.
+    announceReady();
+    return;
+  }
+  // Anything on this channel came from the page's own JS context, which Instagram and
+  // every script it loads can write to. Shape is checked before it is walked.
+  if (msg.kind !== 'captured' || !Array.isArray(msg.payloads)) return;
 
   // The outermost fence. A saved-feed response can only be an answer to the saved grid
   // being on screen; anything arriving while you are on the home feed, a profile, or an
@@ -65,7 +81,11 @@ function handleMessage(ev: MessageEvent): void {
 async function ingest(posts: CapturedPost[]): Promise<void> {
   // Dedupe in-page as well as in the DB — this saves a round trip on every re-render of
   // an already-seen tile, which on an infinite scroll is most of them.
-  const fresh = posts.filter((p) => p.shortcode && !seen.has(p.shortcode));
+  // The shortcode becomes a database key and part of a permalink, and it arrives from a
+  // context the page can write to. Instagram's own codes are short base64url strings.
+  const fresh = posts.filter(
+    (p) => SHORTCODE.test(p.shortcode ?? '') && !seen.has(p.shortcode),
+  );
   if (!fresh.length) return;
   for (const p of fresh) seen.add(p.shortcode);
 
@@ -99,11 +119,23 @@ export function startHarvest(): HarvestHandle {
   seen.clear();
   const before = 0;
 
+  // The 429 flag is a fact about one moment, not about the tab. Left latched, a single
+  // rate-limit anywhere on instagram.com made every later sweep return instantly with
+  // "try again shortly" until the page was reloaded.
+  rateLimited = false;
+
+  // A sweep is only ever a statement about the feed it started on. Without this, walking
+  // from a collection into the full grid mid-sweep produced a "complete" result for a
+  // feed the harvester had barely touched — and "complete" is what authorises the census
+  // to offer the untouched remainder for deletion.
+  const startedOn = location.pathname;
+
   const done = (async (): Promise<HarvestResult> => {
     let idleRounds = 0;
 
     while (!stopped) {
       if (rateLimited) return { reason: 'rate-limited', found: seen.size - before };
+      if (location.pathname !== startedOn) return { reason: 'stopped', found: seen.size - before };
 
       const heightBefore = document.documentElement.scrollHeight;
       const countBefore = seen.size;
@@ -119,6 +151,18 @@ export function startHarvest(): HarvestHandle {
       idleRounds = grew || foundMore ? 0 : idleRounds + 1;
 
       if (idleRounds >= IDLE_ROUNDS_BEFORE_STOP) {
+        // Three quiet rounds is ~2.4s, and a stalled load looks exactly like the end of
+        // the feed. Since 'complete' is what lets the census offer posts for deletion,
+        // buy one long settle before believing it.
+        await sleep(SETTLE_MS);
+        void ingest(scrapeSavedGrid());
+        if (
+          document.documentElement.scrollHeight > heightBefore ||
+          seen.size > countBefore
+        ) {
+          idleRounds = 0;
+          continue;
+        }
         return { reason: 'complete', found: seen.size - before };
       }
     }

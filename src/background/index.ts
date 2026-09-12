@@ -8,6 +8,7 @@
  */
 
 import * as db from './db';
+import * as ledger from './ledger';
 import { Categorizer } from './categorize';
 import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
 import { reserveRanks } from './order';
@@ -47,19 +48,64 @@ const categorizer = new Categorizer((p) => {
  */
 const subscribers = new Set<chrome.runtime.Port>();
 
+/**
+ * Whether the page should currently be auto-scrolling.
+ *
+ * `harvest` is a command, and it was sent over a channel that drops: the library's port
+ * reconnects a second after the worker idles out, so a Pause pressed in that window
+ * reached the popup and never reached the page, which kept scrolling and capturing. Held
+ * here and replayed on connect. Resetting to false when the worker dies is correct —
+ * nothing is running then either.
+ */
+let harvesting = false;
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== PORT) return;
   subscribers.add(port);
-  port.onDisconnect.addListener(() => subscribers.delete(port));
-  // Bring a fresh subscriber up to date immediately.
+  port.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    subscribers.delete(port);
+  });
+  // Bring a fresh subscriber up to date immediately — both what is happening and what it
+  // should be doing about it.
   void categorizer.progress().then((progress) => {
     try {
       port.postMessage({ type: 'progress', progress } satisfies Broadcast);
+      port.postMessage({
+        type: 'harvest',
+        action: harvesting ? 'start' : 'stop',
+      } satisfies Broadcast);
     } catch {
       subscribers.delete(port);
     }
   });
 });
+
+function setHarvest(action: 'start' | 'stop'): void {
+  harvesting = action === 'start';
+  broadcast({ type: 'harvest', action });
+}
+
+/** Surface a background failure through the channel the UI is already watching. */
+function reportFailure(err: unknown): void {
+  const progress: IndexProgress = {
+    ...lastProgress,
+    phase: 'error',
+    message: redact(err instanceof Error ? err.message : String(err)),
+  };
+  lastProgress = progress;
+  broadcast({ type: 'progress', progress });
+}
+
+function trackCompletion(): void {
+  void categorizer
+    .completion()
+    ?.then(async () => {
+      const progress = await categorizer.progress();
+      if (progress.phase === 'done') await chrome.storage.local.set({ lastRunAt: Date.now() });
+    })
+    .catch(reportFailure);
+}
 
 function broadcast(msg: Broadcast): void {
   for (const port of subscribers) {
@@ -86,25 +132,45 @@ chrome.runtime.onMessage.addListener((req: Request, _sender, sendResponse) => {
 async function handle(req: Request): Promise<unknown> {
   switch (req.type) {
     case 'posts:captured': {
+      // This payload started life in the page's own JS context, so it is bounded before it
+      // is stored: an unbounded array or a multi-megabyte caption would otherwise land in
+      // the database and, from there, in a prompt the user pays for.
+      const posts = Array.isArray(req.posts) ? req.posts.slice(0, MAX_POSTS_PER_MESSAGE) : [];
+      if (!posts.length) return { inserted: 0 };
+
       // Posts arrive in feed order, which is save order — see background/order.ts. Ranks
       // are reserved for the whole batch at once so a concurrent message can't interleave.
-      const ranks = await reserveRanks(req.pageId, req.posts.length);
-      const inserted = await db.putIfNew(
-        req.posts.map((p: CapturedPost, i) => toRecord(p, ranks[i] ?? null)),
+      const ranks = await reserveRanks(req.pageId, posts.length);
+      const { inserted, refreshed } = await db.putIfNew(
+        posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null)),
       );
-      if (inserted > 0) {
+      if (inserted > 0 || refreshed > 0) {
         // Push the new total straight away so the library's counts and rows update as
-        // you scroll, whether or not categorisation is about to run.
+        // you scroll. Existing records matter too: their Instagram CDN thumbnail may
+        // have just been replaced with a fresh signed URL.
         broadcast({ type: 'progress', progress: await categorizer.progress() });
+        if (refreshed > 0) {
+          // Counts do not change when an expired CDN URL is refreshed, so a progress
+          // event alone would not make the library query its cards again.
+          broadcast({ type: 'posts:updated' });
+        }
 
         const settings = await getSettings();
         // Auto-index picks up newly captured posts without the user asking, but only
         // when a key exists and a run isn't already in flight.
-        if (settings.autoIndex && settings.apiKey && !categorizer.isRunning()) {
-          void categorizer.start();
+        // `isRunning()` alone was not enough: a paused run is not running, so the next
+        // captured tile restarted the very spend the user had just stopped.
+        if (
+          settings.autoIndex &&
+          settings.apiKey &&
+          !harvesting &&
+          !categorizer.isRunning() &&
+          !categorizer.isPaused()
+        ) {
+          void categorizer.start().catch(reportFailure);
         }
       }
-      return { inserted };
+      return { inserted, refreshed };
     }
 
     case 'posts:query':
@@ -116,10 +182,20 @@ async function handle(req: Request): Promise<unknown> {
       });
 
     case 'posts:stats': {
-      const s = await db.stats();
-      const { lastRunAt } = await chrome.storage.local.get('lastRunAt');
-      return { ...s, lastRunAt: (lastRunAt as number | undefined) ?? null } satisfies Stats;
+      const [s, ledgerCount, stored] = await Promise.all([
+        db.stats(),
+        ledger.count(),
+        chrome.storage.local.get('lastRunAt'),
+      ]);
+      return {
+        ...s,
+        lastRunAt: (stored['lastRunAt'] as number | undefined) ?? null,
+        ledgerCount,
+      } satisfies Stats;
     }
+
+    case 'post:get':
+      return (await db.byShortcode(String(req.shortcode ?? ''))) ?? null;
 
     case 'posts:strays':
       return { count: (await db.strays(req.since)).length };
@@ -130,23 +206,65 @@ async function handle(req: Request): Promise<unknown> {
       return { removed };
     }
 
+    case 'post:reindex': {
+      const shortcode = String(req.shortcode ?? '');
+      if (!/^[A-Za-z0-9_-]{5,30}$/.test(shortcode)) throw new Error('Invalid post id.');
+      const settings = await getSettings();
+      if (!settings.apiKey) throw new Error('Connect a model before re-indexing this post.');
+      const post = await categorizer.reindexOne(shortcode);
+      trackCompletion();
+      return { post, progress: await categorizer.progress() };
+    }
+
     case 'index:start': {
-      // The page owns scrolling, so starting a run means asking whichever tab is on the
-      // saved grid to start harvesting too. A tab that isn't there simply never hears it.
-      broadcast({ type: 'harvest', action: 'start' });
-      void categorizer.start().then(() => chrome.storage.local.set({ lastRunAt: Date.now() }));
+      const settings = await getSettings();
+      if (!settings.apiKey) throw new Error('Connect a model before indexing.');
+      // Freeze the queue before scrolling starts. A response can arrive immediately
+      // after the harvest broadcast; reversing these two lines let it sneak into what
+      // was supposed to be a fixed-size run.
+      await categorizer.start();
+      setHarvest('start');
+      trackCompletion();
       return categorizer.progress();
     }
 
     case 'index:pause':
-      broadcast({ type: 'harvest', action: 'stop' });
+      setHarvest('stop');
       categorizer.pause();
       return categorizer.progress();
 
     case 'index:reindex':
-      broadcast({ type: 'harvest', action: 'start' });
-      void categorizer.reindex();
+      if (!(await getSettings()).apiKey) throw new Error('Connect a model before re-indexing.');
+      // Without the catch, a failed `resetCategories` rejected into `void`: the page was
+      // already scrolling, the button already said Pause, and nothing ever ran.
+      await categorizer.reindex();
+      setHarvest('start');
+      trackCompletion();
       return categorizer.progress();
+
+    case 'harvest:finished':
+      // A natural end used to leave `harvesting=true` in the worker forever. The next
+      // popup/content port to connect replayed "start" and silently began another sweep.
+      if (req.reason === 'rate-limited') categorizer.pause();
+      if (harvesting) setHarvest('stop');
+      return { stopped: true, reason: req.reason };
+
+    case 'index:quote':
+      return categorizer.quoteReindex();
+
+    case 'ledger:export':
+      return ledger.exportAll();
+
+    case 'ledger:import': {
+      const result = await ledger.importAll(req.file);
+      // Imported verdicts are only worth anything once they reach the posts. Clearing the
+      // categorisation lets the next run replay them from the ledger for free.
+      if (result.imported > 0) {
+        await db.resetCategories();
+        void categorizer.start().catch(reportFailure);
+      }
+      return result;
+    }
 
     case 'index:progress':
       return categorizer.isRunning() ? categorizer.progress() : refreshProgress();
@@ -175,7 +293,12 @@ async function handle(req: Request): Promise<unknown> {
       const patch = { ...req.patch };
       if (patch.apiKey !== undefined && patch.apiKey.trim() === '') delete patch.apiKey;
       await setSettings(patch);
-      return getSafeSettings();
+      const safe = await getSafeSettings();
+      // storage.local is TRUSTED_CONTEXTS, so a content script never receives its change
+      // events — the listener that used to carry this was dead. The port is the only way
+      // an open instagram.com tab hears about a settings change without a reload.
+      broadcast({ type: 'settings', settings: safe });
+      return safe;
     }
 
     case 'settings:clear-key': {
@@ -194,10 +317,65 @@ async function handle(req: Request): Promise<unknown> {
       return { ok: true, ms, model, provider: getProvider(provider).label };
     }
 
+    case 'settings:test-candidate': {
+      const apiKey = String(req.apiKey ?? '').trim();
+      if (!apiKey || apiKey.length > 500) throw new Error('Enter a valid API key.');
+      const provider = getProvider(req.provider);
+      if (!provider.models.some((candidate) => candidate.id === req.model)) {
+        throw new Error('Choose a model offered by that provider.');
+      }
+      const started = performance.now();
+      await testKey(req.provider, apiKey, req.model);
+      return {
+        ok: true,
+        ms: Math.round(performance.now() - started),
+        model: req.model,
+        provider: provider.label,
+      };
+    }
+
     default: {
       const exhaustive: never = req;
       throw new Error(`Unhandled request: ${JSON.stringify(exhaustive)}`);
     }
+  }
+}
+
+/** One page of the saved grid is ~12 tiles; a generous ceiling still bounds the damage. */
+const MAX_POSTS_PER_MESSAGE = 500;
+const MAX_CAPTION_CHARS = 4000;
+const MAX_HASHTAGS = 60;
+
+/** Bound the free-text fields a page could have inflated before they reach the DB. */
+function clamp(p: CapturedPost): CapturedPost {
+  return {
+    ...p,
+    caption: String(p.caption ?? '').slice(0, MAX_CAPTION_CHARS),
+    altText: p.altText === null ? null : String(p.altText).slice(0, MAX_CAPTION_CHARS),
+    audioTrackName:
+      p.audioTrackName === null ? null : String(p.audioTrackName).slice(0, 200),
+    handle: String(p.handle ?? '').slice(0, 100),
+    thumbnailUrl: safeMediaUrl(p.thumbnailUrl),
+    hashtags: (Array.isArray(p.hashtags) ? p.hashtags : [])
+      .slice(0, MAX_HASHTAGS)
+      .map((t) => String(t).slice(0, 100)),
+  };
+}
+
+/** Accept only bounded Instagram-hosted HTTPS images from the untrusted page bridge. */
+function safeMediaUrl(value: unknown): string {
+  const raw = String(value ?? '').slice(0, 4_000);
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const allowed =
+      host === 'instagram.com' ||
+      host.endsWith('.instagram.com') ||
+      host.endsWith('.cdninstagram.com') ||
+      host.endsWith('.fbcdn.net');
+    return url.protocol === 'https:' && allowed ? url.href : '';
+  } catch {
+    return '';
   }
 }
 

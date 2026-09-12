@@ -35,6 +35,9 @@
 
 import type { VideoControls } from '../types';
 
+/** Room left for Instagram's own reel chrome along the bottom of the viewport. */
+const BOTTOM_KEEP_OUT_PX = 56;
+
 const SEEK_STEP_SECONDS = 5;
 const BAR_HEIGHT = 36;
 /** Above Instagram's click-catcher — only needed for the native control strip. */
@@ -100,6 +103,13 @@ export function startVideoControls(initial: string | undefined): void {
   // Fires once when the cursor leaves the document, unlike pointerleave, which fires for
   // every element on the way out.
   document.addEventListener('mouseleave', forgetPointer, { passive: true });
+  // Nothing re-targeted on scroll, so wheel-scrolling without moving the mouse left the
+  // bar driving a player that had already left the viewport.
+  document.addEventListener('scroll', queueRetarget, { capture: true, passive: true });
+  document.addEventListener('fullscreenchange', () => {
+    scan();
+    queueRetarget();
+  });
 }
 
 export function setScrubberSkin(raw: string | undefined): void {
@@ -130,9 +140,12 @@ function scan(): void {
 }
 
 function enhance(video: HTMLVideoElement): void {
-  applyFlags(video);
+  // After the early return, not before. The per-video observer below already re-applies
+  // the flags on every attribute React touches, so re-flagging here on every mutation
+  // frame of a page that mutates constantly was pure repetition.
   if (enhanced.has(video)) return;
   enhanced.add(video);
+  applyFlags(video);
 
   // React re-renders reset these attributes; a one-shot pass loses within seconds.
   new MutationObserver(() => applyFlags(video)).observe(video, {
@@ -172,7 +185,12 @@ function keepSoundOn(video: HTMLVideoElement): void {
 }
 
 function applyFlags(video: HTMLVideoElement): void {
-  const wantNative = mode === 'native';
+  // A fullscreen element renders in the browser's top layer, above every z-index, and our
+  // bar lives in document.body rather than inside that subtree — so suppressing the native
+  // strip in fullscreen left the video with no controls at all.
+  const fullscreen = document.fullscreenElement;
+  const wantNative =
+    mode === 'native' || fullscreen === video || Boolean(fullscreen?.contains(video));
   if (video.controls !== wantNative) video.controls = wantNative;
 
   video.removeAttribute('controlslist');
@@ -196,6 +214,10 @@ function applyFlags(video: HTMLVideoElement): void {
 // --- pointer tracking and targeting -----------------------------------------
 
 function onPointerMove(ev: PointerEvent): void {
+  // Hover-capable pointers only. A touch drag set these coordinates and nothing ever
+  // cleared them, so on a touchscreen the bar latched onto a video permanently — holding
+  // a 60fps rAF loop and eating a 36px strip of the page's own scrolling.
+  if (ev.pointerType === 'touch') return;
   pointerX = ev.clientX;
   pointerY = ev.clientY;
   queueRetarget();
@@ -254,13 +276,18 @@ function videoUnderPointer(): HTMLVideoElement | null {
 function retarget(): void {
   if (mode !== 'overlay') return;
   if (bar?.isBusy()) return; // never yank the bar out from under a drag
+
+  // Cheap test first. `pointerOverLibrary` calls elementFromPoint, which forces a layout
+  // flush, and running it unconditionally meant paying for one on every moved frame of
+  // every Instagram page — including the overwhelming majority where the library is not
+  // mounted and the answer is always no.
+  const video = videoUnderPointer();
+  if (!video) return void bar?.hide();
+
   // Targeting is geometric, so a player *behind* the library would still be "under" the
   // cursor. Nothing back there is reachable, so a bar floating over the library would be
   // pure artefact.
   if (pointerOverLibrary()) return void bar?.hide();
-
-  const video = videoUnderPointer();
-  if (!video) return void bar?.hide();
 
   bar ??= new ControlBar();
   bar.attach(video);
@@ -277,7 +304,12 @@ function onKeyDown(ev: KeyboardEvent): void {
   if (target?.isContentEditable) return;
   if (target?.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
-  const video = videoUnderPointer() ?? largestVisibleVideo();
+  // Only the player under the cursor. The old fallback to "the largest visible video"
+  // meant that in the story viewer — where focus sits on <body> and a story is by
+  // definition the largest video on screen — ArrowRight scrubbed the current story
+  // forward instead of advancing to the next one, from a capture-phase listener that
+  // called stopPropagation so Instagram never saw the key. Same for carousel slides.
+  const video = videoUnderPointer();
   if (!video || !Number.isFinite(video.duration)) return;
 
   ev.preventDefault();
@@ -286,21 +318,6 @@ function onKeyDown(ev: KeyboardEvent): void {
   video.currentTime = clamp(video.currentTime + delta, 0, video.duration);
 }
 
-function largestVisibleVideo(): HTMLVideoElement | null {
-  let best: HTMLVideoElement | null = null;
-  let bestArea = 0;
-
-  for (const video of document.querySelectorAll('video')) {
-    const r = video.getBoundingClientRect();
-    if (r.width < MIN_VIDEO_PX || r.bottom < 0 || r.top > window.innerHeight) continue;
-    const area = r.width * r.height;
-    if (area > bestArea) {
-      bestArea = area;
-      best = video;
-    }
-  }
-  return best;
-}
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
@@ -365,8 +382,8 @@ class ControlBar {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: '20px',
-        height: '20px',
+        width: '24px',
+        height: '24px',
         flex: 'none',
         color: '#fff',
         cursor: 'pointer',
@@ -386,7 +403,7 @@ class ControlBar {
     Object.assign(this.hit.style, {
       position: 'relative',
       flex: '1',
-      height: '18px',
+      height: '24px',
       display: 'flex',
       alignItems: 'center',
       cursor: 'pointer',
@@ -512,7 +529,17 @@ class ControlBar {
     // rect while it is on the bar and `retarget` doesn't immediately drop it.
     this.root.style.left = `${r.left}px`;
     this.root.style.width = `${r.width}px`;
-    this.root.style.top = `${Math.min(r.bottom - BAR_HEIGHT, window.innerHeight - BAR_HEIGHT)}px`;
+    // The clamp keeps the bar on screen. Clamping to the very bottom put it straight on
+    // top of Instagram's own caption, audio row and progress line on any viewport-height
+    // player — i.e. on every reel — and our stopPropagation handlers then swallowed the
+    // clicks meant for them.
+    this.root.style.top = `${Math.max(
+      0,
+      Math.min(
+        r.bottom - BAR_HEIGHT,
+        window.innerHeight - BAR_HEIGHT - BOTTOM_KEEP_OUT_PX,
+      ),
+    )}px`;
 
     this.paint();
     this.raf = requestAnimationFrame(this.tick);

@@ -13,6 +13,7 @@
  */
 
 import { DEFAULT_SETTINGS, SETTINGS_VERSION, type Settings } from '../types';
+import { PROVIDERS } from './providers/index';
 import type { SafeSettings } from '../messaging';
 
 const KEY = 'settings';
@@ -52,6 +53,15 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
   }
   if ((next.scrubberSkin as string) === 'thin') next.scrubberSkin = 'overlay';
 
+  // A provider or model that no longer exists is not a harmless stale string. An unknown
+  // provider threw out of the categoriser's loop; an unknown model made `usdFor` return 0,
+  // so real calls were billed while the popup reported the run as costing $0.00.
+  const provider = PROVIDERS[next.provider] ?? PROVIDERS[DEFAULT_SETTINGS.provider];
+  next.provider = provider.id;
+  if (!provider.models.some((m) => m.id === next.model)) {
+    next.model = provider.models[0]?.id ?? DEFAULT_SETTINGS.model;
+  }
+
   next.settingsVersion = SETTINGS_VERSION;
   return next;
 }
@@ -62,7 +72,10 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
-  const next = { ...(await getSettings()), ...patch };
+  const next = migrate({ ...(await getSettings()), ...patch });
+  next.apiKey = typeof next.apiKey === 'string' ? next.apiKey.trim().slice(0, 500) : '';
+  next.autoIndex = Boolean(next.autoIndex);
+  next.scrubberSkin = next.scrubberSkin === 'native' ? 'native' : 'overlay';
   await chrome.storage.local.set({ [KEY]: next });
   return next;
 }
