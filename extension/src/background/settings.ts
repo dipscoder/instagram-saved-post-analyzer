@@ -56,7 +56,13 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
   // A provider or model that no longer exists is not a harmless stale string. An unknown
   // provider threw out of the categoriser's loop; an unknown model made `usdFor` return 0,
   // so real calls were billed while the popup reported the run as costing $0.00.
-  const provider = PROVIDERS[next.provider] ?? PROVIDERS[DEFAULT_SETTINGS.provider];
+  //
+  // A provider that was removed also invalidates the stored key: it belongs to that
+  // provider, and sending an Anthropic or Gemini key to OpenAI would only fail with a
+  // confusing 401.
+  const known = PROVIDERS[next.provider];
+  if (!known) next.apiKey = '';
+  const provider = known ?? PROVIDERS[DEFAULT_SETTINGS.provider];
   next.provider = provider.id;
   if (!provider.models.some((m) => m.id === next.model)) {
     next.model = provider.models[0]?.id ?? DEFAULT_SETTINGS.model;
@@ -101,7 +107,7 @@ export async function getSafeSettings(): Promise<SafeSettings> {
 }
 
 /**
- * `sk-ant-a…9f2c` — enough to tell two keys apart and to match against the provider
+ * `sk-proj-…9f2c` — enough to tell two keys apart and to match against the provider
  * console, useless to steal. Rendered as plain text; it must never go back into a
  * password field, which is what made the mask look like a row of dots.
  */

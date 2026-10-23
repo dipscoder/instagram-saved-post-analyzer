@@ -1,6 +1,9 @@
 # Saved Index — orientation
 
-Chrome MV3 extension (TypeScript, esbuild, **loaded unpacked — not published**). It turns
+Chrome MV3 extension (TypeScript, esbuild, **loaded unpacked — not published**), growing
+into extension + Supabase backend + web app. The repo is npm workspaces: `extension/`,
+`shared/` (pure taxonomy + digest), with `web/` and `supabase/` reserved. **OpenAI is the
+only model provider** — don't add others back. It turns
 Instagram's saved-posts grid into a searchable, AI-categorised library, and gives Instagram
 videos real seek controls.
 
@@ -10,9 +13,9 @@ done and what remains, and `README.md` is the user-facing guide. This file is th
 version plus the things that are easy to break without noticing.
 
 ```bash
-npm run typecheck    # tsc --noEmit
-npm run verify       # 145 pure-function checks, no browser needed — run this
-npm run build        # writes dist/, then Load unpacked in chrome://extensions
+npm run typecheck    # tsc across every workspace
+npm run verify       # 147 pure-function checks, no browser needed — run this
+npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
 
@@ -79,7 +82,7 @@ Anything arriving from the MAIN world is page-controlled: Instagram's own bundle
 anything that gets code onto that origin, can forge it. Validate shape, bound size, and
 never trust a field because it looks right.
 
-**MV3 kills the worker when idle.** Nothing in `src/background/` may assume continuity.
+**MV3 kills the worker when idle.** Nothing in `extension/src/background/` may assume continuity.
 Progress lives in IndexedDB, including the exact members of the active run. On wake, ask
 the run queue what remains; do not rebuild it from every currently uncategorised post,
 because capture may have discovered more after the run began.
@@ -114,7 +117,7 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 The hardening work through Phase 32 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
 resilience, per-post re-index, and the redesigned popup/library. `npm run verify` currently
-contains 145 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 147 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

@@ -32,7 +32,7 @@ import {
   normalizeCategory,
   normalizeSubcategory,
   TAXONOMY_PROMPT_BLOCK,
-} from '../taxonomy';
+} from '@saved-index/shared/taxonomy';
 import type { ReindexQuote } from '../messaging';
 import type { IndexProgress, PostRecord } from '../types';
 

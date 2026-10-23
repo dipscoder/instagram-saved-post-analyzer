@@ -28,8 +28,8 @@ The build prints the exact folder to load. Then in Chrome:
 1. Go to `chrome://extensions`
 2. Turn on **Developer mode** (top right)
 3. Click **Load unpacked**
-4. Select **`dist/`** — ⚠️ **not the repo root.** The root has no `manifest.json`; it is
-   generated into `dist/` by the build. Selecting the root gives
+4. Select **`extension/dist/`** — ⚠️ **not the repo root.** The root has no
+   `manifest.json`; it is generated into `extension/dist/` by the build. Selecting the root gives
    *"Manifest file is missing or unreadable"*. On macOS, `Cmd+Shift+G` in the picker lets
    you paste the path the build printed.
 
@@ -41,26 +41,24 @@ changes up.
 
 ## First run
 
-1. Click the extension icon. Pick a provider and model, paste a key, press **Test and
-   save** — it tests first and stores the key only after the provider accepts it.
+1. Click the extension icon. Pick a model, paste an OpenAI key, press **Test and save** —
+   it tests first and stores the key only after OpenAI accepts it.
 2. Open your saved posts on Instagram: your profile → **Saved**.
 3. The library takes over the page. Scroll and posts are captured automatically. **Index
    now** freezes the number currently waiting, indexes exactly that set, and scans farther
    down the feed; anything found during that scan waits for the next run.
 
-Roughly **$0.40 per 1,000 posts** on Claude Haiku 4.5, for the text tier. Posts caught by
+Roughly **$0.10 per 1,000 posts** on GPT-5.6 Luna, for the text tier, before any
+reasoning tokens. Posts caught by
 the free local rules never reach the model at all; the small minority with no usable
 caption fall through to a thumbnail, which costs several times more per post, so treat the
 figure as a typical price rather than a hard ceiling. The popup and the in-page panel both
 show what you have actually spent, metered from the token counts the provider returns.
 
-Current recommended choices are **GPT-5.6 Luna** for economical OpenAI indexing,
-**GPT-5.6 Terra** when OpenAI quality matters more than cost, **Gemini 3.8 Flash** for the
-best cross-provider price/quality balance, and **Claude Sonnet 5** for difficult posts.
-The reasoning-capable adapters explicitly use low effort: enough deliberation for a closed
-classification task without paying for long hidden reasoning. Gemini 3.8's announced 2027
-price change is encoded in the estimator, so the popup will not keep showing its 2026
-introductory rate after it expires.
+OpenAI is the only provider. **GPT-5.6 Luna** is the economical default and **GPT-5.6
+Terra** is for when quality matters more than cost. Both run at low reasoning effort:
+enough deliberation for a closed classification task without paying for long hidden
+reasoning.
 
 **You never pay for the same post twice.** Every summary is written to a separate ledger,
 keyed by a hash of the exact text the model was shown. Unsaving or re-indexing a post does
@@ -206,11 +204,19 @@ characters, and always with the smallest available thumbnail.
 ## Where each piece lives
 
 ```
-src/
-  types.ts                 PostRecord schema (incl. the nullable pipeline fields)
+package.json               npm workspaces: shared + extension; root scripts delegate
+tsconfig.base.json         compiler options every package extends
+
+shared/src/                pure code for the extension, backend and web app alike
   hash.ts                  short stable digest, for "is this the same input as before?"
-  routes.ts                which Instagram routes capture is allowed to run on
   taxonomy.ts              12 categories + the free rule-based pre-pass
+
+web/                       the web app (planned, Phase 4)
+supabase/                  database migrations + server functions (planned, Phase 2)
+
+extension/src/
+  types.ts                 PostRecord schema (incl. the nullable pipeline fields)
+  routes.ts                which Instagram routes capture is allowed to run on
   messaging.ts             typed contracts for all three contexts
   content.ts               ISOLATED-world entry: bridge + video + library + SPA routing
 
@@ -230,8 +236,7 @@ src/
     categorize.ts          the three-tier pipeline, concurrency, backoff
     providers/
       index.ts             adapter interface, registry, pricing, key redaction
-      anthropic.ts         (sends anthropic-dangerous-direct-browser-access)
-      openai.ts  gemini.ts  openrouter.ts
+      openai.ts            Responses API for GPT-5.6, Chat Completions for 4o
 
   page/
     library.ts             in-page library (Shadow DOM), filters, sort, indexing panel
@@ -240,12 +245,12 @@ src/
 
   popup/popup.ts           setup screen + control room                 → popup.js
 
-public/
+extension/public/
   manifest.json  popup.html  icons/
 
-tools/
-  make-icons.mjs           regenerates the icons (npm run icons)
-  verify.ts                145 regression checks across the critical flows
+extension/tools/
+  make-icons.mjs           regenerates the icons (npm run icons -w extension)
+  verify.ts                147 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -259,11 +264,11 @@ CLAUDE.md                  compact coding-agent orientation
 
 | | |
 |---|---|
-| `npm run build` | production bundle into `dist/` |
+| `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm run verify` | run 145 pure-function regression checks |
-| `npm run icons` | regenerate `public/icons/*.png` |
+| `npm run typecheck` | `tsc` across every workspace |
+| `npm run verify` | run 147 pure-function regression checks |
+| `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why
 
@@ -273,7 +278,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `unlimitedStorage` | thousands of posts in IndexedDB |
 | `https://www.instagram.com/*` | the content scripts |
 | `https://*.cdninstagram.com/*`, `https://*.fbcdn.net/*` | reading thumbnail bytes for the vision fallback |
-| the four model endpoints | categorisation calls |
+| `https://api.openai.com/*` | categorisation calls |
 
 No `tabs`, no `scripting`, no `activeTab`, no `<all_urls>`. Service-worker pushes go over
 `chrome.runtime` ports specifically so `tabs` isn't needed.
@@ -284,13 +289,10 @@ No `tabs`, no `scripting`, no `activeTab`, no `<all_urls>`. Service-worker pushe
 
 **Nothing is being captured.** Open DevTools on the Instagram tab and check the console for
 errors from `capture-main.js`. If Instagram has moved its saved-feed endpoints, the URL
-patterns are one list at the top of `src/capture/main-world.ts` — widen `URL_PATTERNS` and
+patterns are one list at the top of `extension/src/capture/main-world.ts` — widen `URL_PATTERNS` and
 rebuild. The extractor downstream is shape-driven and won't need touching.
 
-**"Key rejected — provider returned 401."** The key is wrong or has no credit. For
-Anthropic, also confirm you're not stripping the
-`anthropic-dangerous-direct-browser-access` header via a proxy — without it the browser
-preflight fails.
+**"Key rejected — provider returned 401."** The key is wrong or has no credit.
 
 **Indexing stops with "returned nothing usable".** The chosen model isn't returning
 parseable JSON. Switch to a stronger model; progress is kept, so it resumes where it

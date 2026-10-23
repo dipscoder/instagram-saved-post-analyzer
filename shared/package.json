@@ -1,0 +1,14 @@
+{
+  "name": "@saved-index/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure code shared by the extension, the backend and the web app: the taxonomy and the input digest.",
+  "type": "module",
+  "exports": {
+    "./taxonomy": "./src/taxonomy.ts",
+    "./hash": "./src/hash.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  }
+}

@@ -102,7 +102,8 @@ export function toRecord(p: CapturedPost, savedRank: number | null = null): Post
   };
 }
 
-export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+/** OpenAI only, by product decision. Kept as a type so the settings shape stays explicit. */
+export type ProviderId = 'openai';
 
 /**
  * 'overlay' is our own control bar, drawn into document.body. 'native' hands the job to
@@ -125,8 +126,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'anthropic',
-  model: 'claude-haiku-4-5',
+  provider: 'openai',
+  model: 'gpt-5.6-luna',
   apiKey: '',
   autoIndex: true,
   scrubberSkin: 'overlay',

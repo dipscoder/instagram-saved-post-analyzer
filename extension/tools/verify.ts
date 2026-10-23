@@ -15,8 +15,8 @@ import {
   normalizeSubcategory,
   RULES_HASH,
   TAXONOMY_HASH,
-} from '../src/taxonomy';
-import { hashText } from '../src/hash';
+} from '@saved-index/shared/taxonomy';
+import { hashText } from '@saved-index/shared/hash';
 import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
@@ -346,6 +346,14 @@ console.log('\nsettings migration');
   check('a deliberate native choice survives', chosen.scrubberSkin === 'native', chosen.scrubberSkin);
 
   check('idempotent', migrate(migrate({ scrubberSkin: 'native' } as never)).scrubberSkin === 'overlay');
+
+  // Anthropic, Gemini and OpenRouter were removed. Their keys mean nothing to OpenAI.
+  const removed = migrate({ provider: 'anthropic', model: 'claude-haiku-4-5', apiKey: 'sk-ant-old' } as never);
+  check('a removed provider falls back to OpenAI',
+    removed.provider === 'openai' && removed.model === 'gpt-5.6-luna', removed);
+  check('a removed provider\'s key is dropped', removed.apiKey === '', removed.apiKey);
+  check('an OpenAI key survives migration',
+    migrate({ provider: 'openai', apiKey: 'sk-keep-me' } as never).apiKey === 'sk-keep-me');
 }
 
 console.log('\nroute fences');
@@ -546,21 +554,16 @@ console.log('\nsearch folding');
 console.log('\ncurrent model catalogue');
 {
   const openaiModels = PROVIDERS.openai.models.map((model) => model.id);
-  const geminiModels = PROVIDERS.gemini.models.map((model) => model.id);
-  const anthropicModels = PROVIDERS.anthropic.models.map((model) => model.id);
+  check('OpenAI is the only provider', Object.keys(PROVIDERS).join() === 'openai');
   check('OpenAI includes GPT-5.6 Luna', openaiModels.includes('gpt-5.6-luna'));
   check('OpenAI includes GPT-5.6 Terra', openaiModels.includes('gpt-5.6-terra'));
-  check('Gemini includes 3.8 Flash', geminiModels.includes('gemini-3.8-flash'));
-  check('Anthropic includes Sonnet 5', anthropicModels.includes('claude-sonnet-5'));
   check('GPT-5.6 uses the reasoning-aware Responses API',
     usesResponsesApi('gpt-5.6-luna') && usesResponsesApi('gpt-5.6-terra'));
   check('GPT-4o keeps its proven Chat Completions path', !usesResponsesApi('gpt-4o-mini'));
 
-  const gemini38 = PROVIDERS.gemini.models.find((model) => model.id === 'gemini-3.8-flash');
-  check('Gemini promotional estimate is current through 2026',
-    Math.abs(estimateUsd(gemini38, 1_000, Date.UTC(2026, 11, 31)) - 0.29625) < 1e-9);
-  check('Gemini estimate automatically adopts 2027 pricing',
-    Math.abs(estimateUsd(gemini38, 1_000, Date.UTC(2027, 0, 1)) - 0.5925) < 1e-9);
+  const luna = PROVIDERS.openai.models.find((model) => model.id === 'gpt-5.6-luna');
+  check('estimate uses list prices',
+    Math.abs(estimateUsd(luna, 1_000) - (145_000 * 0.2 + 50_000 * 1.2) / 1_000_000) < 1e-9);
 }
 
 console.log('\nreasoning-model request contracts');
@@ -587,34 +590,14 @@ console.log('\nreasoning-model request contracts');
         usage: { input_tokens: 7, output_tokens: 5 },
       }));
     }
-    if (url.includes('generativelanguage.googleapis.com')) {
-      return new Response(JSON.stringify({
-        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
-        usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 5, thoughtsTokenCount: 3 },
-      }));
-    }
-    return new Response(JSON.stringify({
-      content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"ok":true}' }],
-      usage: { input_tokens: 7, output_tokens: 8 },
-    }));
+    return new Response(JSON.stringify({ error: { message: `Unexpected URL ${url}` } }), { status: 404 });
   }) as typeof fetch;
 
   try {
     const request = { system: 'Return JSON.', user: 'Classify this.', maxTokens: 64 };
-    const [openaiResult, geminiResult, anthropicResult] = await Promise.all([
-      PROVIDERS.openai.chat(request, 'test-key', 'gpt-5.6-luna'),
-      PROVIDERS.gemini.chat(request, 'test-key', 'gemini-3.8-flash'),
-      PROVIDERS.anthropic.chat(request, 'test-key', 'claude-sonnet-5'),
-    ]);
+    const openaiResult = await PROVIDERS.openai.chat(request, 'test-key', 'gpt-5.6-luna');
     const openaiBody = seen.get('https://api.openai.com/v1/responses');
-    const geminiBody = [...seen.entries()].find(([url]) =>
-      url.includes('gemini-3.8-flash:generateContent'))?.[1];
-    const anthropicBody = seen.get('https://api.anthropic.com/v1/messages');
     const openaiReasoning = openaiBody?.['reasoning'] as Record<string, unknown> | undefined;
-    const geminiGeneration = geminiBody?.['generationConfig'] as Record<string, unknown> | undefined;
-    const geminiThinking = geminiGeneration?.['thinkingConfig'] as Record<string, unknown> | undefined;
-    const anthropicThinking = anthropicBody?.['thinking'] as Record<string, unknown> | undefined;
-    const anthropicOutput = anthropicBody?.['output_config'] as Record<string, unknown> | undefined;
 
     check('GPT-5.6 request uses low reasoning', openaiReasoning?.['effort'] === 'low');
     const openaiInput = openaiBody?.['input'] as { content?: { text?: string }[] }[] | undefined;
@@ -624,11 +607,6 @@ console.log('\nreasoning-model request contracts');
     check('GPT-5.6 reserves room beyond hidden reasoning', openaiBody?.['max_output_tokens'] === 256);
     check('GPT-5.6 output and usage are parsed',
       openaiResult.text === '{"ok":true}' && openaiResult.usage.outputTokens === 5);
-    check('Gemini 3.8 request uses low thinking', geminiThinking?.['thinkingLevel'] === 'low');
-    check('Gemini thinking tokens are included in spend', geminiResult.usage.outputTokens === 8);
-    check('Claude Sonnet 5 uses adaptive thinking at low effort',
-      anthropicThinking?.['type'] === 'adaptive' && anthropicOutput?.['effort'] === 'low');
-    check('Claude parser ignores thinking blocks', anthropicResult.text === '{"ok":true}');
   } finally {
     globalThis.fetch = originalFetch;
   }

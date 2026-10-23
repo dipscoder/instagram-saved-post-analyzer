@@ -23,7 +23,9 @@ copying the same explanation into all four.
 
 ## Current product state
 
-- Chrome Manifest V3 extension, TypeScript + esbuild, loaded unpacked from `dist/`.
+- Chrome Manifest V3 extension, TypeScript + esbuild, loaded unpacked from `extension/dist/`.
+- npm workspaces: `extension/`, `shared/` (taxonomy + digest). `web/` and `supabase/` are
+  reserved for the planned web app and backend. OpenAI is the only model provider.
 - Saved-post capture is restricted by route, payload context, and DOM scope.
 - An indexing run freezes its initial pending shortcodes, processes exactly that set, and
   leaves posts discovered while scrolling for the next run.
@@ -37,10 +39,12 @@ copying the same explanation into all four.
   a validated need.
 - The library and popup share one responsive visual system. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **145 checks**. It does not replace a live
+- The regression suite currently contains **147 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question
+
+Paths are under `extension/` unless they start with `shared/`.
 
 | If you are changing… | Start with |
 |---|---|
@@ -48,7 +52,7 @@ copying the same explanation into all four.
 | Instagram response parsing | `src/capture/extract.ts`, `src/capture/dom-scrape.ts` |
 | IndexedDB records, migration, media refresh | `src/background/db.ts`, `src/types.ts` |
 | Fixed-run queue and pause/resume | `src/background/index.ts`, `src/background/categorize.ts` |
-| Paid-result reuse and re-index charging | `src/background/ledger.ts`, `src/hash.ts`, `src/taxonomy.ts` |
+| Paid-result reuse and re-index charging | `src/background/ledger.ts`, `shared/src/hash.ts`, `shared/src/taxonomy.ts` |
 | Model support, requests, prices, token usage | `src/background/providers/`, `src/background/spend.ts` |
 | In-page library and post detail | `src/page/library.ts`, `src/page/library.css.ts` |
 | Popup setup and controls | `src/popup/popup.ts`, `public/popup.html` |
@@ -94,9 +98,9 @@ npm run verify
 npm run build
 ```
 
-Then reload `dist/` in `chrome://extensions` and verify:
+Then reload `extension/dist/` in `chrome://extensions` and verify:
 
-1. Test and save one provider key; confirm the key never appears in page DevTools.
+1. Test and save an OpenAI key; confirm the key never appears in page DevTools.
 2. Open the full Instagram Saved page and confirm only saved posts enter the library.
 3. Start with a known pending count; confirm the run stops at that count while newly
    discovered posts remain pending.

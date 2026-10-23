@@ -161,7 +161,7 @@ capture data rather than permanent media. Every later saved-feed capture may rep
 stored URL while preserving the post's analysis and ordering fields. The UI hides failed
 image elements behind a neutral placeholder until a revisit or scan supplies a fresh URL.
 
-Record schema (`src/types.ts`) — the nullable tail exists so a later pipeline can
+Record schema (`extension/src/types.ts`) — the nullable tail exists so a later pipeline can
 backfill without a migration:
 
 ```ts
@@ -232,7 +232,7 @@ cost only the posts that actually changed.
 `TAXONOMY_HASH` is derived from the definitions at module load, never typed by hand. A
 hand-maintained generation counter is worse than none: the one time somebody forgets to
 bump it, every stored verdict claims to be current while pointing at a category that no
-longer exists. `tools/verify.ts` pins the committed value, so a taxonomy edit — which
+longer exists. `extension/tools/verify.ts` pins the committed value, so a taxonomy edit — which
 re-bills every affected post in every installed library — shows up as a line in the diff
 rather than as a surprise on someone's invoice.
 
@@ -315,9 +315,7 @@ in `callWithRetry`, so a response that then fails to parse still counts — the 
 billed for it either way.
 
 Reasoning models are deliberately constrained for this workload. GPT-5.6 Luna and Terra
-use the Responses API with low reasoning effort and non-persistent responses; Gemini 3.8
-Flash uses low `thinkingLevel`; Claude Sonnet 5 uses adaptive thinking at low effort rather
-than its high-effort default. Output-token accounting includes provider-reported reasoning
+use the Responses API with low reasoning effort and non-persistent responses. Output-token accounting includes provider-reported reasoning
 tokens. Time-limited model prices carry their announced next rate and switch automatically.
 
 The cost of a **capture** is zero: it reads responses the page was already fetching.
@@ -326,7 +324,10 @@ The cost of a **capture** is zero: it reads responses the page was already fetch
 
 ## 5. Provider adapter
 
-`background/providers/` — one interface, four implementations:
+`background/providers/` — one interface, one implementation. OpenAI is the only provider
+by product decision (October 2026); Anthropic, Gemini and OpenRouter were removed, and a
+stored settings object that still names one of them falls back to OpenAI with its key
+cleared.
 
 ```ts
 interface Provider {
@@ -337,18 +338,15 @@ type ChatResult = { text: string; usage: { inputTokens: number; outputTokens: nu
 
 | Provider | Endpoint | Note |
 |---|---|---|
-| Anthropic | `api.anthropic.com/v1/messages` | needs `anthropic-dangerous-direct-browser-access: true` or CORS fails; usage on `usage.{input,output}_tokens` |
 | OpenAI | `api.openai.com/v1/responses` for GPT-5.6; `/v1/chat/completions` for 4o | Responses usage includes reasoning/output tokens; legacy usage is `usage.{prompt,completion}_tokens` |
-| Gemini | `generativelanguage.googleapis.com/v1beta/…:generateContent` | key in the `x-goog-api-key` header, never the URL; usage on `usageMetadata` |
-| OpenRouter | `openrouter.ai/api/v1/chat/completions` | OpenAI-shaped; upstream list price passed through |
 
-The adapter is hand-written against each REST API rather than pulling in four vendor SDKs:
-an MV3 service worker bundle has to stay small, and three of the four SDKs assume a Node or
-bundler runtime this doesn't have.
+The adapter is hand-written against the REST API rather than pulling in the vendor SDK:
+an MV3 service worker bundle has to stay small. The interface stays, because the planned
+backend calls the same provider from a server function.
 
-Every call happens in the service worker. The key is masked after save (`sk-ant-a…9f2c`)
+Every call happens in the service worker. The key is masked after save (`sk-proj-…9f2c`)
 and never logged — `providers/index.ts` has a `redact()` used on every error path, which
-strips `sk-*`, `AIza*` and `Bearer …` shapes out of anything headed for a log or the UI.
+strips `sk-*` and `Bearer …` shapes out of anything headed for a log or the UI.
 
 ---
 
@@ -411,7 +409,7 @@ typed in the library's search box were seeking the video instead of moving the c
 ```
 storage           settings + IndexedDB quota
 unlimitedStorage  thousands of posts
-host_permissions  https://www.instagram.com/*  + the four model endpoints
+host_permissions  https://www.instagram.com/*, Instagram's CDNs, https://api.openai.com/*
 ```
 
 No `tabs`, no `scripting`, no `<all_urls>`, no `activeTab`. The popup reaches the active
@@ -422,7 +420,12 @@ permission. `sidePanel` is **not** requested — this build uses popup + in-page
 
 ## 8. Build
 
-esbuild → `dist/`, four bundles (`capture-main`, `content`, `background`, `popup`), each
+esbuild → `extension/dist/`, four bundles (`capture-main`, `content`, `background`, `popup`), each
 IIFE, no code splitting (MV3 service workers and content scripts can't share chunks).
 `npm run build` for production, `npm run watch` for a rebuild-on-save loop. No runtime
 dependencies.
+
+The repo is a set of npm workspaces. `shared/` (`@saved-index/shared`) holds pure code the
+extension, the planned backend and the planned web app all need: the taxonomy and the input
+digest. Its `exports` point straight at TypeScript source, so esbuild bundles it like any
+local module and there is nothing to prebuild.

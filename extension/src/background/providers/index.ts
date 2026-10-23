@@ -104,7 +104,6 @@ export class ProviderError extends Error {
 export function redact(text: string): string {
   return text
     .replace(/sk-[A-Za-z0-9_\-]{16,}/g, 'sk-…')
-    .replace(/AIza[A-Za-z0-9_\-]{20,}/g, 'AIza…')
     .replace(/Bearer\s+[A-Za-z0-9._\-]{16,}/gi, 'Bearer …');
 }
 
@@ -167,17 +166,9 @@ export function parseJsonLoose<T>(text: string): T {
   return JSON.parse(body.slice(start, end + 1)) as T;
 }
 
-import { anthropic } from './anthropic';
 import { openai } from './openai';
-import { gemini } from './gemini';
-import { openrouter } from './openrouter';
 
-export const PROVIDERS: Record<ProviderId, Provider> = {
-  anthropic,
-  openai,
-  gemini,
-  openrouter,
-};
+export const PROVIDERS: Record<ProviderId, Provider> = { openai };
 
 export function getProvider(id: ProviderId): Provider {
   const p = PROVIDERS[id];

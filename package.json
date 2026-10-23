@@ -1,19 +1,13 @@
 {
   "name": "saved-index",
-  "version": "0.1.0",
   "private": true,
-  "description": "AI-categorised library for Instagram saved posts, plus real seek controls on Instagram videos.",
+  "description": "AI-categorised library for Instagram saved posts: Chrome extension, backend and web app.",
   "type": "module",
+  "workspaces": ["shared", "extension"],
   "scripts": {
-    "build": "node build.mjs",
-    "watch": "node build.mjs --watch",
-    "typecheck": "tsc --noEmit",
-    "verify": "esbuild tools/verify.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/verify.mjs --log-level=error && node node_modules/.cache/verify.mjs",
-    "icons": "node tools/make-icons.mjs"
-  },
-  "devDependencies": {
-    "@types/chrome": "^0.0.287",
-    "esbuild": "^0.24.0",
-    "typescript": "^5.7.2"
+    "build": "npm run build -w extension",
+    "watch": "npm run watch -w extension",
+    "typecheck": "npm run typecheck --workspaces",
+    "verify": "npm run verify -w extension"
   }
 }
