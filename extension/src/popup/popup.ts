@@ -68,6 +68,8 @@ let replacing = false;
  */
 let quote: ReindexQuote | null = null;
 let confirming: 'reindex' | 'remove' | 'reset' | null = null;
+/** Someone who has signed in here before is far likelier to be signing in than signing up. */
+let accountMode: 'sign-up' | 'sign-in' = remembered('signedInBefore') ? 'sign-in' : 'sign-up';
 
 void init();
 
@@ -92,6 +94,7 @@ async function init(): Promise<void> {
   wire();
   await refresh();
   void loadAccount();
+  void loadLibraryUrl();
   subscribe((msg) => {
     if (msg.type === 'harvest') harvesting = msg.action === 'start';
     else if (msg.type === 'progress') {
@@ -223,11 +226,14 @@ function wire(): void {
     if (file) void onImport(file);
   });
 
+  $('modeUp').addEventListener('click', () => setAccountMode('sign-up'));
+  $('modeIn').addEventListener('click', () => setAccountMode('sign-in'));
   $<HTMLFormElement>('signedOut').addEventListener('submit', (e) => {
     e.preventDefault();
-    void onAccount('account:sign-in', 'Signing in…');
+    void (accountMode === 'sign-up'
+      ? onAccount('account:sign-up', 'Creating your account…')
+      : onAccount('account:sign-in', 'Signing in…'));
   });
-  $('signUp').addEventListener('click', () => void onAccount('account:sign-up', 'Creating your account…'));
   $('syncNow').addEventListener('click', () => void onAccount('account:sync', 'Syncing…'));
   $('signOut').addEventListener('click', () => void onAccount('account:sign-out', 'Signing out…'));
 }
@@ -235,11 +241,34 @@ function wire(): void {
 // --- account ----------------------------------------------------------------
 
 async function loadAccount(): Promise<void> {
+  setAccountMode(accountMode);
   try {
     renderAccount(await send<AccountState>({ type: 'account:get' }));
   } catch (err) {
     fail('accountStatus')(err);
   }
+}
+
+/** Every "Open Library" link goes to the saved feed the worker last saw being captured. */
+async function loadLibraryUrl(): Promise<void> {
+  try {
+    const url = await send<string>({ type: 'library:url' });
+    for (const a of document.querySelectorAll<HTMLAnchorElement>('.library-link')) a.href = url;
+  } catch {
+    // The links already point at instagram.com, which is the right fallback.
+  }
+}
+
+function setAccountMode(mode: typeof accountMode): void {
+  accountMode = mode;
+  const signUp = mode === 'sign-up';
+  $('modeUp').setAttribute('aria-pressed', String(signUp));
+  $('modeIn').setAttribute('aria-pressed', String(!signUp));
+  $('accountSubmit').textContent = signUp ? 'Create Account' : 'Sign In';
+  const password = $<HTMLInputElement>('password');
+  password.autocomplete = signUp ? 'new-password' : 'current-password';
+  password.placeholder = signUp ? 'Password, 8 or more characters' : 'Password';
+  setStatus('accountStatus', '', '');
 }
 
 type AccountRequest = 'account:sign-in' | 'account:sign-up' | 'account:sync' | 'account:sign-out';
@@ -256,6 +285,7 @@ async function onAccount(type: AccountRequest, pending: string): Promise<void> {
     );
     $<HTMLInputElement>('password').value = '';
     renderAccount(state);
+    if (state.email) remember('signedInBefore');
   } catch (err) {
     fail('accountStatus')(err);
   }
@@ -265,17 +295,22 @@ function renderAccount(state: AccountState): void {
   const signedIn = state.email !== null;
   $('signedOut').hidden = signedIn;
   $('signedIn').hidden = !signedIn;
-  $('accountNote').hidden = signedIn;
-  $('accountState').textContent = state.email ?? 'not signed in';
+  $('accountEmail').textContent = state.email ?? '';
+  $('avatar').textContent = state.email?.[0]?.toUpperCase() ?? '';
+  $('accountSync').textContent = state.error
+    ? 'Sync failed'
+    : state.lastSyncAt
+      ? `${state.synced} posts synced ${timeAgo(state.lastSyncAt)}`
+      : 'Not synced yet';
 
   if (state.confirmEmail) {
-    setStatus('accountStatus', 'ok', 'Check your inbox to confirm your email, then sign in.');
+    // Only when the Supabase project still asks for confirmation; see supabase/README.md.
+    setAccountMode('sign-in');
+    setStatus('accountStatus', 'ok', 'Almost there. Open the link we just emailed you, then sign in here.');
   } else if (state.error) {
     setStatus('accountStatus', 'bad', `Sync failed: ${state.error}`);
-  } else if (signedIn && state.lastSyncAt) {
-    setStatus('accountStatus', 'ok', `${state.synced} posts synced, ${timeAgo(state.lastSyncAt)}.`);
   } else {
-    setStatus('accountStatus', '', signedIn ? 'Not synced yet.' : '');
+    setStatus('accountStatus', '', '');
   }
 }
 
@@ -637,6 +672,23 @@ function setStatus(id: string, kind: '' | 'ok' | 'bad', message: string): void {
     msg.textContent = head;
     if (head !== message) el.title = message;
     else el.removeAttribute('title');
+  }
+}
+
+/** Popup-only preferences. Storage can be unavailable, and these are only conveniences. */
+function remembered(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function remember(key: string): void {
+  try {
+    localStorage.setItem(key, '1');
+  } catch {
+    // Nothing to do: the default is still usable.
   }
 }
 

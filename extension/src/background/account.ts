@@ -46,23 +46,49 @@ export async function getAccount(): Promise<Account> {
 
 export async function signIn(email: string, password: string): Promise<Account> {
   const { data, error } = await supabase.auth.signInWithPassword(credentials(email, password));
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendly(error.message));
   return { email: data.user.email ?? null };
 }
 
 /**
- * Creates the account. When the project requires email confirmation there is no session
- * yet, and the caller is told to confirm before signing in.
+ * Creates the account and signs straight in. `confirm` is true only when the project still
+ * requires email confirmation, in which case there is no session until the link is opened.
+ *
+ * Supabase answers a sign-up for an email that already has an account with a session-less
+ * user rather than an error, so that case falls through to an ordinary sign-in: the same
+ * email and password on "Create Account" should still get you in.
  */
 export async function signUp(email: string, password: string): Promise<Account & { confirm: boolean }> {
   const { data, error } = await supabase.auth.signUp(credentials(email, password));
-  if (error) throw new Error(error.message);
-  return { email: data.session?.user.email ?? null, confirm: !data.session };
+  if (error) throw new Error(friendly(error.message));
+  if (data.session) return { email: data.session.user.email ?? null, confirm: false };
+
+  try {
+    return { ...(await signIn(email, password)), confirm: false };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (message === NOT_CONFIRMED) return { email: null, confirm: true };
+    if (message === WRONG_PASSWORD) throw new Error(ALREADY_REGISTERED);
+    throw err;
+  }
 }
 
 export async function signOut(): Promise<void> {
   const { error } = await supabase.auth.signOut();
   if (error) throw new Error(error.message);
+}
+
+const NOT_CONFIRMED = 'Confirm your email first: open the link we sent you, then sign in.';
+const WRONG_PASSWORD = 'Wrong email or password.';
+const ALREADY_REGISTERED = 'That email already has an account. Sign in with its password.';
+
+/** Supabase's messages, reworded for the popup. Anything unrecognised passes through. */
+function friendly(message: string): string {
+  if (/email not confirmed/i.test(message)) return NOT_CONFIRMED;
+  if (/invalid login credentials/i.test(message)) return WRONG_PASSWORD;
+  if (/already (been )?registered/i.test(message)) return ALREADY_REGISTERED;
+  if (/rate limit|too many/i.test(message)) return 'Too many attempts. Wait a minute and try again.';
+  return message;
 }
 
 function credentials(email: unknown, password: unknown): { email: string; password: string } {

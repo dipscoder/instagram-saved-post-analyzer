@@ -311,6 +311,11 @@ before being acted on.
 - [x] The local library mirrors to the account as a diff: only new or changed posts are
       uploaded, pruned posts are deleted, and an interrupted sync resumes from the last
       confirmed batch
+- [x] Create Account signs straight in (an existing email with the right password falls
+      through to sign-in); the email-confirmation step is a project setting, documented in
+      `supabase/README.md`
+- [x] Popup restyled around a new brand: coral-to-violet icon, violet tint, warm neutrals;
+      "Open Library" goes to the saved feed last seen capturing
 - [ ] Thumbnails copied to Supabase Storage (instead of expiring CDN URLs)
 - [ ] The paid-analysis ledger moved to the server
 - [ ] Check a real reel's payload for an Instagram-provided transcript

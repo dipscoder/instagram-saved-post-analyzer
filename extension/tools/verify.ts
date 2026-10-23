@@ -20,7 +20,7 @@ import { hashText } from '@saved-index/shared/hash';
 import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
-import { isFullSavedFeed, isSavedRoute } from '../src/routes';
+import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 import { applyResult } from '../src/background/categorize';
@@ -369,6 +369,10 @@ console.log('\nroute fences');
   check('all-posts is the full feed', isFullSavedFeed('/dipscoder/saved/all-posts/'));
   check('a collection is not the full feed', !isFullSavedFeed('/dipscoder/saved/travel/'));
   check('a hashtag page is never the full feed', !isFullSavedFeed('/explore/tags/saved/'));
+
+  check('a collection opens the full saved feed', savedFeedPath('/dipscoder/saved/travel/1792/') === '/dipscoder/saved/');
+  check('a non-saved page has no library', savedFeedPath('/dipscoder/') === null);
+  check('a hashtag page has no library', savedFeedPath('/explore/tags/saved/') === null);
 }
 
 console.log('\nhashText');

@@ -43,8 +43,9 @@ changes up.
 
 1. Click the extension icon. Pick a model, paste an OpenAI key, press **Test and save** —
    it tests first and stores the key only after OpenAI accepts it.
-2. Optional: in the popup's settings, **Create account** or **Sign in**. Your library then
-   syncs to your Saved Index account in the background, ready for the web app.
+2. Optional: under **Account** in the popup, **Create Account** or **Sign In**. You are
+   signed in straight away, and your library syncs to your account in the background,
+   ready for the web app.
 3. Open your saved posts on Instagram: your profile → **Saved**.
 4. The library takes over the page. Scroll and posts are captured automatically. **Index
    now** freezes the number currently waiting, indexes exactly that set, and scans farther

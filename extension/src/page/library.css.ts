@@ -10,11 +10,11 @@ export const styles = /* css */ `
   --text: #171923;
   --text-2: #5f6472;
   --text-3: #858b99;
-  --accent: #665cf6;
-  --accent-strong: #5549ed;
+  --accent: #6e44f5;
+  --accent-strong: #5a31e0;
   --on-accent: #ffffff;
-  --accent-wash: #efedff;
-  --accent-line: #d9d5ff;
+  --accent-wash: #f1ecff;
+  --accent-line: #ddd2ff;
   --danger: #c9425a;
   --on-danger: #ffffff;
   --shadow-sm: 0 1px 2px rgba(20, 23, 35, 0.04), 0 5px 16px rgba(20, 23, 35, 0.04);
@@ -39,11 +39,11 @@ export const styles = /* css */ `
     --text: #f3f4f8;
     --text-2: #a7adbb;
     --text-3: #737a8a;
-    --accent: #9a94ff;
-    --accent-strong: #b0abff;
+    --accent: #a48bff;
+    --accent-strong: #bba8ff;
     --on-accent: #11131a;
-    --accent-wash: #24213c;
-    --accent-line: #3c3763;
+    --accent-wash: #261f3d;
+    --accent-line: #3f3466;
     --danger: #ff8095;
     --on-danger: #171017;
     --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.22), 0 10px 30px rgba(0, 0, 0, 0.12);
@@ -93,8 +93,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .brand { flex: none; display: flex; align-items: center; gap: 10px; }
 .brand-mark {
   position: relative; width: 30px; height: 30px; border-radius: 9px;
-  background: linear-gradient(145deg, #786dfc, #566cf0);
-  box-shadow: 0 6px 16px rgba(98, 89, 242, 0.24);
+  background: linear-gradient(120deg, #ff6a55, #f03e86 50%, #7a4cff);
+  box-shadow: 0 6px 16px rgba(240, 62, 134, 0.24);
 }
 .brand-mark::before {
   content: ""; position: absolute; left: 9px; top: 7px; width: 12px; height: 16px;
@@ -102,8 +102,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
 }
 .brand-mark::after {
-  content: ""; position: absolute; z-index: 1; left: 12px; top: 12px; width: 6px; height: 1.5px;
-  border-radius: 2px; background: #665cf6; box-shadow: 0 4px 0 #665cf6;
+  content: ""; position: absolute; z-index: 1; left: 12px; top: 10px; width: 6px; height: 6px;
+  background: #f03e86;
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
 }
 .brand-name { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
 .search {
@@ -321,15 +322,16 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .empty { min-height: 420px; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 70px 36px; text-align: center; }
 .empty-mark {
   position: relative; width: 42px; height: 42px; margin-bottom: 9px; border-radius: 13px;
-  background: linear-gradient(145deg, #786dfc, #566cf0); box-shadow: 0 10px 25px rgba(98, 89, 242, 0.24);
+  background: linear-gradient(120deg, #ff6a55, #f03e86 50%, #7a4cff); box-shadow: 0 10px 25px rgba(240, 62, 134, 0.24);
 }
 .empty-mark::before {
   content: ""; position: absolute; left: 13px; top: 10px; width: 16px; height: 21px;
   border-radius: 4px; background: #fff; clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 73%, 0 100%);
 }
 .empty-mark::after {
-  content: ""; position: absolute; z-index: 1; left: 17px; top: 17px; width: 8px; height: 2px;
-  border-radius: 2px; background: #665cf6; box-shadow: 0 5px 0 #665cf6;
+  content: ""; position: absolute; z-index: 1; left: 17px; top: 14px; width: 8px; height: 8px;
+  background: #f03e86;
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
 }
 .empty-title { font-size: var(--t-lg); font-weight: 680; }
 .empty-detail { max-width: 390px; color: var(--text-2); font-size: 13px; line-height: 1.6; }
@@ -342,7 +344,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .restore:hover { border-color: var(--accent); transform: translateY(-1px); }
 .restore .brand-mark { width: 26px; height: 26px; border-radius: 8px; }
 .restore .brand-mark::before { left: 8px; top: 6px; width: 10px; height: 14px; }
-.restore .brand-mark::after { left: 10px; top: 10px; width: 6px; height: 1.5px; box-shadow: 0 3px 0 #665cf6; }
+.restore .brand-mark::after { left: 10.5px; top: 9px; width: 5px; height: 5px; }
 .restore-key { color: var(--text-3); }
 
 @media (max-width: 1900px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

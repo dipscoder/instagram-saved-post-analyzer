@@ -31,6 +31,7 @@ import {
   type Response,
   type Stats,
 } from '../messaging';
+import { savedFeedPath } from '../routes';
 import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
@@ -137,6 +138,7 @@ chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
   const request = fromPage && String(req?.type).startsWith('account:')
     ? Promise.reject(new Error('Account requests are only accepted from the extension.'))
     : handle(req);
+  if (req?.type === 'posts:captured' && sender.url) void rememberLibrary(sender.url);
   request
     .then((value) => sendResponse({ ok: true, value } satisfies Response))
     .catch((err: unknown) =>
@@ -296,6 +298,11 @@ async function handle(req: Request): Promise<unknown> {
       await resetSpend();
       return categorizer.progress();
 
+    case 'library:url': {
+      const stored = await chrome.storage.local.get(LIBRARY_KEY);
+      return `${INSTAGRAM}${typeof stored[LIBRARY_KEY] === 'string' ? stored[LIBRARY_KEY] : '/'}`;
+    }
+
     case 'settings:get':
       return {
         settings: await getSafeSettings(),
@@ -397,12 +404,26 @@ const MAX_POSTS_PER_MESSAGE = 500;
 const MAX_CAPTION_CHARS = 4000;
 const MAX_HASHTAGS = 60;
 
-/** Bound the free-text fields a page could have inflated before they reach the DB. */
+/** Who is signed in and how the last sync went: the account as it may leave the worker. */
 async function accountState(): Promise<AccountState> {
   const [{ email }, sync] = await Promise.all([getAccount(), getSyncStatus()]);
   return { email, ...sync };
 }
 
+const INSTAGRAM = 'https://www.instagram.com';
+const LIBRARY_KEY = 'libraryPath';
+
+/**
+ * Remembers whose saved feed is being captured, so the popup can open it directly. Taken
+ * from `sender.url`, which the browser sets, never from anything the page sent.
+ */
+async function rememberLibrary(url: string): Promise<void> {
+  const { origin, pathname } = new URL(url);
+  const path = origin === INSTAGRAM ? savedFeedPath(pathname) : null;
+  if (path) await chrome.storage.local.set({ [LIBRARY_KEY]: path });
+}
+
+/** Bound the free-text fields a page could have inflated before they reach the DB. */
 function clamp(p: CapturedPost): CapturedPost {
   return {
     ...p,

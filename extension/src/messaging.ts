@@ -68,6 +68,8 @@ export type Request =
   /** The page owns scrolling and reports when a requested sweep naturally ends. */
   | { type: 'harvest:finished'; reason: 'complete' | 'stopped' | 'rate-limited' }
   | { type: 'spend:reset' }
+  /** Where the popup's "Open Library" goes: the saved feed last seen capturing. */
+  | { type: 'library:url' }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<Settings> }
   | { type: 'settings:clear-key' }

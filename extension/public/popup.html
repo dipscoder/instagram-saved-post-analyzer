@@ -4,43 +4,48 @@
     <meta charset="utf-8" />
     <title>Saved Index</title>
     <style>
-      /* Grouped-list design in the manner of Apple's system settings: system type, inset
-         grouped rows with hairline separators, one tinted accent, and colour reserved for
-         meaning. Light and dark follow the OS. */
+      /* System type and grouped lists, as in Apple's own apps, carried by one brand: a
+         coral-to-violet gradient kept for the icon, the main button and progress, with a
+         single violet tint for everything interactive. Light and dark follow the OS. */
       :root {
         color-scheme: light dark;
         --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
         --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+        --brand: linear-gradient(120deg, #ff6a55, #f03e86 50%, #7a4cff);
 
-        --bg: #f2f2f7;
+        --bg: #f5f3f0;
         --card: #ffffff;
-        --fill: rgba(120, 120, 128, 0.12);
-        --separator: rgba(60, 60, 67, 0.16);
-        --label: #000000;
-        --label-2: rgba(60, 60, 67, 0.62);
-        --label-3: rgba(60, 60, 67, 0.32);
-        --accent: #007aff;
-        --accent-tint: rgba(0, 122, 255, 0.12);
-        --green: #34c759;
-        --red: #ff3b30;
-        --bar: rgba(242, 242, 247, 0.8);
-        --shadow: 0 0.5px 1px rgba(0, 0, 0, 0.04);
+        --fill: rgba(23, 21, 28, 0.06);
+        --separator: rgba(23, 21, 28, 0.1);
+        --label: #17151c;
+        --label-2: rgba(23, 21, 28, 0.58);
+        --label-3: rgba(23, 21, 28, 0.3);
+        --accent: #6e44f5;
+        --accent-tint: rgba(110, 68, 245, 0.1);
+        --green: #1e9e57;
+        --red: #e5484d;
+        --bar: rgba(245, 243, 240, 0.82);
+        --shadow: 0 1px 2px rgba(23, 21, 28, 0.04), 0 0 0 0.5px rgba(23, 21, 28, 0.05);
+        --glow: 0 6px 18px rgba(240, 62, 134, 0.28);
+        --raised: #ffffff;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #000000;
-          --card: #1c1c1e;
-          --fill: rgba(118, 118, 128, 0.24);
-          --separator: rgba(84, 84, 88, 0.6);
-          --label: #ffffff;
-          --label-2: rgba(235, 235, 245, 0.6);
-          --label-3: rgba(235, 235, 245, 0.3);
-          --accent: #0a84ff;
-          --accent-tint: rgba(10, 132, 255, 0.18);
-          --green: #30d158;
-          --red: #ff453a;
-          --bar: rgba(0, 0, 0, 0.72);
-          --shadow: none;
+          --bg: #0e0d11;
+          --card: #1a191f;
+          --fill: rgba(255, 255, 255, 0.08);
+          --separator: rgba(255, 255, 255, 0.09);
+          --label: #f4f2f7;
+          --label-2: rgba(244, 242, 247, 0.6);
+          --label-3: rgba(244, 242, 247, 0.3);
+          --accent: #a48bff;
+          --accent-tint: rgba(164, 139, 255, 0.14);
+          --green: #3ecf7a;
+          --red: #ff6369;
+          --bar: rgba(14, 13, 17, 0.82);
+          --shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+          --glow: 0 6px 20px rgba(240, 62, 134, 0.22);
+          --raised: #3a3842;
         }
       }
 
@@ -57,7 +62,7 @@
         -webkit-font-smoothing: antialiased;
       }
       :where(button, input, select, a, [role="switch"]):focus-visible {
-        outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+        outline: 3px solid color-mix(in srgb, var(--accent) 40%, transparent);
         outline-offset: 1px;
         border-radius: 8px;
       }
@@ -75,9 +80,12 @@
         border-bottom: 0.5px solid var(--separator);
       }
       .brand { display: flex; align-items: center; gap: 9px; }
-      .brand img { width: 24px; height: 24px; border-radius: 6px; }
-      .brand b { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
-      .nav { color: var(--accent); font-size: 13px; font-weight: 500; padding: 6px 2px; }
+      .brand img { width: 26px; height: 26px; }
+      .brand b { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; }
+      .nav {
+        height: 26px; padding: 0 11px; border-radius: 13px;
+        background: var(--accent-tint); color: var(--accent); font-size: 12px; font-weight: 600;
+      }
 
       main { flex: 1; overflow-y: auto; padding: 4px 16px 24px; }
       section { display: none; flex-direction: column; }
@@ -89,34 +97,29 @@
         border-top: 0.5px solid var(--separator); background: var(--bar);
         font-size: 11px; color: var(--label-2);
       }
+      footer a { font-weight: 500; }
 
       /* --- onboarding hero ------------------------------------------------------ */
 
-      .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 12px 6px; }
-      .hero img {
-        width: 64px; height: 64px; border-radius: 15px;
-        box-shadow: 0 8px 24px rgba(88, 86, 214, 0.28);
-      }
-      .hero h1 { margin: 14px 0 4px; font-size: 22px; font-weight: 700; letter-spacing: -0.022em; }
+      .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 12px 4px; }
+      .hero img { width: 72px; height: 72px; filter: drop-shadow(0 10px 18px rgba(240, 62, 134, 0.3)); }
+      .hero h1 { margin: 14px 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
       .hero p { margin: 0; max-width: 280px; font-size: 13px; color: var(--label-2); }
 
       /* --- grouped lists -------------------------------------------------------- */
 
-      .heading {
-        margin: 22px 16px 6px; font-size: 11px; font-weight: 500;
-        text-transform: uppercase; letter-spacing: 0.04em; color: var(--label-2);
-      }
+      .heading { margin: 22px 4px 8px; font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
       .group {
-        background: var(--card); border-radius: 12px; overflow: hidden;
+        background: var(--card); border-radius: 14px; overflow: hidden;
         box-shadow: var(--shadow);
       }
       .row {
-        position: relative; min-height: 40px; padding: 9px 16px;
+        position: relative; min-height: 42px; padding: 10px 16px;
         display: flex; align-items: center; justify-content: space-between; gap: 12px;
       }
       /* Inset hairline above every row but a group's first visible one, as in a grouped
-         table view. Rows can sit inside wrappers (a form, a box shown on demand), so the
-         first row is found through the first visible child. */
+         table view. Rows can sit inside a box shown on demand, so the first row is also
+         found through the group's first visible child. */
       .row::before {
         content: ""; position: absolute; top: 0; left: 16px; right: 0;
         border-top: 0.5px solid var(--separator);
@@ -127,9 +130,9 @@
       .row .value { color: var(--label-2); text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .row .value.mono { font-family: var(--mono); font-size: 12px; }
       .sub { display: block; margin-top: 1px; font-size: 11px; color: var(--label-2); }
-      .note { margin: 6px 16px 0; font-size: 11px; line-height: 1.45; color: var(--label-2); }
+      .note { margin: 8px 4px 0; font-size: 11px; line-height: 1.45; color: var(--label-2); }
 
-      /* A whole row that is a button: blue for actions, red for destructive ones. */
+      /* A whole row that is a button: tinted for actions, red for destructive ones. */
       .action { width: 100%; justify-content: flex-start; color: var(--accent); text-align: left; }
       .action:hover { background: var(--fill); }
       .action.destructive { color: var(--red); }
@@ -151,46 +154,67 @@
         background-size: 4px 4px; background-repeat: no-repeat;
       }
 
+      /* --- account ---------------------------------------------------------------- */
+
+      .segmented {
+        display: grid; grid-template-columns: 1fr 1fr; padding: 2px; margin-bottom: 10px;
+        border-radius: 10px; background: var(--fill);
+      }
+      .segmented button {
+        height: 28px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--label-2);
+        transition: background 150ms ease, color 150ms ease;
+      }
+      .segmented button[aria-pressed="true"] {
+        background: var(--raised); color: var(--label); font-weight: 600;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+      }
+      .who { justify-content: flex-start; }
+      .avatar {
+        flex: none; width: 32px; height: 32px; border-radius: 50%;
+        display: grid; place-items: center;
+        background: var(--brand); color: #fff; font-size: 14px; font-weight: 650;
+      }
+      .who .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+
       /* --- buttons -------------------------------------------------------------- */
 
       .btn {
-        width: 100%; height: 36px; margin-top: 12px; border-radius: 10px;
-        font-size: 13px; font-weight: 600; text-align: center;
-        background: var(--accent); color: #fff;
-        transition: filter 120ms ease, transform 120ms ease;
+        width: 100%; height: 40px; margin-top: 12px; border-radius: 12px;
+        font-size: 14px; font-weight: 600; text-align: center;
+        background: var(--brand); color: #fff; box-shadow: var(--glow);
+        transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease;
       }
-      .btn:hover:not(:disabled) { filter: brightness(1.08); }
+      .btn:hover:not(:disabled) { filter: brightness(1.06) saturate(1.05); }
       .btn:active:not(:disabled) { transform: scale(0.985); }
-      .btn:disabled { opacity: 0.4; cursor: default; }
-      .btn.tinted { background: var(--accent-tint); color: var(--accent); }
-      .btn.danger { background: var(--red); }
-      .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .pair .btn { margin-top: 0; }
-      .text-btn { display: block; margin: 14px auto 0; padding: 4px 8px; color: var(--accent); font-size: 12px; }
+      .btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+      .btn.danger { background: var(--red); box-shadow: none; }
+      .text-btn { display: block; margin: 14px auto 0; padding: 4px 8px; color: var(--accent); font-size: 12px; font-weight: 500; }
 
       /* --- status lines --------------------------------------------------------- */
 
       .status:has(.msg:empty) { display: none; }
-      .status { margin: 6px 16px 0; font-size: 11px; line-height: 1.4; color: var(--label-2); }
+      .status { margin: 8px 4px 0; font-size: 11px; line-height: 1.4; color: var(--label-2); }
       .status .led { display: none; }
       .status.ok .msg { color: var(--green); }
       .status.bad .msg { color: var(--red); }
 
       /* --- control room ---------------------------------------------------------- */
 
-      .summary { margin-top: 12px; padding: 16px; }
-      .summary h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; }
+      .summary { margin-top: 12px; padding: 14px 16px 16px; }
+      .card-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--label-2); }
+      .card-head a { font-weight: 600; }
+      .summary h1 { margin: 8px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.25; }
       .summary p { margin: 4px 0 0; font-size: 12px; color: var(--label-2); }
       .track { height: 6px; margin-top: 14px; border-radius: 3px; background: var(--fill); overflow: hidden; }
-      .track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 300ms ease; }
+      .track i { display: block; height: 100%; border-radius: inherit; background: var(--brand); transition: width 300ms ease; }
       .stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 14px; }
       .stat { display: flex; flex-direction: column; gap: 1px; padding-left: 12px; border-left: 0.5px solid var(--separator); }
       .stat:first-child { padding-left: 0; border-left: 0; }
-      .stat b { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+      .stat b { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
       .stat span { font-size: 11px; color: var(--label-2); }
       .value.money { font-variant-numeric: tabular-nums; color: var(--label); }
 
-      /* iOS-style switch, a real button with role="switch". */
+      /* A switch, a real button with role="switch". */
       .switch {
         flex: none; width: 42px; height: 26px; padding: 2px; border-radius: 13px;
         display: flex; background: var(--fill); transition: background 180ms ease;
@@ -200,14 +224,14 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
         transition: transform 180ms ease;
       }
-      .switch[aria-checked="true"] { background: var(--green); }
+      .switch[aria-checked="true"] { background: var(--accent); }
       .switch[aria-checked="true"] i { transform: translateX(16px); }
       .row label { cursor: pointer; }
     </style>
   </head>
   <body>
     <header>
-      <div class="brand"><img src="icons/icon48.png" alt="" /><b>Saved Index</b></div>
+      <div class="brand"><img src="icons/icon128.png" alt="" /><b>Saved Index</b></div>
       <button class="nav" id="navBtn" hidden>Settings</button>
     </header>
 
@@ -215,20 +239,28 @@
       <!-- Moved into the visible screen's slot by popup.ts: both screens need it. -->
       <div id="account">
         <div class="heading">Account</div>
-        <div class="group">
-          <form id="signedOut">
+        <form id="signedOut">
+          <div class="segmented" role="group" aria-label="Account">
+            <button type="button" id="modeUp" aria-pressed="true">Create Account</button>
+            <button type="button" id="modeIn" aria-pressed="false">Sign In</button>
+          </div>
+          <div class="group">
             <label class="row field"><input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="Email" /></label>
-            <label class="row field"><input id="password" type="password" autocomplete="current-password" placeholder="Password" /></label>
-            <button class="row action" id="signIn" type="submit">Sign In</button>
-            <button class="row action" id="signUp" type="button">Create Account</button>
-          </form>
-          <div id="signedIn" hidden>
-            <div class="row"><span class="label">Signed in</span><span class="value" id="accountState">not signed in</span></div>
+            <label class="row field"><input id="password" type="password" autocomplete="new-password" placeholder="Password, 8 or more characters" /></label>
+          </div>
+          <button class="btn" id="accountSubmit" type="submit">Create Account</button>
+          <p class="note">Your library is kept in your account, so it is safe if this browser is reset and ready for the web app.</p>
+        </form>
+        <div id="signedIn" hidden>
+          <div class="group">
+            <div class="row who">
+              <span class="avatar" id="avatar" aria-hidden="true"></span>
+              <span class="label"><span id="accountEmail"></span><span class="sub" id="accountSync"></span></span>
+            </div>
             <button class="row action" id="syncNow">Sync Now</button>
             <button class="row action destructive" id="signOut">Sign Out</button>
           </div>
         </div>
-        <p class="note" id="accountNote">Sign in to keep your library in your account and open it on the web. Passwords need 8 or more characters.</p>
         <div class="status" id="accountStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
       </div>
 
@@ -255,7 +287,7 @@
 
         <div class="heading">Then</div>
         <div class="group">
-          <a class="row action" href="https://www.instagram.com/" target="_blank" rel="noopener">
+          <a class="row action library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">
             <span>Open your saved posts on Instagram<span class="sub">Profile → Saved. Posts are captured as they load.</span></span>
           </a>
         </div>
@@ -266,6 +298,10 @@
       <!-- Control room: shown once a key is saved -->
       <section id="home">
         <div class="group summary">
+          <div class="card-head">
+            <span>Library</span>
+            <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Open ↗</a>
+          </div>
           <h1 id="homeTitle">Nothing captured yet</h1>
           <p id="homeBody"></p>
           <div class="track" id="track" role="progressbar" aria-label="Indexing progress"
@@ -281,14 +317,14 @@
         <button class="btn" id="primary">Start indexing</button>
         <div class="status" id="homeStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
 
+        <div id="accountSlotHome"></div>
+
         <div class="heading">Cost</div>
         <div class="group">
           <div class="row"><span class="label">Spent</span><span class="value money" id="fSpent">$0.00</span></div>
           <div class="row"><span class="label" id="fLeftCap">left, at most</span><span class="value money" id="fLeft">$0.00</span></div>
           <button class="row action destructive" id="resetSpend">Reset Spend Counter</button>
         </div>
-
-        <div id="accountSlotHome"></div>
 
         <div class="heading">OpenAI</div>
         <div class="group">
@@ -334,7 +370,7 @@
 
     <footer>
       <span id="footLabel"></span>
-      <a id="footLink" href="https://www.instagram.com/" target="_blank" rel="noopener">Saved posts ↗</a>
+      <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Open Library ↗</a>
     </footer>
 
     <script src="popup.js"></script>
