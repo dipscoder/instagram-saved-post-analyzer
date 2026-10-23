@@ -34,8 +34,8 @@
  * an extension page can hand the browser a Blob directly.
  */
 
-import { hashText } from '../hash';
-import { RULES_HASH, TAXONOMY_HASH } from '../taxonomy';
+import { hashText } from '@saved-index/shared/hash';
+import { RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 import type { PostRecord } from '../types';
 import { LEDGER_STORE, openDb } from './db';
 

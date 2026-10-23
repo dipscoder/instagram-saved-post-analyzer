@@ -295,6 +295,15 @@ before being acted on.
       clearer key actions, and accessible light/dark contrast
 - [x] New reproducible indexed-bookmark icon at 16, 48, and 128 px
 
+## Phase 33 — Repo layout for extension + backend + web app
+- [x] npm workspaces: `extension/` (the existing extension, unchanged in behaviour) and
+      `shared/` (taxonomy + input digest, needed by the backend and web app too)
+- [x] `web/` and `supabase/` reserved with a README each; no code until their phase
+- [x] OpenAI is the only provider. Anthropic, Gemini and OpenRouter adapters, host
+      permissions and checks removed; a stored non-OpenAI provider migrates to OpenAI and
+      drops its key
+- [x] 147 checks (catalogue checks replaced, settings-migration checks added)
+
 ---
 
 ## Not done — needs the user

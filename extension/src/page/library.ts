@@ -24,7 +24,7 @@ import {
 } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed } from '../routes';
-import { CATEGORY_NAMES, UNCATEGORIZED } from '../taxonomy';
+import { CATEGORY_NAMES, UNCATEGORIZED } from '@saved-index/shared/taxonomy';
 import { IDLE_PROGRESS, type IndexProgress, type PostRecord } from '../types';
 import { styles } from './library.css';
 
