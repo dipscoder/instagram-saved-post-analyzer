@@ -448,6 +448,10 @@ async function onPrimary(): Promise<void> {
 function render(): void {
   $('setup').classList.toggle('on', screen === 'setup');
   $('home').classList.toggle('on', screen === 'home');
+  // One account card, shown on whichever screen is visible. Moved only when the screen
+  // changes: re-appending on every progress push would blur a half-typed email.
+  const slot = $(screen === 'setup' ? 'accountSlotSetup' : 'accountSlotHome');
+  if ($('account').parentElement !== slot) slot.append($('account'));
   // Always available from the home screen. Hiding it when there was no key meant a user
   // who pressed "Skip" had no route back to setup at all — and the disabled primary
   // button's own recovery branch was unreachable for the same reason.
@@ -460,7 +464,7 @@ function render(): void {
 
   $('footLabel').textContent = settings.hasKey
     ? `${providerLabel(settings.provider)} · ${settings.keyMask}`
-    : 'no key connected';
+    : 'No key connected';
 }
 
 /**
@@ -499,19 +503,17 @@ function renderSetup(): void {
   const provider = currentProvider();
   if (!provider) return;
 
-  $<HTMLInputElement>('key').placeholder =
-    `Paste your ${provider.label} key — ${provider.keyPlaceholder}`;
+  $<HTMLInputElement>('key').placeholder = provider.keyPlaceholder;
   $<HTMLAnchorElement>('keysUrl').href = provider.keysUrl;
 
   const model = currentModel();
   $('priceHint').textContent = model
-    ? `about ${fmtUsd(model.per1kPosts)} per 1,000 posts${model.supportsVision ? '' : ' · text only'}`
+    ? `About ${fmtUsd(model.per1kPosts)} per 1,000 posts${model.supportsVision ? '' : ' · text only'}`
     : '';
 
   $('privacy').textContent =
-    `Your key is stored in this browser's extension storage, which scripts on ` +
-    `instagram.com cannot read. Every model call is made by the extension's background ` +
-    `worker and goes to ${provider.label} and nowhere else — there is no server in between.`;
+    `Your key stays in this browser's extension storage, out of reach of instagram.com, ` +
+    `and is sent only to ${provider.label}.`;
 }
 
 function renderHome(): void {
@@ -526,14 +528,14 @@ function renderHome(): void {
       ? Math.max(0, progress.runTotal - progress.runCompleted)
       : pending,
   );
-  $('fQueuedCap').textContent = progress.phase === 'running' ? 'this run' : 'waiting';
+  $('fQueuedCap').textContent = progress.phase === 'running' ? 'This run' : 'Waiting';
   $('fSpent').textContent = fmtUsd(spentUsd);
 
   // When there is nothing pending, "left, at most" is $0.00 and the button beside it
   // starts a full re-index. Show what that button would cost instead.
   const finished = pending === 0 && total > 0 && !active;
   $('fLeft').textContent = fmtUsd(finished && quote ? quote.usd : estimateUsd);
-  $('fLeftCap').textContent = finished ? 'to re-index' : 'left, at most';
+  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'Left, at most';
   const progressTotal = progress.runTotal || total;
   const progressDone = progress.runTotal ? progress.runCompleted : categorized;
   const percent = Math.round(progressTotal ? (progressDone / progressTotal) * 100 : 0);
@@ -590,13 +592,13 @@ function renderHome(): void {
     );
   }
 
-  $('ledgerState').textContent = `${stats.ledgerCount} on file`;
-  $('remove').textContent = confirming === 'remove' ? 'Remove the key?' : 'Remove';
+  $('ledgerState').textContent = String(stats.ledgerCount);
+  $('remove').textContent = confirming === 'remove' ? 'Click again to remove the key' : 'Remove Key';
   $('resetSpend').textContent =
-    confirming === 'reset' ? 'Erase the spend record?' : 'Reset the spend counter';
+    confirming === 'reset' ? 'Click again to erase the spend record' : 'Reset Spend Counter';
   $('keyMask').textContent = settings.keyMask || 'none';
   $('keyState').textContent = settings.hasKey ? 'saved in this browser' : 'not set';
-  $('replace').textContent = replacing ? 'Cancel' : 'Replace';
+  $('replace').textContent = replacing ? 'Cancel' : 'Replace Key';
   $<HTMLElement>('replaceBox').hidden = !replacing;
 
   // aria-checked drives the visual state as well as the announced one, so the two can
