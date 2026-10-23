@@ -178,6 +178,7 @@
       .track { height: 5px; background: var(--bg-sunk); border-radius: 99px; overflow: hidden; }
       .track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7569fc, #5d7af5); transition: width 240ms ease; }
 
+      .account { margin-bottom: 24px; }
       .keycard {
         display: flex; flex-direction: column; gap: 9px;
         padding: 15px; border: 1px solid var(--line); border-radius: 13px;
@@ -214,6 +215,28 @@
     </header>
 
     <main>
+      <!-- Account — on both screens: signing in is not a setting -->
+      <div class="keycard account">
+        <div class="between">
+          <span class="cap">Account</span>
+          <span class="mono" id="accountState">not signed in</span>
+        </div>
+        <p id="accountNote">Sign in to keep your library in your account and open it on the web.</p>
+        <form id="signedOut" class="stack">
+          <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="Email" />
+          <input id="password" type="password" autocomplete="current-password" placeholder="Password, 8+ characters" />
+          <div class="row">
+            <button class="btn secondary" id="signIn" type="submit" style="width: auto; flex: 1">Sign in</button>
+            <button class="btn secondary" id="signUp" type="button" style="width: auto; flex: 1">Create account</button>
+          </div>
+        </form>
+        <div class="row" id="signedIn" hidden>
+          <button class="btn secondary" id="syncNow" style="width: auto; flex: 1">Sync now</button>
+          <button class="link quiet" id="signOut" style="flex: none">Sign out</button>
+        </div>
+        <div class="status" id="accountStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
+      </div>
+
       <!-- Setup — shown until a key is saved -->
       <section id="setup">
         <div class="stack tight">
@@ -286,27 +309,6 @@
         </div>
 
         <div class="stack divide">
-          <div class="keycard">
-            <div class="between">
-              <span class="cap">Account</span>
-              <span class="mono" id="accountState">not signed in</span>
-            </div>
-            <p id="accountNote">Sign in to keep your library in your account and open it on the web.</p>
-            <form id="signedOut" class="stack">
-              <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="Email" />
-              <input id="password" type="password" autocomplete="current-password" placeholder="Password, 8+ characters" />
-              <div class="row">
-                <button class="btn secondary" id="signIn" type="submit" style="width: auto; flex: 1">Sign in</button>
-                <button class="btn secondary" id="signUp" type="button" style="width: auto; flex: 1">Create account</button>
-              </div>
-            </form>
-            <div class="row" id="signedIn" hidden>
-              <button class="btn secondary" id="syncNow" style="width: auto; flex: 1">Sync now</button>
-              <button class="link quiet" id="signOut" style="flex: none">Sign out</button>
-            </div>
-            <div class="status" id="accountStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
-          </div>
-
           <span class="cap">Model</span>
           <div class="pair">
             <select id="provider2" aria-label="Provider"></select>
