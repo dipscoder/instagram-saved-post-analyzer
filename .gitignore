@@ -2,3 +2,13 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# Secrets and packaging artefacts. "Pack extension" writes a private signing key
+# (<name>.pem) next to the build folder; committing it would let anyone ship updates
+# as this extension.
+.env
+.env.*
+*.pem
+*.key
+*.crx
+*.zip
