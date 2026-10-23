@@ -15,6 +15,7 @@
 import {
   send,
   subscribe,
+  type AccountState,
   type LedgerFile,
   type ReindexQuote,
   type SafeSettings,
@@ -90,6 +91,7 @@ async function init(): Promise<void> {
 
   wire();
   await refresh();
+  void loadAccount();
   subscribe((msg) => {
     if (msg.type === 'harvest') harvesting = msg.action === 'start';
     else if (msg.type === 'progress') {
@@ -220,6 +222,61 @@ function wire(): void {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (file) void onImport(file);
   });
+
+  $<HTMLFormElement>('signedOut').addEventListener('submit', (e) => {
+    e.preventDefault();
+    void onAccount('account:sign-in', 'Signing in…');
+  });
+  $('signUp').addEventListener('click', () => void onAccount('account:sign-up', 'Creating your account…'));
+  $('syncNow').addEventListener('click', () => void onAccount('account:sync', 'Syncing…'));
+  $('signOut').addEventListener('click', () => void onAccount('account:sign-out', 'Signing out…'));
+}
+
+// --- account ----------------------------------------------------------------
+
+async function loadAccount(): Promise<void> {
+  try {
+    renderAccount(await send<AccountState>({ type: 'account:get' }));
+  } catch (err) {
+    fail('accountStatus')(err);
+  }
+}
+
+type AccountRequest = 'account:sign-in' | 'account:sign-up' | 'account:sync' | 'account:sign-out';
+
+async function onAccount(type: AccountRequest, pending: string): Promise<void> {
+  setStatus('accountStatus', '', pending);
+  try {
+    const credentials = {
+      email: $<HTMLInputElement>('email').value,
+      password: $<HTMLInputElement>('password').value,
+    };
+    const state = await send<AccountState>(
+      type === 'account:sign-in' || type === 'account:sign-up' ? { type, ...credentials } : { type },
+    );
+    $<HTMLInputElement>('password').value = '';
+    renderAccount(state);
+  } catch (err) {
+    fail('accountStatus')(err);
+  }
+}
+
+function renderAccount(state: AccountState): void {
+  const signedIn = state.email !== null;
+  $('signedOut').hidden = signedIn;
+  $('signedIn').hidden = !signedIn;
+  $('accountNote').hidden = signedIn;
+  $('accountState').textContent = state.email ?? 'not signed in';
+
+  if (state.confirmEmail) {
+    setStatus('accountStatus', 'ok', 'Check your inbox to confirm your email, then sign in.');
+  } else if (state.error) {
+    setStatus('accountStatus', 'bad', `Sync failed: ${state.error}`);
+  } else if (signedIn && state.lastSyncAt) {
+    setStatus('accountStatus', 'ok', `${state.synced} posts synced, ${timeAgo(state.lastSyncAt)}.`);
+  } else {
+    setStatus('accountStatus', '', signedIn ? 'Not synced yet.' : '');
+  }
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {

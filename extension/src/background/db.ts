@@ -14,18 +14,20 @@
  *                allowed to delete it. See ledger.ts for the whole argument.
  *   `indexQueue` — the fixed members and progress of the current run. Disposable after
  *                  the next run starts, but persisted so worker restarts keep the target.
+ *   `sync`     — what was last uploaded to the account, per post. See sync.ts.
  */
 
 import type { SortKey } from '../messaging';
 import { SCHEMA_VERSION, type PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE = 'posts';
 
 /** The ledger's store. Created here because the upgrade transaction is here. */
 export const LEDGER_STORE = 'analysis';
 export const INDEX_QUEUE_STORE = 'indexQueue';
+export const SYNC_STORE = 'sync';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -46,6 +48,9 @@ export function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(INDEX_QUEUE_STORE)) {
         db.createObjectStore(INDEX_QUEUE_STORE, { keyPath: 'shortcode' });
+      }
+      if (!db.objectStoreNames.contains(SYNC_STORE)) {
+        db.createObjectStore(SYNC_STORE, { keyPath: 'shortcode' });
       }
 
       const store = req.transaction?.objectStore(STORE);

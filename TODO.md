@@ -304,6 +304,17 @@ before being acted on.
       drops its key
 - [x] 147 checks (catalogue checks replaced, settings-migration checks added)
 
+## Phase 34 — Accounts and sync (Phase 2a of the web app plan)
+- [x] `public.posts` in Supabase with Row Level Security; tested against Postgres that
+      another user and an anonymous caller can neither read nor write someone's posts
+- [x] Email + password sign-in in the popup; the session stays in the service worker
+- [x] The local library mirrors to the account as a diff: only new or changed posts are
+      uploaded, pruned posts are deleted, and an interrupted sync resumes from the last
+      confirmed batch
+- [ ] Thumbnails copied to Supabase Storage (instead of expiring CDN URLs)
+- [ ] The paid-analysis ledger moved to the server
+- [ ] Check a real reel's payload for an Instagram-provided transcript
+
 ---
 
 ## Not done — needs the user

@@ -286,6 +286,27 @@
         </div>
 
         <div class="stack divide">
+          <div class="keycard">
+            <div class="between">
+              <span class="cap">Account</span>
+              <span class="mono" id="accountState">not signed in</span>
+            </div>
+            <p id="accountNote">Sign in to keep your library in your account and open it on the web.</p>
+            <form id="signedOut" class="stack">
+              <input id="email" type="email" autocomplete="email" spellcheck="false" placeholder="Email" />
+              <input id="password" type="password" autocomplete="current-password" placeholder="Password, 8+ characters" />
+              <div class="row">
+                <button class="btn secondary" id="signIn" type="submit" style="width: auto; flex: 1">Sign in</button>
+                <button class="btn secondary" id="signUp" type="button" style="width: auto; flex: 1">Create account</button>
+              </div>
+            </form>
+            <div class="row" id="signedIn" hidden>
+              <button class="btn secondary" id="syncNow" style="width: auto; flex: 1">Sync now</button>
+              <button class="link quiet" id="signOut" style="flex: none">Sign out</button>
+            </div>
+            <div class="status" id="accountStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
+          </div>
+
           <span class="cap">Model</span>
           <div class="pair">
             <select id="provider2" aria-label="Provider"></select>

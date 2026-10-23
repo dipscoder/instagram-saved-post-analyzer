@@ -11,7 +11,8 @@
     "https://www.instagram.com/*",
     "https://*.cdninstagram.com/*",
     "https://*.fbcdn.net/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://siwmxcsrzdvvtouolvph.supabase.co/*"
   ],
 
   "background": {

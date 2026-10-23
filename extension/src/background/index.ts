@@ -13,6 +13,8 @@ import { Categorizer } from './categorize';
 import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
 import { reserveRanks } from './order';
 import { resetSpend } from './spend';
+import { getAccount, signIn, signOut, signUp } from './account';
+import { getSyncStatus, resetSync, scheduleSync, syncNow } from './sync';
 import {
   clearKey,
   getSafeSettings,
@@ -21,7 +23,14 @@ import {
   migrateSettings,
   setSettings,
 } from './settings';
-import { PORT, type Broadcast, type Request, type Response, type Stats } from '../messaging';
+import {
+  PORT,
+  type AccountState,
+  type Broadcast,
+  type Request,
+  type Response,
+  type Stats,
+} from '../messaging';
 import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
@@ -34,12 +43,16 @@ chrome.runtime.onInstalled.addListener(() => {
   void lockDownStorage();
   void migrateSettings();
 });
+// Catch up on anything captured or categorised since the last upload.
+scheduleSync();
 
 let lastProgress: IndexProgress = IDLE_PROGRESS;
 
 const categorizer = new Categorizer((p) => {
   lastProgress = p;
   broadcast({ type: 'progress', progress: p });
+  // Progress means categories were written. The sync diff decides whether any changed.
+  scheduleSync();
 });
 
 /**
@@ -117,8 +130,14 @@ function broadcast(msg: Broadcast): void {
   }
 }
 
-chrome.runtime.onMessage.addListener((req: Request, _sender, sendResponse) => {
-  handle(req)
+chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
+  // A content script runs inside instagram.com. Nothing there may sign in, out or
+  // anywhere else on the user's behalf.
+  const fromPage = sender.tab !== undefined;
+  const request = fromPage && String(req?.type).startsWith('account:')
+    ? Promise.reject(new Error('Account requests are only accepted from the extension.'))
+    : handle(req);
+  request
     .then((value) => sendResponse({ ok: true, value } satisfies Response))
     .catch((err: unknown) =>
       sendResponse({
@@ -145,6 +164,7 @@ async function handle(req: Request): Promise<unknown> {
         posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null)),
       );
       if (inserted > 0 || refreshed > 0) {
+        scheduleSync();
         // Push the new total straight away so the library's counts and rows update as
         // you scroll. Existing records matter too: their Instagram CDN thumbnail may
         // have just been replaced with a fresh signed URL.
@@ -202,7 +222,10 @@ async function handle(req: Request): Promise<unknown> {
 
     case 'posts:prune': {
       const removed = await db.prune(req.since);
-      if (removed > 0) broadcast({ type: 'progress', progress: await categorizer.progress() });
+      if (removed > 0) {
+        scheduleSync();
+        broadcast({ type: 'progress', progress: await categorizer.progress() });
+      }
       return { removed };
     }
 
@@ -334,6 +357,34 @@ async function handle(req: Request): Promise<unknown> {
       };
     }
 
+    case 'account:get':
+      return accountState();
+
+    case 'account:sign-in':
+      await signIn(req.email, req.password);
+      // Start from a clean slate: the account may have been changed from elsewhere.
+      await resetSync();
+      await syncNow();
+      return accountState();
+
+    case 'account:sign-up': {
+      const { confirm } = await signUp(req.email, req.password);
+      if (!confirm) {
+        await resetSync();
+        await syncNow();
+      }
+      return { ...(await accountState()), confirmEmail: confirm };
+    }
+
+    case 'account:sign-out':
+      await signOut();
+      await resetSync();
+      return accountState();
+
+    case 'account:sync':
+      await syncNow();
+      return accountState();
+
     default: {
       const exhaustive: never = req;
       throw new Error(`Unhandled request: ${JSON.stringify(exhaustive)}`);
@@ -347,6 +398,11 @@ const MAX_CAPTION_CHARS = 4000;
 const MAX_HASHTAGS = 60;
 
 /** Bound the free-text fields a page could have inflated before they reach the DB. */
+async function accountState(): Promise<AccountState> {
+  const [{ email }, sync] = await Promise.all([getAccount(), getSyncStatus()]);
+  return { email, ...sync };
+}
+
 function clamp(p: CapturedPost): CapturedPost {
   return {
     ...p,

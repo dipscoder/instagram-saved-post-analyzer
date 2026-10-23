@@ -241,21 +241,35 @@ added to what the README promises. Portability across machines is a file: the po
 a Blob and clicks its own link, which an extension page may do with no permission at all —
 `chrome.downloads` would have added a line to the install prompt for nothing.
 
-### Backend decision
+### Backend: an account the library mirrors to
 
-Keep the product local-first. Records contain text metadata and remote thumbnail URLs, not
-media blobs, and Chrome's `unlimitedStorage` permission already covers IndexedDB. A remote
-database would not preserve expiring Instagram media URLs; it would add login, row-level
-authorization, sync conflicts, and a second privacy boundary. Supabase Free may pause an
-inactive project, and Firestore's free write quota can be exhausted by a single very large
-first sync.
+The product now has a web app planned, so the earlier "stay local-first" decision was
+revisited in October 2026 and the adapter it described was built. IndexedDB stays the
+working copy; Supabase holds a mirror per user that the web app will read.
 
-If multi-device sync becomes a validated requirement, add it as an optional adapter rather
-than replacing IndexedDB: authenticate the user; create `posts` and `analysis` tables keyed
-by `(user_id, shortcode)`; enable row-level policies; sync metadata/verdicts only; resolve
-conflicts by `categorizedAt`; never upload provider keys or media; keep JSON export/import
-as the recovery path. Supabase is the simpler relational fit, but it is not needed for the
-current single-browser product.
+- **Schema.** `public.posts` (`supabase/migrations/`), keyed by `(user_id, shortcode)`,
+  with Row Level Security on every operation. The browser only ever has the public
+  publishable key, so the policies are the whole access model. Column limits are at least
+  as wide as the capture clamps in `background/index.ts`, so a valid local record is never
+  rejected.
+- **Auth.** Email + password through supabase-js in the service worker. The session is a
+  credential and is stored like the API key: `chrome.storage.local`, trusted contexts only.
+  Only the email leaves the worker, and `account:*` requests from a content script are
+  refused, because that script runs inside instagram.com.
+- **Sync is a diff, not an event log** (`sync-plan.ts`). Each upload records a digest of
+  the row it sent in the `sync` store; the next sync compares every local post against it.
+  No write path has to remember to enqueue anything, a missed sync catches up on the next,
+  and batches are recorded only after the server accepts them, so a worker killed
+  mid-upload resumes. `seenInSavedFeed` is not uploaded: every sweep re-stamps it, and
+  sending it would re-upload the whole library on each visit.
+- **Deletes follow prune.** A post that was uploaded and is no longer local was pruned as
+  unsaved, which only happens after a completed sweep of the full feed (invariant 3), so
+  the account deletes it too. The ledger is untouched, as before.
+- **A different user starts over.** The `sync` store belongs to one user id; signing in
+  as anyone, or signing in again, clears it and uploads everything.
+
+Still to come: thumbnails copied to Storage (CDN URLs expire), and the ledger moving to
+the server along with the OpenAI calls.
 
 ---
 

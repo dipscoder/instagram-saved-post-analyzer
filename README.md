@@ -43,8 +43,10 @@ changes up.
 
 1. Click the extension icon. Pick a model, paste an OpenAI key, press **Test and save** —
    it tests first and stores the key only after OpenAI accepts it.
-2. Open your saved posts on Instagram: your profile → **Saved**.
-3. The library takes over the page. Scroll and posts are captured automatically. **Index
+2. Optional: in the popup's settings, **Create account** or **Sign in**. Your library then
+   syncs to your Saved Index account in the background, ready for the web app.
+3. Open your saved posts on Instagram: your profile → **Saved**.
+4. The library takes over the page. Scroll and posts are captured automatically. **Index
    now** freezes the number currently waiting, indexes exactly that set, and scans farther
    down the feed; anything found during that scan waits for the next run.
 
@@ -231,6 +233,9 @@ extension/src/
     db.ts                  IndexedDB store, dedupe + gap-filling merge
     ledger.ts              paid-for verdicts, kept apart from the disposable post cache
     settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
+    account.ts             Supabase sign-in; the session never leaves the worker
+    sync.ts                mirrors the library to the account, in resumable batches
+    sync-plan.ts           pure diff: which posts to upload or delete
     order.ts               feed position -> save order, across visits
     spend.ts               metered tokens + dollars, survives worker restarts
     categorize.ts          the three-tier pipeline, concurrency, backoff
@@ -279,6 +284,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `https://www.instagram.com/*` | the content scripts |
 | `https://*.cdninstagram.com/*`, `https://*.fbcdn.net/*` | reading thumbnail bytes for the vision fallback |
 | `https://api.openai.com/*` | categorisation calls |
+| `https://siwmxcsrzdvvtouolvph.supabase.co/*` | account sign-in and library sync |
 
 No `tabs`, no `scripting`, no `activeTab`, no `<all_urls>`. Service-worker pushes go over
 `chrome.runtime` ports specifically so `tabs` isn't needed.
