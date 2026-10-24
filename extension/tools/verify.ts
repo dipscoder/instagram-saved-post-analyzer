@@ -20,10 +20,11 @@ import { hashText } from '@saved-index/shared/hash';
 import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
-import { isFullSavedFeed, isSavedRoute } from '../src/routes';
+import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 import { applyResult } from '../src/background/categorize';
+import { planSync, toRow } from '../src/background/sync-plan';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
 
@@ -368,6 +369,10 @@ console.log('\nroute fences');
   check('all-posts is the full feed', isFullSavedFeed('/dipscoder/saved/all-posts/'));
   check('a collection is not the full feed', !isFullSavedFeed('/dipscoder/saved/travel/'));
   check('a hashtag page is never the full feed', !isFullSavedFeed('/explore/tags/saved/'));
+
+  check('a collection opens the full saved feed', savedFeedPath('/dipscoder/saved/travel/1792/') === '/dipscoder/saved/');
+  check('a non-saved page has no library', savedFeedPath('/dipscoder/') === null);
+  check('a hashtag page has no library', savedFeedPath('/explore/tags/saved/') === null);
 }
 
 console.log('\nhashText');
@@ -549,6 +554,45 @@ console.log('\nsearch folding');
   check('accents are optional', matchesSearch(post, tokenize('creme brulee')));
   check('accents still match themselves', matchesSearch(post, tokenize('crème')));
   check('every term must appear', !matchesSearch(post, tokenize('creme pasta')));
+}
+
+console.log('\naccount sync plan');
+{
+  const base = toRecord({
+    shortcode: 'SYNC1',
+    permalink: 'https://www.instagram.com/p/SYNC1/',
+    handle: 'chef',
+    caption: 'pasta night',
+    hashtags: ['pasta'],
+    thumbnailUrl: '',
+    isVideo: false,
+    durationSec: null,
+    audioTrackName: null,
+    altText: null,
+    postedAt: Date.UTC(2026, 0, 2),
+  }, 7);
+  const row = toRow(base);
+  check('timestamps become ISO strings', row.posted_at === '2026-01-02T00:00:00.000Z', row.posted_at);
+  check('save order is kept', row.saved_rank === 7);
+  check('the sweep stamp is not uploaded', !('seen_in_saved_feed' in row));
+
+  const first = planSync([base], new Map());
+  check('a new post is uploaded', first.upserts.length === 1 && first.deletes.length === 0);
+
+  const synced = new Map(first.upserts.map(({ row: r, hash }) => [r.shortcode, hash]));
+  check('an unchanged post is not uploaded again', planSync([base], synced).upserts.length === 0);
+
+  // Every visit to the saved grid re-stamps seenInSavedFeed. That alone must not
+  // re-send the whole library.
+  const reswept = { ...base, seenInSavedFeed: (base.seenInSavedFeed ?? 0) + 60_000 };
+  check('a re-sweep alone uploads nothing', planSync([reswept], synced).upserts.length === 0);
+
+  const categorised = { ...base, category: 'Food & Recipes', categorizedAt: Date.now() };
+  check('a new category is uploaded', planSync([categorised], synced).upserts.length === 1);
+
+  const pruned = planSync([], synced);
+  check('a pruned post is deleted from the account',
+    pruned.deletes.length === 1 && pruned.deletes[0] === 'SYNC1');
 }
 
 console.log('\ncurrent model catalogue');

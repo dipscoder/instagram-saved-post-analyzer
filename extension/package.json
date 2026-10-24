@@ -12,7 +12,8 @@
     "icons": "node tools/make-icons.mjs"
   },
   "dependencies": {
-    "@saved-index/shared": "0.1.0"
+    "@saved-index/shared": "0.1.0",
+    "@supabase/supabase-js": "^2.118.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

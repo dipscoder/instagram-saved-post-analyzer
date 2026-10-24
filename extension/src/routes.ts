@@ -32,3 +32,12 @@ export function isSavedRoute(pathname: string = location.pathname): boolean {
 export function isFullSavedFeed(pathname: string = location.pathname): boolean {
   return /^\/[^/]+\/saved\/?$/.test(pathname) || /^\/[^/]+\/saved\/all-posts\/?$/.test(pathname);
 }
+
+/**
+ * The full saved feed of the account browsing `pathname`, or null off the saved routes.
+ * The popup's "Open Library" goes here: Instagram has no username-free saved URL.
+ */
+export function savedFeedPath(pathname: string): string | null {
+  const match = /^\/([A-Za-z0-9._]{1,30})\/saved(\/|$)/.exec(pathname);
+  return match ? `/${match[1]}/saved/` : null;
+}

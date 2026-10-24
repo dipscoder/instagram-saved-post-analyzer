@@ -68,12 +68,20 @@ export type Request =
   /** The page owns scrolling and reports when a requested sweep naturally ends. */
   | { type: 'harvest:finished'; reason: 'complete' | 'stopped' | 'rate-limited' }
   | { type: 'spend:reset' }
+  /** Where the popup's "Open Library" goes: the saved feed last seen capturing. */
+  | { type: 'library:url' }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<Settings> }
   | { type: 'settings:clear-key' }
   | { type: 'settings:test-key' }
   /** Test before persistence so an invalid replacement never becomes the active key. */
-  | { type: 'settings:test-candidate'; provider: Settings['provider']; model: string; apiKey: string };
+  | { type: 'settings:test-candidate'; provider: Settings['provider']; model: string; apiKey: string }
+  /** Account requests are accepted from extension pages only, never a content script. */
+  | { type: 'account:get' }
+  | { type: 'account:sign-in'; email: string; password: string }
+  | { type: 'account:sign-up'; email: string; password: string }
+  | { type: 'account:sign-out' }
+  | { type: 'account:sync' };
 
 export type Response =
   | { ok: true; value: unknown }
@@ -108,6 +116,17 @@ export type Broadcast =
   /** Captured metadata changed without changing library counts (for example a fresh CDN URL). */
   | { type: 'posts:updated' }
   | { type: 'settings'; settings: SafeSettings };
+
+/** The account as it may leave the service worker: who is signed in, never their tokens. */
+export interface AccountState {
+  email: string | null;
+  lastSyncAt: number | null;
+  /** Posts currently mirrored to the account. */
+  synced: number;
+  error: string | null;
+  /** Set after sign-up when the project requires email confirmation first. */
+  confirmEmail?: boolean;
+}
 
 /** Settings as they may safely leave the service worker — key replaced by a mask. */
 export type SafeSettings = Omit<Settings, 'apiKey'> & {

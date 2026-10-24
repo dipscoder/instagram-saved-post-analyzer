@@ -3,73 +3,74 @@
  *
  * Written by hand rather than checked in as binaries so the artwork is reviewable and
  * reproducible: `node tools/make-icons.mjs` regenerates all three from this source.
- * A violet-blue tile with a white indexed-bookmark glyph. The two small rules make the
- * mark specific to this product rather than another generic bookmark app, while staying
- * legible at Chrome's 16px toolbar size.
+ * A squircle in the brand's coral-to-violet gradient holding a white bookmark, with a
+ * sparkle cut out of it for the sorting. Below 32px the sparkle would only smudge, so the
+ * toolbar icon is the bookmark alone.
  */
 
 import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const BG_A = [0x78, 0x6d, 0xfc];
-const BG_B = [0x50, 0x6f, 0xee];
-const FG = [0xff, 0xff, 0xff];
+const CORAL = [0xff, 0x6a, 0x55];
+const PINK = [0xf0, 0x3e, 0x86];
+const VIOLET = [0x7a, 0x4c, 0xff];
+const WHITE = [0xff, 0xff, 0xff];
+/** Samples per axis per pixel. Coverage by supersampling keeps every shape a plain test. */
+const SS = 5;
 
-/** Signed-distance rounded rectangle, used for antialiased edges. */
-function roundedRectSDF(x, y, cx, cy, halfW, halfH, radius) {
-  const dx = Math.abs(x - cx) - (halfW - radius);
-  const dy = Math.abs(y - cy) - (halfH - radius);
-  const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0));
-  return outside + Math.min(Math.max(dx, dy), 0) - radius;
+/** Each shape is drawn on a 128-unit canvas: a test of whether (x, y) is inside it. */
+const inTile = (x, y) => (Math.abs(x - 64) / 60) ** 5 + (Math.abs(y - 64) / 60) ** 5 <= 1;
+
+function inBookmark(x, y) {
+  const dx = Math.abs(x - 64);
+  if (dx > 24 || y < 28 || y > 100) return false;
+  // The notch: a V rising from the two tails at the bottom to y = 82 in the middle.
+  if (y > 82 + (dx / 24) * 18) return false;
+  // Rounded top corners.
+  const r = 9;
+  if (y < 28 + r && dx > 24 - r) return Math.hypot(dx - (24 - r), y - (28 + r)) <= r;
+  return true;
 }
+
+/** A four-point sparkle: an astroid, whose concave sides give the pointed star. */
+const inSparkle = (x, y) => Math.abs((x - 64) / 15) ** (2 / 3) + Math.abs((y - 56) / 15) ** (2 / 3) <= 1;
 
 function render(size) {
   const px = new Uint8Array(size * size * 4);
-  const s = size / 128; // design at 128, scale down
-  const aa = 0.8 * s; // antialias width in pixels
+  const unit = 128 / size;
+  const sparkle = size >= 32;
 
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const cx = x + 0.5;
-      const cy = y + 0.5;
-
-      // Tile: rounded square covering most of the canvas, with the same subtle diagonal
-      // shift as the brand mark used in both extension surfaces.
-      const tile = roundedRectSDF(cx, cy, size / 2, size / 2, 60 * s, 60 * s, 19 * s);
-      const tileA = clamp01(0.5 - tile / aa);
-      const gradient = clamp01((cx + cy) / (size * 2));
-      const bg = mix(BG_A, BG_B, gradient);
-
-      // Bookmark: a tall rounded card with a triangular notch cut from the bottom.
-      const body = roundedRectSDF(cx, cy, size / 2, 61 * s, 25 * s, 38 * s, 7 * s);
-      let markA = clamp01(0.5 - body / aa);
-
-      // Notch — carve a V out of the lower half.
-      const notchTop = 75 * s;
-      if (cy > notchTop) {
-        const halfWidthAtY = ((cy - notchTop) / (24 * s)) * (25 * s);
-        if (Math.abs(cx - size / 2) < halfWidthAtY) markA = 0;
+  for (let py = 0; py < size; py++) {
+    for (let pxl = 0; pxl < size; pxl++) {
+      let tile = 0;
+      let mark = 0;
+      for (let sy = 0; sy < SS; sy++) {
+        for (let sx = 0; sx < SS; sx++) {
+          const x = (pxl + (sx + 0.5) / SS) * unit;
+          const y = (py + (sy + 0.5) / SS) * unit;
+          if (!inTile(x, y)) continue;
+          tile++;
+          if (inBookmark(x, y) && !(sparkle && inSparkle(x, y))) mark++;
+        }
       }
+      const i = (py * size + pxl) * 4;
+      if (!tile) continue;
 
-      // Two index rules, knocked back into the white mark. They remain two crisp dots at
-      // 16px and become the recognisable "index" detail at larger sizes.
-      const rule1 = roundedRectSDF(cx, cy, size / 2, 48 * s, 13 * s, 3 * s, 3 * s);
-      const rule2 = roundedRectSDF(cx, cy, size / 2, 63 * s, 13 * s, 3 * s, 3 * s);
-      const ruleA = Math.max(clamp01(0.5 - rule1 / aa), clamp01(0.5 - rule2 / aa)) * markA;
+      // Diagonal gradient, with a soft light falling from the top edge.
+      const cx = (pxl + 0.5) * unit;
+      const cy = (py + 0.5) * unit;
+      const t = Math.min(1, Math.max(0, (cx * 0.45 + cy) / 175));
+      const bg = t < 0.5 ? mix(CORAL, PINK, t * 2) : mix(PINK, VIOLET, (t - 0.5) * 2);
+      const lit = mix(bg, WHITE, Math.max(0, 0.14 - cy / 128 * 0.28));
 
-      const i = (y * size + x) * 4;
-      const [r, g, b] = mix(mix(bg, FG, markA), bg, ruleA);
+      const [r, g, b] = mix(lit, WHITE, mark / tile);
       px[i] = r;
       px[i + 1] = g;
       px[i + 2] = b;
-      px[i + 3] = Math.round(tileA * 255);
+      px[i + 3] = Math.round((tile / (SS * SS)) * 255);
     }
   }
   return px;
-}
-
-function clamp01(n) {
-  return Math.min(1, Math.max(0, n));
 }
 
 function mix(a, b, t) {

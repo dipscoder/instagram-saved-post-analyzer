@@ -13,6 +13,8 @@ import { Categorizer } from './categorize';
 import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
 import { reserveRanks } from './order';
 import { resetSpend } from './spend';
+import { getAccount, signIn, signOut, signUp } from './account';
+import { getSyncStatus, resetSync, scheduleSync, syncNow } from './sync';
 import {
   clearKey,
   getSafeSettings,
@@ -21,7 +23,15 @@ import {
   migrateSettings,
   setSettings,
 } from './settings';
-import { PORT, type Broadcast, type Request, type Response, type Stats } from '../messaging';
+import {
+  PORT,
+  type AccountState,
+  type Broadcast,
+  type Request,
+  type Response,
+  type Stats,
+} from '../messaging';
+import { savedFeedPath } from '../routes';
 import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
@@ -34,12 +44,16 @@ chrome.runtime.onInstalled.addListener(() => {
   void lockDownStorage();
   void migrateSettings();
 });
+// Catch up on anything captured or categorised since the last upload.
+scheduleSync();
 
 let lastProgress: IndexProgress = IDLE_PROGRESS;
 
 const categorizer = new Categorizer((p) => {
   lastProgress = p;
   broadcast({ type: 'progress', progress: p });
+  // Progress means categories were written. The sync diff decides whether any changed.
+  scheduleSync();
 });
 
 /**
@@ -117,8 +131,15 @@ function broadcast(msg: Broadcast): void {
   }
 }
 
-chrome.runtime.onMessage.addListener((req: Request, _sender, sendResponse) => {
-  handle(req)
+chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
+  // A content script runs inside instagram.com. Nothing there may sign in, out or
+  // anywhere else on the user's behalf.
+  const fromPage = sender.tab !== undefined;
+  const request = fromPage && String(req?.type).startsWith('account:')
+    ? Promise.reject(new Error('Account requests are only accepted from the extension.'))
+    : handle(req);
+  if (req?.type === 'posts:captured' && sender.url) void rememberLibrary(sender.url);
+  request
     .then((value) => sendResponse({ ok: true, value } satisfies Response))
     .catch((err: unknown) =>
       sendResponse({
@@ -145,6 +166,7 @@ async function handle(req: Request): Promise<unknown> {
         posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null)),
       );
       if (inserted > 0 || refreshed > 0) {
+        scheduleSync();
         // Push the new total straight away so the library's counts and rows update as
         // you scroll. Existing records matter too: their Instagram CDN thumbnail may
         // have just been replaced with a fresh signed URL.
@@ -202,7 +224,10 @@ async function handle(req: Request): Promise<unknown> {
 
     case 'posts:prune': {
       const removed = await db.prune(req.since);
-      if (removed > 0) broadcast({ type: 'progress', progress: await categorizer.progress() });
+      if (removed > 0) {
+        scheduleSync();
+        broadcast({ type: 'progress', progress: await categorizer.progress() });
+      }
       return { removed };
     }
 
@@ -273,6 +298,11 @@ async function handle(req: Request): Promise<unknown> {
       await resetSpend();
       return categorizer.progress();
 
+    case 'library:url': {
+      const stored = await chrome.storage.local.get(LIBRARY_KEY);
+      return `${INSTAGRAM}${typeof stored[LIBRARY_KEY] === 'string' ? stored[LIBRARY_KEY] : '/'}`;
+    }
+
     case 'settings:get':
       return {
         settings: await getSafeSettings(),
@@ -334,6 +364,34 @@ async function handle(req: Request): Promise<unknown> {
       };
     }
 
+    case 'account:get':
+      return accountState();
+
+    case 'account:sign-in':
+      await signIn(req.email, req.password);
+      // Start from a clean slate: the account may have been changed from elsewhere.
+      await resetSync();
+      await syncNow();
+      return accountState();
+
+    case 'account:sign-up': {
+      const { confirm } = await signUp(req.email, req.password);
+      if (!confirm) {
+        await resetSync();
+        await syncNow();
+      }
+      return { ...(await accountState()), confirmEmail: confirm };
+    }
+
+    case 'account:sign-out':
+      await signOut();
+      await resetSync();
+      return accountState();
+
+    case 'account:sync':
+      await syncNow();
+      return accountState();
+
     default: {
       const exhaustive: never = req;
       throw new Error(`Unhandled request: ${JSON.stringify(exhaustive)}`);
@@ -345,6 +403,25 @@ async function handle(req: Request): Promise<unknown> {
 const MAX_POSTS_PER_MESSAGE = 500;
 const MAX_CAPTION_CHARS = 4000;
 const MAX_HASHTAGS = 60;
+
+/** Who is signed in and how the last sync went: the account as it may leave the worker. */
+async function accountState(): Promise<AccountState> {
+  const [{ email }, sync] = await Promise.all([getAccount(), getSyncStatus()]);
+  return { email, ...sync };
+}
+
+const INSTAGRAM = 'https://www.instagram.com';
+const LIBRARY_KEY = 'libraryPath';
+
+/**
+ * Remembers whose saved feed is being captured, so the popup can open it directly. Taken
+ * from `sender.url`, which the browser sets, never from anything the page sent.
+ */
+async function rememberLibrary(url: string): Promise<void> {
+  const { origin, pathname } = new URL(url);
+  const path = origin === INSTAGRAM ? savedFeedPath(pathname) : null;
+  if (path) await chrome.storage.local.set({ [LIBRARY_KEY]: path });
+}
 
 /** Bound the free-text fields a page could have inflated before they reach the DB. */
 function clamp(p: CapturedPost): CapturedPost {
