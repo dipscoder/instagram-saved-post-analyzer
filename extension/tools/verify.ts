@@ -17,14 +17,21 @@ import {
   TAXONOMY_HASH,
 } from '@saved-index/shared/taxonomy';
 import { hashText } from '@saved-index/shared/hash';
-import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
+import { applyVerdict, isFresh, parseVerdict, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
 import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 import { applyResult } from '../src/background/categorize';
-import { planSync, toRow } from '../src/background/sync-plan';
+import {
+  changed,
+  fromVerdictRow,
+  planSync,
+  planThumbnails,
+  toRow,
+  toVerdictRow,
+} from '../src/background/sync-plan';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
 
@@ -593,6 +600,51 @@ console.log('\naccount sync plan');
   const pruned = planSync([], synced);
   check('a pruned post is deleted from the account',
     pruned.deletes.length === 1 && pruned.deletes[0] === 'SYNC1');
+
+  // Thumbnails: only for posts the account already has, newest saved first, and an
+  // expired URL is not retried until the post comes back with a fresh one.
+  const cdn = 'https://scontent.cdninstagram.com/a.jpg';
+  const older = { ...base, shortcode: 'OLD', thumbnailUrl: cdn, savedRank: 1 };
+  const newer = { ...base, shortcode: 'NEW', thumbnailUrl: cdn, savedRank: 9 };
+  const inAccount = new Map([['OLD', 'h'], ['NEW', 'h']]);
+  const todo = planThumbnails([older, newer], inAccount, new Map());
+  check('thumbnails are copied newest saved first', todo.map((t) => t.shortcode).join() === 'NEW,OLD');
+  check('no thumbnail before its post is in the account',
+    planThumbnails([older], new Map(), new Map()).length === 0);
+  const failed = new Map([['OLD', { shortcode: 'OLD', stored: false, url: cdn }]]);
+  check('an expired thumbnail URL is not retried', planThumbnails([older], inAccount, failed).length === 0);
+  check('a fresh URL retries a failed thumbnail',
+    planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=2` }], inAccount, failed).length === 1);
+  const stored = new Map([['OLD', { shortcode: 'OLD', stored: true, url: '' }]]);
+  check('a stored thumbnail is never copied again',
+    planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=3` }], inAccount, stored).length === 0);
+}
+
+console.log('\naccount ledger');
+{
+  const verdict: Verdict = {
+    shortcode: 'PAID1',
+    category: 'Food & Recipes',
+    subcategory: null,
+    tags: ['pasta'],
+    summary: 'A pasta recipe.',
+    modelUsed: 'gpt-5.6-luna',
+    categorizedAt: Date.UTC(2026, 9, 24, 9, 30),
+    inputHash: 'abc',
+    taxonomyHash: 'tax',
+    rulesHash: 'rules',
+    ledgerVersion: 2,
+  };
+  const row = toVerdictRow(verdict);
+  // Postgres hands timestamps back as "+00:00" rather than "Z".
+  const fromServer = fromVerdictRow({ ...row, categorized_at: '2026-10-24T09:30:00+00:00' });
+  const back = parseVerdict(fromServer);
+  check('a verdict survives the round trip through the account',
+    JSON.stringify(back) === JSON.stringify(verdict), back);
+  const synced = new Map(changed([row], new Map()).map(({ row: r, hash }) => [r.shortcode, hash]));
+  check('a pulled verdict is not uploaded straight back',
+    back !== null && changed([toVerdictRow(back)], synced).length === 0);
+  check('a garbled verdict from the account is refused', parseVerdict(fromVerdictRow({ shortcode: 'X' })) === null);
 }
 
 console.log('\ncurrent model catalogue');

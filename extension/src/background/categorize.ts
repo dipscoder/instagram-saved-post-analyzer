@@ -26,6 +26,7 @@ import {
   type ChatResult,
 } from './providers/index';
 import * as ledger from './ledger';
+import { fetchThumbnail } from './media';
 import { applyVerdict, inputHash, isFresh, verdictFrom } from './ledger';
 import {
   classifyByRules,
@@ -42,8 +43,6 @@ const MAX_ATTEMPTS = 4;
 const CAPTION_CHAR_BUDGET = 400;
 /** Attempts to get an answer for one post before it is set down for this run. */
 const MAX_UNANSWERED = 2;
-const MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024;
-const THUMBNAIL_TIMEOUT_MS = 15_000;
 
 const SYSTEM_PROMPT = [
   'You file saved Instagram posts into a fixed taxonomy so they can be found again later.',
@@ -698,42 +697,14 @@ function firstLine(caption: string): string {
  * String.fromCharCode(...bytes) blows the argument limit on anything non-trivial.
  */
 async function fetchImageBase64(url: string): Promise<{ mediaType: string; base64: string }> {
-  // The URL came out of a payload the page could have written. Three bounds, because a
-  // bare fetch of an attacker-chosen URL is an outbound request from the user's browser,
-  // an unbounded response is a service worker running out of memory, and a hung one is a
-  // run that never finishes.
-  if (!isInstagramCdn(url)) throw new Error('Thumbnail is not on an Instagram CDN.');
-
-  const res = await fetch(url, { signal: AbortSignal.timeout(THUMBNAIL_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`Thumbnail fetch failed: ${res.status}`);
-
-  const declared = Number(res.headers.get('content-length') ?? '0');
-  if (declared > MAX_THUMBNAIL_BYTES) throw new Error('Thumbnail too large.');
-
-  const buffer = await res.arrayBuffer();
-  if (buffer.byteLength > MAX_THUMBNAIL_BYTES) throw new Error('Thumbnail too large.');
-  const bytes = new Uint8Array(buffer);
+  const image = await fetchThumbnail(url);
+  const bytes = new Uint8Array(await image.arrayBuffer());
   let binary = '';
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
     binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
-
-  const mediaType = (res.headers.get('content-type') ?? 'image/jpeg').split(';')[0]!;
-  return { mediaType, base64: btoa(binary) };
-}
-
-/** Matches host_permissions. A thumbnail from anywhere else is not ours to fetch. */
-function isInstagramCdn(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return (
-      protocol === 'https:' &&
-      (hostname.endsWith('.cdninstagram.com') || hostname.endsWith('.fbcdn.net'))
-    );
-  } catch {
-    return false;
-  }
+  return { mediaType: image.type || 'image/jpeg', base64: btoa(binary) };
 }
 
 function sleep(ms: number): Promise<void> {

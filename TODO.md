@@ -316,9 +316,15 @@ before being acted on.
       `supabase/README.md`
 - [x] Popup restyled around a new brand: coral-to-violet icon, violet tint, warm neutrals;
       "Open Library" goes to the saved feed last seen capturing
-- [ ] Thumbnails copied to Supabase Storage (instead of expiring CDN URLs)
-- [ ] The paid-analysis ledger moved to the server
 - [ ] Check a real reel's payload for an Instagram-provided transcript
+
+## Phase 35 — Thumbnails and the ledger in the account (Phase 2b)
+- [x] One JPEG per post (480 px long edge) in a private Storage bucket, copied 20 at a time
+      with a jittered pause between downloads; expired URLs wait for a fresh capture
+- [x] `public.verdicts` mirrors the ledger, with no delete policy; the first sync for an
+      account pulls it back, so a new browser never re-pays for a summary
+- [x] Post text columns widened to the ledger's 2,000-character import limit
+- [x] 166 checks
 
 ---
 

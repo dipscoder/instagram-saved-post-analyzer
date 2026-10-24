@@ -287,6 +287,7 @@ async function handle(req: Request): Promise<unknown> {
       if (result.imported > 0) {
         await db.resetCategories();
         void categorizer.start().catch(reportFailure);
+        scheduleSync();
       }
       return result;
     }

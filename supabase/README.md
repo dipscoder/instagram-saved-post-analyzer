@@ -5,6 +5,7 @@ Database migrations and, later, server functions for the Saved Index backend.
 | Path | What it is |
 | --- | --- |
 | `migrations/20261023120000_posts.sql` | `public.posts`: one row per saved post per user, protected by Row Level Security |
+| `migrations/20261024090000_thumbnails_and_verdicts.sql` | The private `thumbnails` bucket, `public.verdicts` (the paid-analysis ledger, never deleted), and `posts.thumbnail_stored` |
 
 ## Applying a migration
 

@@ -123,6 +123,8 @@ export interface AccountState {
   lastSyncAt: number | null;
   /** Posts currently mirrored to the account. */
   synced: number;
+  /** Of those, how many have their thumbnail stored. */
+  thumbnails: number;
   error: string | null;
   /** Set after sign-up when the project requires email confirmation first. */
   confirmEmail?: boolean;

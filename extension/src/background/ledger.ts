@@ -27,11 +27,10 @@
  * available answers are "re-spend everything" and "serve an answer from a prompt that no
  * longer exists", and this file exists to avoid choosing between them.
  *
- * It is deliberately local. No account, no vendor, no network, no new permission, and
- * nothing added to what the README promises — the user's captions and interests stay on
- * their machine. Portability across machines is a file: `exportAll` writes one, `importAll`
- * reads one, and the popup does both without asking for a single extra permission, because
- * an extension page can hand the browser a Blob directly.
+ * The store itself is local. Portability across machines is the account, when signed in
+ * (sync.ts mirrors every verdict and pulls them back with `merge`), or a file: `exportAll`
+ * writes one, `importAll` reads one, and the popup does both without asking for a single
+ * extra permission, because an extension page can hand the browser a Blob directly.
  */
 
 import { hashText } from '@saved-index/shared/hash';
@@ -210,7 +209,7 @@ export async function exportAll(): Promise<LedgerFile> {
     ledgerVersion: LEDGER_VERSION,
     taxonomyHash: TAXONOMY_HASH,
     exportedAt: Date.now(),
-    verdicts: [...(await resident()).values()],
+    verdicts: await all(),
   };
 }
 
@@ -228,32 +227,31 @@ export async function importAll(raw: unknown): Promise<{ imported: number; skipp
   if (!file || file.kind !== 'saved-index-ledger' || !Array.isArray(file.verdicts)) {
     throw new Error('That file is not a Saved Index ledger export.');
   }
+  const valid = file.verdicts.map(parseVerdict).filter((v): v is Verdict => v !== null);
+  const imported = await merge(valid);
+  return { imported, skipped: file.verdicts.length - imported };
+}
 
+/** Stores each verdict that is newer than the one on file. Returns how many were stored. */
+export async function merge(verdicts: Verdict[]): Promise<number> {
   const live = await resident();
-  const fresh: Verdict[] = [];
-  let skipped = 0;
-
-  for (const candidate of file.verdicts) {
-    const v = sanitize(candidate);
-    if (!v) {
-      skipped++;
-      continue;
-    }
+  const fresh = verdicts.filter((v) => {
     const existing = live.get(v.shortcode);
-    if (existing && existing.categorizedAt >= v.categorizedAt) {
-      skipped++;
-      continue;
-    }
-    fresh.push(v);
-  }
-
+    return !existing || existing.categorizedAt < v.categorizedAt;
+  });
   await putMany(fresh);
-  return { imported: fresh.length, skipped };
+  return fresh.length;
+}
+
+/** Every verdict on file. */
+export async function all(): Promise<Verdict[]> {
+  return [...(await resident()).values()];
 }
 
 const MAX_TEXT = 2000;
 
-function sanitize(raw: unknown): Verdict | null {
+/** A verdict from a file or the account, checked field by field; null if unusable. */
+export function parseVerdict(raw: unknown): Verdict | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const v = raw as Record<string, unknown>;
 

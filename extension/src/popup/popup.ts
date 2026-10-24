@@ -300,7 +300,7 @@ function renderAccount(state: AccountState): void {
   $('accountSync').textContent = state.error
     ? 'Sync failed'
     : state.lastSyncAt
-      ? `${state.synced} posts synced ${timeAgo(state.lastSyncAt)}`
+      ? `${state.synced} posts, ${state.thumbnails} thumbnails · synced ${timeAgo(state.lastSyncAt)}`
       : 'Not synced yet';
 
   if (state.confirmEmail) {

@@ -236,8 +236,8 @@ longer exists. `extension/tools/verify.ts` pins the committed value, so a taxono
 re-bills every affected post in every installed library — shows up as a line in the diff
 rather than as a surprise on someone's invoice.
 
-It is deliberately local. No account, no vendor, no network, no new permission, and nothing
-added to what the README promises. Portability across machines is a file: the popup builds
+Locally it needs no account and no permission. Portability across machines is either the
+account (below) or a file: the popup builds
 a Blob and clicks its own link, which an extension page may do with no permission at all —
 `chrome.downloads` would have added a line to the install prompt for nothing.
 
@@ -265,11 +265,23 @@ working copy; Supabase holds a mirror per user that the web app will read.
 - **Deletes follow prune.** A post that was uploaded and is no longer local was pruned as
   unsaved, which only happens after a completed sweep of the full feed (invariant 3), so
   the account deletes it too. The ledger is untouched, as before.
-- **A different user starts over.** The `sync` store belongs to one user id; signing in
-  as anyone, or signing in again, clears it and uploads everything.
+- **A different user starts over.** The sync stores (`sync`, `ledgerSync`, `thumbs`)
+  belong to one user id; signing in as anyone, or signing in again, clears them, pulls,
+  and uploads what the account lacks.
 
-Still to come: thumbnails copied to Storage (CDN URLs expire), and the ledger moving to
-the server along with the OpenAI calls.
+- **The ledger goes up, and comes back down.** `public.verdicts` mirrors the local ledger
+  and has no delete policy: invariant 4 holds on the server too. The first sync for an
+  account pulls it into the local ledger (newer wins, per shortcode), records what the
+  server holds so nothing is sent straight back, and starts nothing: the next indexing run
+  replays those verdicts for free, and no pull ever triggers a paid run on its own.
+- **Thumbnails are copied, gently.** Instagram's CDN URLs are signed and expire, so each
+  synced post gets one JPEG, at most 480 px, in the private `thumbnails` bucket at
+  `{user_id}/{shortcode}.jpg`, and `posts.thumbnail_stored` turns true. The copy runs 20 at
+  a time, one download after another with a 0.4–1.2 s pause, newest saved first, from URLs
+  the page already loaded and with no cookies attached. An expired URL is remembered and
+  retried only when the post comes back with a fresh one. Pruning a post removes its file.
+
+Still to come: the OpenAI calls moving to the server.
 
 ---
 

@@ -39,7 +39,7 @@ copying the same explanation into all four.
   a validated need.
 - The library and popup share one responsive visual system. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **158 checks**. It does not replace a live
+- The regression suite currently contains **166 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question
@@ -57,7 +57,7 @@ Paths are under `extension/` unless they start with `shared/`.
 | In-page library and post detail | `src/page/library.ts`, `src/page/library.css.ts` |
 | Popup setup and controls | `src/popup/popup.ts`, `public/popup.html` |
 | Reel controls | `src/page/video.ts` |
-| Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/config.ts` |
+| Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/background/media.ts`, `src/config.ts` |
 | Database schema and access rules | `supabase/migrations/` |
 | Cross-context contracts | `src/messaging.ts` |
 | Extension assets and packaging | `public/manifest.json`, `tools/make-icons.mjs`, `build.mjs` |
