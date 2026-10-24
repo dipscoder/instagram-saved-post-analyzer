@@ -151,21 +151,6 @@ export async function readJson<T>(res: Response): Promise<T> {
   }
 }
 
-/** Models wrap JSON in prose or fences often enough that this is worth centralising. */
-export function parseJsonLoose<T>(text: string): T {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  const body = fenced?.[1] ?? text;
-  const start = body.search(/[[{]/);
-  if (start === -1) throw new Error('Model returned no JSON.');
-
-  const opening = body[start];
-  const closing = opening === '[' ? ']' : '}';
-  const end = body.lastIndexOf(closing);
-  if (end <= start) throw new Error('Model returned truncated JSON.');
-
-  return JSON.parse(body.slice(start, end + 1)) as T;
-}
-
 import { openai } from './openai';
 
 export const PROVIDERS: Record<ProviderId, Provider> = { openai };

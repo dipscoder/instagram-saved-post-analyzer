@@ -12,3 +12,8 @@ dist/
 *.key
 *.crx
 *.zip
+
+# Built Edge Functions (npm run build:functions) and Supabase CLI state.
+supabase/functions/*/dist/
+supabase/.temp/
+supabase/.branches/

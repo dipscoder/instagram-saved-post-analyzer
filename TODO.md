@@ -316,7 +316,8 @@ before being acted on.
       `supabase/README.md`
 - [x] Popup restyled around a new brand: coral-to-violet icon, violet tint, warm neutrals;
       "Open Library" goes to the saved feed last seen capturing
-- [ ] Check a real reel's payload for an Instagram-provided transcript
+- [x] Check for an Instagram-provided transcript: there is none on web; reels need
+      speech-to-text on their audio
 
 ## Phase 35 — Thumbnails and the ledger in the account (Phase 2b)
 - [x] One JPEG per post (480 px long edge) in a private Storage bucket, copied 20 at a time
@@ -325,6 +326,19 @@ before being acted on.
       account pulls it back, so a new browser never re-pays for a summary
 - [x] Post text columns widened to the ledger's 2,000-character import limit
 - [x] 166 checks
+
+## Phase 36 — Analysis through the account (Phase 3)
+- [x] `analyze` Edge Function: the Decisions API picks the category (with `unknown` and a
+      0.6 probability floor), one batched call writes summary, tags and subcategory
+- [x] The OpenAI key lives only in the function's secrets; the function uses the caller's
+      session, so RLS applies and no service-role key is needed
+- [x] `public.usage` and `record_usage`: spend per user per UTC day, add-only, with a
+      `DAILY_CAP_USD` limit enforced before any call
+- [x] Signed in, the extension indexes without a key; your own key still works signed out
+- [ ] Deploy the function from CI on push to main
+- [x] 183 checks
+- [ ] Reel transcription with `gpt-transcribe`, on audio the page already loads
+- [ ] A labelled test set and an accuracy eval for the two-call filing
 
 ---
 
@@ -356,7 +370,6 @@ before being acted on.
 - [ ] Collections — Instagram's saved posts can be grouped; currently flattened
 
 ## Deliberately out of scope
-- Transcription (Instagram doesn't expose transcripts on web)
 - Publishing to the Web Store (loaded unpacked)
 - `sidePanel` (superseded by popup + in-page library)
 - Populating `transcript` / `ocrText` / `embedding` / `perceptualHash` — schema accepts them

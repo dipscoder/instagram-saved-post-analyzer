@@ -84,7 +84,7 @@ export function isFresh(v: Verdict | undefined, inputHash: string): v is Verdict
   );
 }
 
-/** The digest of one post's model-visible text. `signature` comes from categorize.ts. */
+/** The digest of one post's model-visible text. `signature` comes from filing.ts. */
 export function inputHash(signature: string): string {
   return hashText(signature);
 }

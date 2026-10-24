@@ -23,7 +23,17 @@ import { reserveRanks } from '../src/background/order';
 import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
-import { applyResult } from '../src/background/categorize';
+import { applyResult } from '../src/background/filing';
+import {
+  BadRequest,
+  combine,
+  costUsd,
+  decisionsBody,
+  MIN_PROBABILITY,
+  parseRequest,
+  readDecisions,
+  readSummaries,
+} from '../../supabase/functions/analyze/decide';
 import {
   changed,
   fromVerdictRow,
@@ -645,6 +655,55 @@ console.log('\naccount ledger');
   check('a pulled verdict is not uploaded straight back',
     back !== null && changed([toVerdictRow(back)], synced).length === 0);
   check('a garbled verdict from the account is refused', parseVerdict(fromVerdictRow({ shortcode: 'X' })) === null);
+}
+
+console.log('\nserver analysis');
+{
+  const refused = (body: unknown): boolean => {
+    try {
+      parseRequest(body);
+      return false;
+    } catch (err) {
+      return err instanceof BadRequest;
+    }
+  };
+  check('an empty batch is refused', refused({ posts: [] }));
+  check('more than 25 posts are refused', refused({ posts: Array.from({ length: 26 }, () => ({ text: 'x' })) }));
+  check('an image with several posts is refused', refused({ posts: [{ text: 'a' }, { text: 'b' }], image: 'data:image/jpeg;base64,AAAA' }));
+  check('an image that is not a data URL is refused', refused({ posts: [{ text: 'a' }], image: 'https://example.com/a.jpg' }));
+  const req = parseRequest({ posts: [{ id: 7, text: 'chef | caption: pasta' }, { id: 7, text: 'cat | caption: lol' }] });
+  check('post ids are positions, whatever the caller sent', req.posts.map((p) => p.id).join() === '0,1');
+
+  const body = decisionsBody(req) as { questions: { name: string; choices: { value: string }[] }[] };
+  check('one choice question per post', body.questions.map((q) => q.name).join() === 'post_0,post_1');
+  check('every question offers unknown', body.questions.every((q) => q.choices.some((c) => c.value === 'unknown')));
+
+  const decisions = readDecisions({
+    answers: [
+      { type: 'choice', name: 'post_0', choice: 'Food & Recipes', probabilities: [{ value: 'Food & Recipes', probability: 0.92 }], confidence: 0.9 },
+      { type: 'choice', name: 'post_1', choice: 'Humor & Misc', probabilities: [{ value: 'Humor & Misc', probability: MIN_PROBABILITY - 0.1 }] },
+    ],
+  });
+  check('a confident decision keeps its category', decisions.get(0)?.category === 'Food & Recipes');
+  check('an unsure decision files as Uncategorized', decisions.get(1)?.category === null);
+  check('a refusal is simply absent', readDecisions({ answers: [{ type: 'refusal', name: 'post_0' }] }).size === 0);
+
+  const summaries = readSummaries({ output_text: JSON.stringify({ results: [
+    { id: 0, category: 'Travel', subcategory: 'Recipe', tags: ['pasta'], summary: 'Pasta.', confidence: 'high' },
+    { id: 1, category: 'Humor & Misc', subcategory: null, tags: ['cat'], summary: 'A cat.', confidence: 'high' },
+  ] }) });
+  const combined = combine(req, decisions, summaries);
+  check('the Decisions API chooses the category', combined[0]?.category === 'Food & Recipes' && combined[0]?.confidence === 'high');
+  check('a subcategory from the category it chose is kept', combined[0]?.subcategory === 'Recipe');
+  check('an unsure post keeps its summary but no category',
+    combined[1]?.confidence === 'low' && combined[1]?.summary === 'A cat.');
+  check('the result files the post through applyResult as Uncategorized',
+    applyResult(toRecord({ shortcode: 'S1', permalink: '', handle: 'cat', caption: 'lol', hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null }), combined[1]!, 'm').category === null);
+  check('without a decision the summary call\'s own answer stands',
+    combine(req, new Map(), summaries)[0]?.category === 'Travel');
+  check('an unreadable summary reply is no answers', readSummaries({ output_text: 'sorry' }).length === 0);
+  check('the Decisions API bills input only',
+    Math.abs(costUsd({ inputTokens: 1_000_000, outputTokens: 999 }, { inputTokens: 0, outputTokens: 0 }) - 0.1) < 1e-9);
 }
 
 console.log('\ncurrent model catalogue');

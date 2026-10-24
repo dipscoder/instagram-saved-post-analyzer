@@ -1,0 +1,9 @@
+# Only what this repo deploys. The project itself is configured in the dashboard.
+project_id = "siwmxcsrzdvvtouolvph"
+
+[functions.analyze]
+enabled = true
+# The function checks the caller's session itself: the publishable key is not a JWT.
+verify_jwt = false
+# Built by `npm run build -w supabase`: bundles the shared taxonomy and prompt in.
+entrypoint = "./functions/analyze/dist/index.js"

@@ -9,7 +9,7 @@
 
 import * as db from './db';
 import * as ledger from './ledger';
-import { Categorizer } from './categorize';
+import { canIndex, Categorizer } from './categorize';
 import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
 import { reserveRanks } from './order';
 import { resetSpend } from './spend';
@@ -179,12 +179,12 @@ async function handle(req: Request): Promise<unknown> {
 
         const settings = await getSettings();
         // Auto-index picks up newly captured posts without the user asking, but only
-        // when a key exists and a run isn't already in flight.
+        // when something can answer (an account or a key) and a run isn't already in flight.
         // `isRunning()` alone was not enough: a paused run is not running, so the next
         // captured tile restarted the very spend the user had just stopped.
         if (
           settings.autoIndex &&
-          settings.apiKey &&
+          (await canIndex()) &&
           !harvesting &&
           !categorizer.isRunning() &&
           !categorizer.isPaused()
@@ -234,16 +234,14 @@ async function handle(req: Request): Promise<unknown> {
     case 'post:reindex': {
       const shortcode = String(req.shortcode ?? '');
       if (!/^[A-Za-z0-9_-]{5,30}$/.test(shortcode)) throw new Error('Invalid post id.');
-      const settings = await getSettings();
-      if (!settings.apiKey) throw new Error('Connect a model before re-indexing this post.');
+      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
       const post = await categorizer.reindexOne(shortcode);
       trackCompletion();
       return { post, progress: await categorizer.progress() };
     }
 
     case 'index:start': {
-      const settings = await getSettings();
-      if (!settings.apiKey) throw new Error('Connect a model before indexing.');
+      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
       // Freeze the queue before scrolling starts. A response can arrive immediately
       // after the harvest broadcast; reversing these two lines let it sneak into what
       // was supposed to be a fixed-size run.
@@ -259,7 +257,7 @@ async function handle(req: Request): Promise<unknown> {
       return categorizer.progress();
 
     case 'index:reindex':
-      if (!(await getSettings()).apiKey) throw new Error('Connect a model before re-indexing.');
+      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
       // Without the catch, a failed `resetCategories` rejected into `void`: the page was
       // already scrolling, the button already said Pause, and nothing ever ran.
       await categorizer.reindex();
@@ -399,6 +397,8 @@ async function handle(req: Request): Promise<unknown> {
     }
   }
 }
+
+const NOTHING_TO_INDEX_WITH = 'Sign in, or connect an OpenAI key, before indexing.';
 
 /** One page of the saved grid is ~12 tiles; a generous ceiling still bounds the damage. */
 const MAX_POSTS_PER_MESSAGE = 500;

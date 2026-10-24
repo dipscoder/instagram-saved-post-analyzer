@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     "./taxonomy": "./src/taxonomy.ts",
-    "./hash": "./src/hash.ts"
+    "./hash": "./src/hash.ts",
+    "./filing": "./src/filing.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

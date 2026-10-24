@@ -281,7 +281,35 @@ working copy; Supabase holds a mirror per user that the web app will read.
   the page already loaded and with no cookies attached. An expired URL is remembered and
   retried only when the post comes back with a fresh one. Pruning a post removes its file.
 
-Still to come: the OpenAI calls moving to the server.
+### Analysis through the account
+
+Signed in, the worker no longer needs an OpenAI key: an *analyst* (`background/analysts.ts`)
+sends each batch to the `analyze` Edge Function (`supabase/functions/analyze/`), which
+holds the project's OpenAI key as a function secret. Without an account, the same
+interface calls OpenAI with your own key, so the rules, the ledger, the fixed run queue,
+the quote and the retries are shared by both paths and nothing about them changed.
+
+- **Two calls per batch, sent together.** The Decisions API (`gpt-6-luna`) picks each
+  post's category from the fixed taxonomy plus `unknown`, with a probability; below 0.6 the
+  post is filed as Uncategorized. The filing prompt the extension already uses
+  (`shared/src/filing.ts`) writes the summary, tags and subcategory with `gpt-5.6-luna`, and
+  its subcategory is kept only when it belongs to the chosen category. A batch fails only
+  if both calls fail; either one answering is a usable result.
+- **The caller's own session does the database work.** The function checks the caller with
+  `/auth/v1/user`, then reads `public.usage` and calls `record_usage` with that session, so
+  Row Level Security applies and no service-role key exists anywhere. `record_usage` only
+  ever adds.
+- **A daily cap per user.** `DAILY_CAP_USD` (default $1) per UTC day. Over it the function
+  answers 402, which the worker treats as final rather than retrying, and the run stops
+  with the message.
+- **The request is untrusted.** At most 25 posts, 1,500 characters each, ids reassigned as
+  positions, and an image only with a single post, as a small base64 data URL.
+
+The function is bundled with esbuild (`npm run build:functions`) because `shared/` uses
+extensionless imports, and deployed with the Supabase CLI (`supabase/README.md`).
+
+No transcription yet: Instagram's web payload has no caption track for reels, so their
+words need speech-to-text on the audio (`gpt-transcribe`), planned as a separate step.
 
 ---
 
@@ -304,8 +332,8 @@ Only when the caption is empty or under **15 characters**. Sends the *smallest a
 thumbnail — image tokens dominate cost, and a 150px thumbnail is enough to tell a recipe
 from a gym reel.
 
-No transcription: Instagram does not expose transcripts on web, and audio download is
-both fragile and a separate cost centre.
+No transcription: Instagram's web payload carries no transcript or caption track, so a
+reel's words would need speech-to-text on its audio, a separate cost centre left for later.
 
 **Accuracy.** The prompt carries each category's subcategory list, which turns that field
 from free text into a closed vocabulary. Every post is described with its handle, caption,

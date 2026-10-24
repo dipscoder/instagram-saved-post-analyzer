@@ -41,11 +41,11 @@ changes up.
 
 ## First run
 
-1. Click the extension icon. Pick a model, paste an OpenAI key, press **Test and save** —
-   it tests first and stores the key only after OpenAI accepts it.
-2. Optional: under **Account** in the popup, **Create Account** or **Sign In**. You are
-   signed in straight away, and your library syncs to your account in the background,
-   ready for the web app.
+1. Click the extension icon. Under **Account**, **Create Account** or **Sign In**. You are
+   signed in straight away, your library syncs to your account in the background, and
+   your account analyses your posts, so no OpenAI key is needed.
+2. Or, without an account: pick a model, paste an OpenAI key, press **Test and save**. It
+   tests first and stores the key only after OpenAI accepts it.
 3. Open your saved posts on Instagram: your profile → **Saved**.
 4. The library takes over the page. Scroll and posts are captured automatically. **Index
    now** freezes the number currently waiting, indexes exactly that set, and scans farther
@@ -164,6 +164,10 @@ a time, one download after another with a pause between them, from the same CDN 
 page already loaded. Summaries are never deleted from the account, so a new browser, or a
 post you unsave and save again, never pays for the same answer twice.
 
+Signed in, posts are analysed by the account's server function instead of your own key:
+the same post text and thumbnails go to OpenAI from there, with a daily spending limit per
+user. Your own key, if you saved one, is not used while you are signed in.
+
 **Your Instagram account.** The extension never calls Instagram's API. It reads the
 responses the page fetches for itself, which is why no `doc_id` is ever forged and no
 request pattern is added. The one active behaviour is auto-scroll, which is randomised
@@ -235,6 +239,8 @@ extension/src/
     order.ts               feed position -> save order, across visits
     spend.ts               metered tokens + dollars, survives worker restarts
     categorize.ts          the three-tier pipeline, concurrency, backoff
+    analysts.ts            who answers: OpenAI with your key, or your account
+    filing.ts              pure: what the model sees, and how its answer is applied
     providers/
       index.ts             adapter interface, registry, pricing, key redaction
       openai.ts            Responses API for GPT-5.6, Chat Completions for 4o
