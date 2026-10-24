@@ -70,6 +70,8 @@ let quote: ReindexQuote | null = null;
 let confirming: 'reindex' | 'remove' | 'reset' | null = null;
 /** Someone who has signed in here before is far likelier to be signing in than signing up. */
 let accountMode: 'sign-up' | 'sign-in' = remembered('signedInBefore') ? 'sign-in' : 'sign-up';
+/** Signed in, posts are analysed by the account and no key of your own is needed. */
+let signedIn = false;
 
 void init();
 
@@ -89,11 +91,11 @@ async function init(): Promise<void> {
   }
   settings = res.settings;
   providers = res.providers;
-  screen = settings.hasKey ? 'home' : 'setup';
 
   wire();
+  await loadAccount();
+  screen = canIndex() ? 'home' : 'setup';
   await refresh();
-  void loadAccount();
   void loadLibraryUrl();
   subscribe((msg) => {
     if (msg.type === 'harvest') harvesting = msg.action === 'start';
@@ -137,7 +139,7 @@ function statusLine(): string {
   }
   if (harvesting) return 'Scanning the saved feed. New finds wait for the next run.';
   if (progress.phase === 'paused') return 'Paused. Progress is saved.';
-  if (!settings.hasKey) return 'Connect a model to index — press Setup above.';
+  if (!canIndex()) return 'Sign in or connect an OpenAI key to index — press Setup above.';
   return stats.lastRunAt ? `Last run ${timeAgo(stats.lastRunAt)}.` : '';
 }
 
@@ -292,7 +294,13 @@ async function onAccount(type: AccountRequest, pending: string): Promise<void> {
 }
 
 function renderAccount(state: AccountState): void {
-  const signedIn = state.email !== null;
+  const wasSignedIn = signedIn;
+  signedIn = state.email !== null;
+  // Signing in from setup is the end of setup: there is nothing left to connect.
+  if (signedIn && !wasSignedIn && screen === 'setup' && settings.hasKey === false) {
+    screen = 'home';
+    render();
+  }
   $('signedOut').hidden = signedIn;
   $('signedIn').hidden = !signedIn;
   $('accountEmail').textContent = state.email ?? '';
@@ -300,7 +308,7 @@ function renderAccount(state: AccountState): void {
   $('accountSync').textContent = state.error
     ? 'Sync failed'
     : state.lastSyncAt
-      ? `${state.synced} posts synced ${timeAgo(state.lastSyncAt)}`
+      ? `${state.synced} posts, ${state.thumbnails} thumbnails · synced ${timeAgo(state.lastSyncAt)}`
       : 'Not synced yet';
 
   if (state.confirmEmail) {
@@ -447,7 +455,7 @@ async function onRemove(): Promise<void> {
 }
 
 async function onPrimary(): Promise<void> {
-  if (!settings.hasKey) {
+  if (!canIndex()) {
     screen = 'setup';
     return render();
   }
@@ -490,16 +498,19 @@ function render(): void {
   // Always available from the home screen. Hiding it when there was no key meant a user
   // who pressed "Skip" had no route back to setup at all — and the disabled primary
   // button's own recovery branch was unreachable for the same reason.
-  $<HTMLButtonElement>('navBtn').hidden = screen === 'setup' && !settings.hasKey;
+  $<HTMLButtonElement>('navBtn').hidden = screen === 'setup' && !canIndex();
   $('navBtn').textContent = screen === 'home' ? 'Setup' : 'Done';
 
   renderSelects();
   renderSetup();
   renderHome();
 
-  $('footLabel').textContent = settings.hasKey
-    ? `${providerLabel(settings.provider)} · ${settings.keyMask}`
-    : 'No key connected';
+  $('footLabel').textContent = signedIn
+    ? 'Analysed by your account'
+    : settings.hasKey
+      ? `${providerLabel(settings.provider)} · ${settings.keyMask}`
+      : 'No key connected';
+  $('ownKeyNote').hidden = !signedIn;
 }
 
 /**
@@ -615,7 +626,7 @@ function renderHome(): void {
           ? `Confirm — re-index ${total} posts`
           : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
         : 'Index now';
-  primary.disabled = !settings.hasKey;
+  primary.disabled = !canIndex();
 
   if (confirming === 'reindex' && quote) {
     setStatus(
@@ -673,6 +684,10 @@ function setStatus(id: string, kind: '' | 'ok' | 'bad', message: string): void {
     if (head !== message) el.title = message;
     else el.removeAttribute('title');
   }
+}
+
+function canIndex(): boolean {
+  return signedIn || settings.hasKey;
 }
 
 /** Popup-only preferences. Storage can be unavailable, and these are only conveniences. */

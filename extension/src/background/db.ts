@@ -21,13 +21,16 @@ import type { SortKey } from '../messaging';
 import { SCHEMA_VERSION, type PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const STORE = 'posts';
 
 /** The ledger's store. Created here because the upgrade transaction is here. */
 export const LEDGER_STORE = 'analysis';
 export const INDEX_QUEUE_STORE = 'indexQueue';
+/** What has been uploaded to the account: post digests, verdict digests, thumbnails. */
 export const SYNC_STORE = 'sync';
+export const LEDGER_SYNC_STORE = 'ledgerSync';
+export const THUMB_STORE = 'thumbs';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -49,8 +52,8 @@ export function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(INDEX_QUEUE_STORE)) {
         db.createObjectStore(INDEX_QUEUE_STORE, { keyPath: 'shortcode' });
       }
-      if (!db.objectStoreNames.contains(SYNC_STORE)) {
-        db.createObjectStore(SYNC_STORE, { keyPath: 'shortcode' });
+      for (const name of [SYNC_STORE, LEDGER_SYNC_STORE, THUMB_STORE]) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'shortcode' });
       }
 
       const store = req.transaction?.objectStore(STORE);

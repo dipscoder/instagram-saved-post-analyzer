@@ -41,11 +41,11 @@ changes up.
 
 ## First run
 
-1. Click the extension icon. Pick a model, paste an OpenAI key, press **Test and save** —
-   it tests first and stores the key only after OpenAI accepts it.
-2. Optional: under **Account** in the popup, **Create Account** or **Sign In**. You are
-   signed in straight away, and your library syncs to your account in the background,
-   ready for the web app.
+1. Click the extension icon. Under **Account**, **Create Account** or **Sign In**. You are
+   signed in straight away, your library syncs to your account in the background, and
+   your account analyses your posts, so no OpenAI key is needed.
+2. Or, without an account: pick a model, paste an OpenAI key, press **Test and save**. It
+   tests first and stores the key only after OpenAI accepts it.
 3. Open your saved posts on Instagram: your profile → **Saved**.
 4. The library takes over the page. Scroll and posts are captured automatically. **Index
    now** freezes the number currently waiting, indexes exactly that set, and scans farther
@@ -152,23 +152,21 @@ cap at your provider, and use **Remove** in the popup when you're done; it clear
 without touching anything you've indexed.
 
 **Your posts.** Everything captured sits in this extension's own IndexedDB, in your
-browser. The extension stores metadata and Instagram CDN URLs, not copies of the photos or
-videos. The only outbound analysis traffic goes to the provider you chose: post text for
-normal classification, plus a small thumbnail for a post with too little text. There is no
-server and no telemetry — **Save a copy** exports the paid-analysis ledger to your disk.
-Instagram's signed preview URLs eventually expire; revisiting or scanning the saved feed
-refreshes them without touching the summary or category you already paid for. Until then,
-the library shows a neutral placeholder instead of a broken image or exposed alt text.
+browser. The only outbound analysis traffic goes to OpenAI: post text for normal
+classification, plus a small thumbnail for a post with too little text. There is no
+telemetry, and **Save a copy** exports the paid-analysis ledger to your disk.
 
-**Why there is no backend.** Local IndexedDB is the simpler and safer default here. Chrome's
-[`unlimitedStorage` permission](https://developer.chrome.com/docs/extensions/reference/permissions-list)
-covers IndexedDB and exempts extension storage from quota restrictions and eviction. A
-backend would add authentication, sync conflicts, a new copy of private saved-post metadata,
-and another secret/configuration surface without making Instagram's expiring CDN URLs
-permanent. Supabase Free can [pause low-activity projects](https://supabase.com/docs/guides/platform/free-project-pausing),
-while Firestore's free tier currently allows [20,000 document writes per day](https://firebase.google.com/docs/firestore/quotas),
-which a large first sync can consume. Keep the current local-first design; export the ledger
-for backup. Add remote sync only when multi-device access becomes a real requirement.
+**Your account (optional).** Signed in, the extension mirrors three things to your
+Supabase account, readable only by you under Row Level Security: the post metadata, the
+summaries and categories you paid for, and one small JPEG thumbnail per post (about 30 KB,
+480 px on the long edge) in a private bucket. Never videos. Thumbnails are copied a few at
+a time, one download after another with a pause between them, from the same CDN URLs the
+page already loaded. Summaries are never deleted from the account, so a new browser, or a
+post you unsave and save again, never pays for the same answer twice.
+
+Signed in, posts are analysed by the account's server function instead of your own key:
+the same post text and thumbnails go to OpenAI from there, with a daily spending limit per
+user. Your own key, if you saved one, is not used while you are signed in.
 
 **Your Instagram account.** The extension never calls Instagram's API. It reads the
 responses the page fetches for itself, which is why no `doc_id` is ever forged and no
@@ -235,11 +233,14 @@ extension/src/
     ledger.ts              paid-for verdicts, kept apart from the disposable post cache
     settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
     account.ts             Supabase sign-in; the session never leaves the worker
-    sync.ts                mirrors the library to the account, in resumable batches
+    sync.ts                mirrors posts, the ledger and thumbnails to the account
+    media.ts               bounded thumbnail downloads and the stored JPEG
     sync-plan.ts           pure diff: which posts to upload or delete
     order.ts               feed position -> save order, across visits
     spend.ts               metered tokens + dollars, survives worker restarts
     categorize.ts          the three-tier pipeline, concurrency, backoff
+    analysts.ts            who answers: OpenAI with your key, or your account
+    filing.ts              pure: what the model sees, and how its answer is applied
     providers/
       index.ts             adapter interface, registry, pricing, key redaction
       openai.ts            Responses API for GPT-5.6, Chat Completions for 4o

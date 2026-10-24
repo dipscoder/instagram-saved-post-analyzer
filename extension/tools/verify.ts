@@ -17,14 +17,31 @@ import {
   TAXONOMY_HASH,
 } from '@saved-index/shared/taxonomy';
 import { hashText } from '@saved-index/shared/hash';
-import { applyVerdict, isFresh, verdictFrom, type Verdict } from '../src/background/ledger';
+import { applyVerdict, isFresh, parseVerdict, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
 import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
-import { applyResult } from '../src/background/categorize';
-import { planSync, toRow } from '../src/background/sync-plan';
+import { applyResult } from '../src/background/filing';
+import {
+  BadRequest,
+  combine,
+  costUsd,
+  decisionsBody,
+  MIN_PROBABILITY,
+  parseRequest,
+  readDecisions,
+  readSummaries,
+} from '../../supabase/functions/analyze/decide';
+import {
+  changed,
+  fromVerdictRow,
+  planSync,
+  planThumbnails,
+  toRow,
+  toVerdictRow,
+} from '../src/background/sync-plan';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
 
@@ -593,6 +610,100 @@ console.log('\naccount sync plan');
   const pruned = planSync([], synced);
   check('a pruned post is deleted from the account',
     pruned.deletes.length === 1 && pruned.deletes[0] === 'SYNC1');
+
+  // Thumbnails: only for posts the account already has, newest saved first, and an
+  // expired URL is not retried until the post comes back with a fresh one.
+  const cdn = 'https://scontent.cdninstagram.com/a.jpg';
+  const older = { ...base, shortcode: 'OLD', thumbnailUrl: cdn, savedRank: 1 };
+  const newer = { ...base, shortcode: 'NEW', thumbnailUrl: cdn, savedRank: 9 };
+  const inAccount = new Map([['OLD', 'h'], ['NEW', 'h']]);
+  const todo = planThumbnails([older, newer], inAccount, new Map());
+  check('thumbnails are copied newest saved first', todo.map((t) => t.shortcode).join() === 'NEW,OLD');
+  check('no thumbnail before its post is in the account',
+    planThumbnails([older], new Map(), new Map()).length === 0);
+  const failed = new Map([['OLD', { shortcode: 'OLD', stored: false, url: cdn }]]);
+  check('an expired thumbnail URL is not retried', planThumbnails([older], inAccount, failed).length === 0);
+  check('a fresh URL retries a failed thumbnail',
+    planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=2` }], inAccount, failed).length === 1);
+  const stored = new Map([['OLD', { shortcode: 'OLD', stored: true, url: '' }]]);
+  check('a stored thumbnail is never copied again',
+    planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=3` }], inAccount, stored).length === 0);
+}
+
+console.log('\naccount ledger');
+{
+  const verdict: Verdict = {
+    shortcode: 'PAID1',
+    category: 'Food & Recipes',
+    subcategory: null,
+    tags: ['pasta'],
+    summary: 'A pasta recipe.',
+    modelUsed: 'gpt-5.6-luna',
+    categorizedAt: Date.UTC(2026, 9, 24, 9, 30),
+    inputHash: 'abc',
+    taxonomyHash: 'tax',
+    rulesHash: 'rules',
+    ledgerVersion: 2,
+  };
+  const row = toVerdictRow(verdict);
+  // Postgres hands timestamps back as "+00:00" rather than "Z".
+  const fromServer = fromVerdictRow({ ...row, categorized_at: '2026-10-24T09:30:00+00:00' });
+  const back = parseVerdict(fromServer);
+  check('a verdict survives the round trip through the account',
+    JSON.stringify(back) === JSON.stringify(verdict), back);
+  const synced = new Map(changed([row], new Map()).map(({ row: r, hash }) => [r.shortcode, hash]));
+  check('a pulled verdict is not uploaded straight back',
+    back !== null && changed([toVerdictRow(back)], synced).length === 0);
+  check('a garbled verdict from the account is refused', parseVerdict(fromVerdictRow({ shortcode: 'X' })) === null);
+}
+
+console.log('\nserver analysis');
+{
+  const refused = (body: unknown): boolean => {
+    try {
+      parseRequest(body);
+      return false;
+    } catch (err) {
+      return err instanceof BadRequest;
+    }
+  };
+  check('an empty batch is refused', refused({ posts: [] }));
+  check('more than 25 posts are refused', refused({ posts: Array.from({ length: 26 }, () => ({ text: 'x' })) }));
+  check('an image with several posts is refused', refused({ posts: [{ text: 'a' }, { text: 'b' }], image: 'data:image/jpeg;base64,AAAA' }));
+  check('an image that is not a data URL is refused', refused({ posts: [{ text: 'a' }], image: 'https://example.com/a.jpg' }));
+  const req = parseRequest({ posts: [{ id: 7, text: 'chef | caption: pasta' }, { id: 7, text: 'cat | caption: lol' }] });
+  check('post ids are positions, whatever the caller sent', req.posts.map((p) => p.id).join() === '0,1');
+
+  const body = decisionsBody(req) as { questions: { name: string; choices: { value: string }[] }[] };
+  check('one choice question per post', body.questions.map((q) => q.name).join() === 'post_0,post_1');
+  check('every question offers unknown', body.questions.every((q) => q.choices.some((c) => c.value === 'unknown')));
+
+  const decisions = readDecisions({
+    answers: [
+      { type: 'choice', name: 'post_0', choice: 'Food & Recipes', probabilities: [{ value: 'Food & Recipes', probability: 0.92 }], confidence: 0.9 },
+      { type: 'choice', name: 'post_1', choice: 'Humor & Misc', probabilities: [{ value: 'Humor & Misc', probability: MIN_PROBABILITY - 0.1 }] },
+    ],
+  });
+  check('a confident decision keeps its category', decisions.get(0)?.category === 'Food & Recipes');
+  check('an unsure decision files as Uncategorized', decisions.get(1)?.category === null);
+  check('a refusal is simply absent', readDecisions({ answers: [{ type: 'refusal', name: 'post_0' }] }).size === 0);
+
+  const summaries = readSummaries({ output_text: JSON.stringify({ results: [
+    { id: 0, category: 'Travel', subcategory: 'Recipe', tags: ['pasta'], summary: 'Pasta.', confidence: 'high' },
+    { id: 1, category: 'Humor & Misc', subcategory: null, tags: ['cat'], summary: 'A cat.', confidence: 'high' },
+  ] }) });
+  const combined = combine(req, decisions, summaries);
+  check('the Decisions API chooses the category', combined[0]?.category === 'Food & Recipes' && combined[0]?.confidence === 'high');
+  check('a subcategory from the category it chose is kept', combined[0]?.subcategory === 'Recipe');
+  check('an unsure post keeps its summary but no category',
+    combined[1]?.confidence === 'low' && combined[1]?.summary === 'A cat.');
+  check('the result files the post through applyResult as Uncategorized',
+    applyResult(toRecord({ shortcode: 'S1', permalink: '', handle: 'cat', caption: 'lol', hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null }), combined[1]!, 'm').category === null);
+  check('without a decision the summary call\'s own answer stands',
+    combine(req, new Map(), summaries)[0]?.category === 'Travel');
+  check('an unreadable summary reply is no answers', readSummaries({ output_text: 'sorry' }).length === 0);
+  check('the Decisions API bills input only',
+    Math.abs(costUsd({ inputTokens: 1_000_000, outputTokens: 999 }, { inputTokens: 0, outputTokens: 0 }) - 0.1) < 1e-9);
 }
 
 console.log('\ncurrent model catalogue');

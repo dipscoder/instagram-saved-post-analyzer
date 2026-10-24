@@ -3,11 +3,16 @@
   "private": true,
   "description": "AI-categorised library for Instagram saved posts: Chrome extension, backend and web app.",
   "type": "module",
-  "workspaces": ["shared", "extension"],
+  "workspaces": [
+    "shared",
+    "extension",
+    "supabase"
+  ],
   "scripts": {
     "build": "npm run build -w extension",
     "watch": "npm run watch -w extension",
     "typecheck": "npm run typecheck --workspaces",
-    "verify": "npm run verify -w extension"
+    "verify": "npm run verify -w extension",
+    "build:functions": "npm run build -w supabase"
   }
 }

@@ -4,7 +4,7 @@ Start here when taking over the project. This file answers **what to read**, **w
 feature lives**, **what is complete**, and **what still needs attention**. It deliberately
 links to the detailed source of truth instead of repeating it.
 
-Last reviewed: **2026-09-12**.
+Last reviewed: **2026-10-24**.
 
 ## Reading order
 
@@ -24,8 +24,9 @@ copying the same explanation into all four.
 ## Current product state
 
 - Chrome Manifest V3 extension, TypeScript + esbuild, loaded unpacked from `extension/dist/`.
-- npm workspaces: `extension/`, `shared/` (taxonomy + digest). `web/` and `supabase/` are
-  reserved for the planned web app and backend. OpenAI is the only model provider.
+- npm workspaces: `extension/`, `shared/` (taxonomy, digest, filing prompt) and
+  `supabase/` (migrations and the `analyze` Edge Function). `web/` is reserved for the
+  planned web app. OpenAI is the only model provider.
 - Saved-post capture is restricted by route, payload context, and DOM scope.
 - An indexing run freezes its initial pending shortcodes, processes exactly that set, and
   leaves posts discovered while scrolling for the next run.
@@ -33,13 +34,12 @@ copying the same explanation into all four.
   bounded thumbnail fallback only when text is insufficient.
 - Individual posts can be re-indexed from their detail view. The action intentionally
   bypasses rules and the paid-result ledger to obtain a fresh judgment.
-- Indexed posts and purchased analysis remain local in IndexedDB. JSON export/import backs
-  up the paid-analysis ledger; captured post metadata is reproducible by scanning the
-  saved feed again. A hosted backend is intentionally deferred until multi-device sync is
-  a validated need.
+- Indexed posts and purchased analysis live in IndexedDB and, when signed in, mirror to a
+  Supabase account (posts, thumbnails, and the ledger). Signed in, analysis runs through
+  the account's `analyze` function and no OpenAI key is needed in the browser.
 - The library and popup share one responsive visual system. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **158 checks**. It does not replace a live
+- The regression suite currently contains **183 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question
@@ -54,10 +54,12 @@ Paths are under `extension/` unless they start with `shared/`.
 | Fixed-run queue and pause/resume | `src/background/index.ts`, `src/background/categorize.ts` |
 | Paid-result reuse and re-index charging | `src/background/ledger.ts`, `shared/src/hash.ts`, `shared/src/taxonomy.ts` |
 | Model support, requests, prices, token usage | `src/background/providers/`, `src/background/spend.ts` |
+| Own key vs. account analysis | `src/background/analysts.ts`, `src/background/filing.ts`, `shared/src/filing.ts` |
+| Server analysis, daily cap, deploy | `supabase/functions/analyze/`, `supabase/migrations/` |
 | In-page library and post detail | `src/page/library.ts`, `src/page/library.css.ts` |
 | Popup setup and controls | `src/popup/popup.ts`, `public/popup.html` |
 | Reel controls | `src/page/video.ts` |
-| Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/config.ts` |
+| Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/background/media.ts`, `src/config.ts` |
 | Database schema and access rules | `supabase/migrations/` |
 | Cross-context contracts | `src/messaging.ts` |
 | Extension assets and packaging | `public/manifest.json`, `tools/make-icons.mjs`, `build.mjs` |

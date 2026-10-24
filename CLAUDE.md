@@ -2,7 +2,8 @@
 
 Chrome MV3 extension (TypeScript, esbuild, **loaded unpacked — not published**), growing
 into extension + Supabase backend + web app. The repo is npm workspaces: `extension/`,
-`shared/` (pure taxonomy + digest), with `web/` and `supabase/` reserved. **OpenAI is the
+`shared/` (pure taxonomy, digest, filing prompt) and `supabase/` (migrations and the
+`analyze` Edge Function), with `web/` reserved. **OpenAI is the
 only model provider** — don't add others back. It turns
 Instagram's saved-posts grid into a searchable, AI-categorised library, and gives Instagram
 videos real seek controls.
@@ -14,7 +15,7 @@ version plus the things that are easy to break without noticing.
 
 ```bash
 npm run typecheck    # tsc across every workspace
-npm run verify       # 158 pure-function checks, no browser needed — run this
+npm run verify       # 183 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -58,7 +59,8 @@ mid-sweep.
 
 **4. Nothing deletes from the ledger.** `posts` is a disposable view of what is currently
 saved — free to rebuild by scrolling. `analysis` is work that was *bought* with the user's
-own API key and is irreproducible. `prune` and `resetCategories` touch only the first.
+own API key and is irreproducible. `prune` and `resetCategories` touch only the first. The account's
+`verdicts` table has no delete policy for the same reason.
 See ARCHITECTURE §3b.
 
 **5. Every spend is the user's money.** Before writing anything that calls a model, ask
@@ -117,10 +119,11 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 
 ## State
 
-The hardening work through Phase 32 is the current implementation: paid-result ledger,
+The work through Phase 36 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
-resilience, per-post re-index, and the redesigned popup/library. `npm run verify` currently
-contains 158 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
+the ledger, and server-side analysis with a daily cap). `npm run verify` currently
+contains 183 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository
