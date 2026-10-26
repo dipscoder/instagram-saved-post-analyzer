@@ -31,15 +31,31 @@
  * React re-renders strip our attributes within seconds, so every video also gets its own
  * attribute observer; a document-level observer catches players added later. Both funnel
  * through one rAF-throttled scan, so a mutation storm costs one pass per frame.
+ *
+ * ## Scrubbing, frames and stills
+ *
+ * Setting `currentTime` while a seek is still decoding abandons it, so a drag that seeked
+ * on every pointer move kept the decoder restarting and the picture frozen until you let
+ * go. Seeks are now coalesced: one in flight per video, and only the newest target waits
+ * behind it. The slider follows the pointer directly rather than the playhead, so it feels
+ * immediate even while the decoder catches up.
+ *
+ * Stepping goes one frame at a time, anchored on the frame actually on screen (see
+ * frames.ts), and a still is drawn from the video element at its own resolution into a
+ * canvas of ours. Instagram's DOM, player state and requests are never touched for either.
  */
 
 import type { VideoControls } from '../types';
+import { frameDuration, frameFilename, shortcodeFrom, stepTarget, timecode } from './frames';
 
 /** Room left for Instagram's own reel chrome along the bottom of the viewport. */
 const BOTTOM_KEEP_OUT_PX = 56;
 
 const SEEK_STEP_SECONDS = 5;
 const BAR_HEIGHT = 36;
+/** Below this player width the frame-step buttons give their room back to the slider. */
+const STEP_BUTTONS_MIN_PX = 300;
+const TOAST_MS = 1_800;
 /** Above Instagram's click-catcher — only needed for the native control strip. */
 const NATIVE_Z_INDEX = '2147483000';
 const BAR_Z_INDEX = '2147483002';
@@ -49,6 +65,9 @@ const MIN_VIDEO_PX = 120;
 const ICON_PLAY = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M6.5 5h3.5v14H6.5zM14 5h3.5v14H14z"/></svg>';
 const ICON_SOUND = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+const ICON_PREV_FRAME = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M6 6h2v12H6zM18 6v12l-8.5-6z"/></svg>';
+const ICON_NEXT_FRAME = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M16 6h2v12h-2zM6 6v12l8.5-6z"/></svg>';
+const ICON_CAMERA = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 8.5h3l1.6-2.5h6.8L17 8.5h3v10H4z"/><circle cx="12" cy="13.2" r="3.3"/></svg>';
 const ICON_MUTED = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z"/><path d="M15.5 9.5l4 5M19.5 9.5l-4 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
 
 const enhanced = new WeakSet<HTMLVideoElement>();
@@ -72,6 +91,14 @@ const wantsSound = new WeakSet<HTMLVideoElement>();
  * through our button or theirs.
  */
 const REASSERT_WINDOW_MS = 600;
+
+/**
+ * The newest seek target waiting behind one already in flight, per video. Applied on
+ * `seeked`, so a burst of seeks decodes at most two frames instead of none.
+ */
+const queuedSeek = new WeakMap<HTMLVideoElement, number>();
+/** The last target asked of each video, for stepping again before a seek lands. */
+const requestedSeek = new WeakMap<HTMLVideoElement, number>();
 
 let mode: VideoControls = 'overlay';
 let bar: ControlBar | null = null;
@@ -154,6 +181,19 @@ function enhance(video: HTMLVideoElement): void {
   });
 
   keepSoundOn(video);
+  video.addEventListener('seeked', () => {
+    const next = queuedSeek.get(video);
+    if (next === undefined) return;
+    queuedSeek.delete(video);
+    video.currentTime = next;
+  });
+}
+
+/** Seek without abandoning one already decoding; see the file comment. */
+function seek(video: HTMLVideoElement, seconds: number): void {
+  requestedSeek.set(video, seconds);
+  if (video.seeking) queuedSeek.set(video, seconds);
+  else video.currentTime = seconds;
 }
 
 /**
@@ -296,8 +336,10 @@ function retarget(): void {
 // --- keyboard ---------------------------------------------------------------
 
 function onKeyDown(ev: KeyboardEvent): void {
-  if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
-  // Never steal arrows from a text field or Instagram's own story navigation. The
+  const step = ev.key === ',' ? -1 : ev.key === '.' ? 1 : 0;
+  if (!step && ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  // Never steal keys from a text field or Instagram's own story navigation. The
   // library's search box lives in a shadow root, where `ev.target` retargets to the host
   // — composedPath()[0] is the node actually focused, so arrows there move the caret.
   const target = (ev.composedPath()[0] ?? ev.target) as HTMLElement | null;
@@ -314,20 +356,131 @@ function onKeyDown(ev: KeyboardEvent): void {
 
   ev.preventDefault();
   ev.stopPropagation();
+  if (step) return stepFrame(video, step);
   const delta = ev.key === 'ArrowRight' ? SEEK_STEP_SECONDS : -SEEK_STEP_SECONDS;
-  video.currentTime = clamp(video.currentTime + delta, 0, video.duration);
+  seek(video, clamp((requestedSeekIfPending(video) ?? video.currentTime) + delta, 0, video.duration));
 }
 
+// --- frames -----------------------------------------------------------------
+
+/**
+ * What the browser has told us about one player's frames: the start of the frame on
+ * screen, and recent gaps between frames during playback, from which frames.ts learns
+ * the frame length.
+ */
+interface FrameClock {
+  frameStart: number | null;
+  /** False from a `seeked` until the frame it landed on has been presented. */
+  fresh: boolean;
+  presented: number;
+  gaps: number[];
+  handle: number;
+}
+
+const clocks = new WeakMap<HTMLVideoElement, FrameClock>();
+const MAX_GAPS = 12;
+
+/** Follow presented frames while the bar is on this player. */
+function watchFrames(video: HTMLVideoElement): void {
+  if (typeof video.requestVideoFrameCallback !== 'function') return;
+  let clock = clocks.get(video);
+  if (!clock) {
+    const created: FrameClock = { frameStart: null, fresh: false, presented: 0, gaps: [], handle: 0 };
+    video.addEventListener('seeked', () => {
+      created.fresh = false;
+    });
+    clocks.set(video, created);
+    clock = created;
+  }
+  if (clock.handle) return;
+
+  const c = clock;
+  const onFrame = (_now: number, meta: VideoFrameCallbackMetadata): void => {
+    // Only consecutive frames during playback measure the frame length; a seek or a
+    // dropped frame would not.
+    if (c.frameStart !== null && meta.presentedFrames === c.presented + 1 && !video.paused && !video.seeking) {
+      c.gaps.push(meta.mediaTime - c.frameStart);
+      if (c.gaps.length > MAX_GAPS) c.gaps.shift();
+    }
+    c.frameStart = meta.mediaTime;
+    c.presented = meta.presentedFrames;
+    c.fresh = true;
+    c.handle = video.requestVideoFrameCallback(onFrame);
+  };
+  c.handle = video.requestVideoFrameCallback(onFrame);
+}
+
+function unwatchFrames(video: HTMLVideoElement): void {
+  const clock = clocks.get(video);
+  if (!clock?.handle) return;
+  video.cancelVideoFrameCallback(clock.handle);
+  clock.handle = 0;
+}
+
+/** The target of a seek that has not landed yet, so repeated steps build on each other. */
+function requestedSeekIfPending(video: HTMLVideoElement): number | undefined {
+  const landed = !video.seeking && !queuedSeek.has(video) && clocks.get(video)?.fresh !== false;
+  return landed ? undefined : requestedSeek.get(video);
+}
+
+/** Pause and show the neighbouring frame. Holding the key steps continuously. */
+function stepFrame(video: HTMLVideoElement, direction: 1 | -1): void {
+  if (!Number.isFinite(video.duration)) return;
+  if (!video.paused) video.pause();
+
+  const clock = clocks.get(video);
+  const frame = frameDuration(clock?.gaps ?? []);
+  const pending = requestedSeekIfPending(video);
+  const anchor =
+    pending !== undefined
+      ? pending - frame / 2
+      : clock?.fresh && clock.frameStart !== null
+        ? clock.frameStart
+        : Math.floor(video.currentTime / frame + 1e-6) * frame;
+  seek(video, stepTarget(anchor, frame, direction, video.duration));
+}
+
+/**
+ * The timestamp of the frame on screen. `currentTime` can sit just before it after a
+ * pause, which would name a still after the frame before the one it shows.
+ */
+function shownAt(video: HTMLVideoElement): number {
+  const clock = clocks.get(video);
+  return clock?.fresh && clock.frameStart !== null ? clock.frameStart : video.currentTime;
+}
+
+/** The post a player belongs to: the open post's URL, or the feed card it sits in. */
+function shortcodeOf(video: HTMLVideoElement): string | null {
+  const link = video.closest('article')?.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+  return shortcodeFrom(location.pathname) ?? shortcodeFrom(link?.getAttribute('href') ?? '');
+}
+
+/**
+ * The frame on screen as a PNG at the video's own resolution, not the size it is shown
+ * at. Drawing reads the element; it does not seek, pause or reload it.
+ */
+async function grabFrame(video: HTMLVideoElement): Promise<Blob | string> {
+  if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || !video.videoWidth) {
+    return 'This frame hasn’t loaded yet.';
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 'Couldn’t capture this frame.';
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  try {
+    // Throws when the video came straight from another origin without CORS. Instagram's
+    // players stream through MediaSource, which is same-origin, so this is the exception.
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    return blob ?? 'Couldn’t capture this frame.';
+  } catch {
+    return 'This video can’t be captured.';
+  }
+}
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
-}
-
-function fmt(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 // --- the control bar --------------------------------------------------------
@@ -340,31 +493,40 @@ function fmt(seconds: number): string {
 class ControlBar {
   private readonly root = document.createElement('div');
   private readonly playBtn = document.createElement('button');
+  private readonly prevBtn = document.createElement('button');
+  private readonly nextBtn = document.createElement('button');
+  private readonly shotBtn = document.createElement('button');
   private readonly muteBtn = document.createElement('button');
   private readonly time = document.createElement('span');
   private readonly hit = document.createElement('div');
   private readonly track = document.createElement('div');
   private readonly fill = document.createElement('div');
   private readonly knob = document.createElement('div');
+  private readonly toast = document.createElement('div');
 
   private video: HTMLVideoElement | null = null;
   private dragging = false;
+  /** Where the pointer is on the track while dragging, 0–1. Painted instead of the playhead. */
+  private dragAt = 0;
+  private resumeAfterDrag = false;
   private hovering = false;
   private raf = 0;
+  private toastTimer = 0;
   // paint() runs every frame; these keep it from rewriting markup that hasn't changed.
   private shownPaused: boolean | null = null;
   private shownMuted: boolean | null = null;
   private shownTime = '';
+  private shownSteps: boolean | null = null;
 
   constructor() {
     Object.assign(this.root.style, {
       position: 'fixed',
       display: 'none',
       alignItems: 'center',
-      gap: '10px',
+      gap: '6px',
       boxSizing: 'border-box',
       height: `${BAR_HEIGHT}px`,
-      padding: '0 12px',
+      padding: '0 10px',
       zIndex: BAR_Z_INDEX,
       background: 'linear-gradient(to top, rgba(0,0,0,0.68), rgba(0,0,0,0.18))',
       color: '#fff',
@@ -376,7 +538,14 @@ class ControlBar {
     } satisfies Partial<CSSStyleDeclaration>);
     this.root.setAttribute('data-saved-index', 'video-controls');
 
-    for (const btn of [this.playBtn, this.muteBtn]) {
+    const buttons: [HTMLButtonElement, string, string][] = [
+      [this.playBtn, ICON_PLAY, 'Play'],
+      [this.prevBtn, ICON_PREV_FRAME, 'Previous frame ( , )'],
+      [this.nextBtn, ICON_NEXT_FRAME, 'Next frame ( . )'],
+      [this.shotBtn, ICON_CAMERA, 'Save this frame · Shift-click to copy it'],
+      [this.muteBtn, ICON_SOUND, 'Mute'],
+    ];
+    for (const [btn, icon, title] of buttons) {
       Object.assign(btn.style, {
         all: 'unset',
         display: 'flex',
@@ -385,16 +554,22 @@ class ControlBar {
         width: '24px',
         height: '24px',
         flex: 'none',
+        borderRadius: '6px',
         color: '#fff',
         cursor: 'pointer',
         opacity: '0.9',
+        transition: 'background 110ms ease',
       } satisfies Partial<CSSStyleDeclaration>);
+      btn.innerHTML = icon;
+      btn.title = title;
+      btn.setAttribute('aria-label', title);
+      btn.addEventListener('pointerenter', () => (btn.style.background = 'rgba(255,255,255,0.16)'));
+      btn.addEventListener('pointerleave', () => (btn.style.background = ''));
     }
-    this.playBtn.innerHTML = ICON_PLAY;
-    this.muteBtn.innerHTML = ICON_SOUND;
 
     Object.assign(this.time.style, {
       flex: 'none',
+      margin: '0 4px',
       opacity: '0.85',
       fontVariantNumeric: 'tabular-nums',
     } satisfies Partial<CSSStyleDeclaration>);
@@ -403,6 +578,7 @@ class ControlBar {
     Object.assign(this.hit.style, {
       position: 'relative',
       flex: '1',
+      minWidth: '40px',
       height: '24px',
       display: 'flex',
       alignItems: 'center',
@@ -442,9 +618,36 @@ class ControlBar {
       pointerEvents: 'none',
     } satisfies Partial<CSSStyleDeclaration>);
 
+    Object.assign(this.toast.style, {
+      position: 'absolute',
+      right: '10px',
+      bottom: `${BAR_HEIGHT + 6}px`,
+      padding: '6px 10px',
+      borderRadius: '8px',
+      background: 'rgba(20,20,22,0.82)',
+      backdropFilter: 'blur(8px)',
+      font: '500 12px/1.2 system-ui, -apple-system, sans-serif',
+      letterSpacing: '0',
+      whiteSpace: 'nowrap',
+      opacity: '0',
+      transform: 'translateY(4px)',
+      transition: 'opacity 160ms ease, transform 160ms ease',
+      pointerEvents: 'none',
+    } satisfies Partial<CSSStyleDeclaration>);
+    this.toast.setAttribute('role', 'status');
+
     this.track.append(this.fill, this.knob);
     this.hit.append(this.track);
-    this.root.append(this.playBtn, this.time, this.hit, this.muteBtn);
+    this.root.append(
+      this.playBtn,
+      this.prevBtn,
+      this.nextBtn,
+      this.time,
+      this.hit,
+      this.shotBtn,
+      this.muteBtn,
+      this.toast,
+    );
     document.body.appendChild(this.root);
 
     this.root.addEventListener('pointerenter', () => {
@@ -471,6 +674,20 @@ class ControlBar {
       this.paint();
     });
 
+    this.prevBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (this.video) stepFrame(this.video, -1);
+    });
+    this.nextBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (this.video) stepFrame(this.video, 1);
+    });
+
+    this.shotBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (this.video) void this.capture(this.video, ev.shiftKey);
+    });
+
     this.muteBtn.addEventListener('click', (ev) => {
       ev.preventDefault();
       const video = this.video;
@@ -493,7 +710,9 @@ class ControlBar {
 
   attach(video: HTMLVideoElement): void {
     if (this.video === video) return;
+    if (this.video) unwatchFrames(this.video);
     this.video = video;
+    watchFrames(video);
     this.root.style.display = 'flex';
     cancelAnimationFrame(this.raf);
     this.tick();
@@ -503,6 +722,7 @@ class ControlBar {
     if (this.dragging) return;
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.video) unwatchFrames(this.video);
     this.video = null;
     // Hiding the node means its pointerleave will never arrive; without this, `isBusy`
     // would stay true and retarget would refuse to bind anything again.
@@ -512,8 +732,49 @@ class ControlBar {
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
+    if (this.video) unwatchFrames(this.video);
     this.root.remove();
     this.video = null;
+  }
+
+  /** Download the frame on screen, or with `copy`, put it on the clipboard. */
+  private async capture(video: HTMLVideoElement, copy: boolean): Promise<void> {
+    const shot = await grabFrame(video);
+    if (typeof shot === 'string') return this.say(shot);
+    const size = `${video.videoWidth} × ${video.videoHeight}`;
+
+    if (copy) {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': shot })]);
+        return this.say(`Copied · ${size}`);
+      } catch {
+        return this.say('Couldn’t copy. Click to download instead.');
+      }
+    }
+
+    // The link lives inside the bar, so its click stops here like every other click on
+    // the bar and never reaches the post underneath.
+    const url = URL.createObjectURL(shot);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = frameFilename(shortcodeOf(video), shownAt(video));
+    link.hidden = true;
+    this.root.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    this.say(`Saved · ${size}`);
+  }
+
+  private say(message: string): void {
+    this.toast.textContent = message;
+    this.toast.style.opacity = '1';
+    this.toast.style.transform = 'translateY(0)';
+    clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      this.toast.style.opacity = '0';
+      this.toast.style.transform = 'translateY(4px)';
+    }, TOAST_MS);
   }
 
   /** Follow the player's rect and playhead. Only runs while attached. */
@@ -541,6 +802,12 @@ class ControlBar {
       ),
     )}px`;
 
+    const steps = r.width >= STEP_BUTTONS_MIN_PX;
+    if (this.shownSteps !== steps) {
+      this.shownSteps = steps;
+      this.prevBtn.style.display = this.nextBtn.style.display = steps ? 'flex' : 'none';
+    }
+
     this.paint();
     this.raf = requestAnimationFrame(this.tick);
   };
@@ -550,7 +817,9 @@ class ControlBar {
     if (!video) return;
 
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const pct = duration > 0 ? clamp(video.currentTime / duration, 0, 1) * 100 : 0;
+    // While dragging, the slider is where the pointer is; the picture catches up behind.
+    const at = this.dragging ? this.dragAt * duration : video.currentTime;
+    const pct = duration > 0 ? clamp(at / duration, 0, 1) * 100 : 0;
     const active = this.hovering || this.dragging;
 
     this.track.style.height = active ? '5px' : '3px';
@@ -568,7 +837,10 @@ class ControlBar {
       this.muteBtn.innerHTML = video.muted ? ICON_MUTED : ICON_SOUND;
       this.muteBtn.title = video.muted ? 'Unmute' : 'Mute';
     }
-    const label = `${fmt(video.currentTime)} / ${fmt(duration)}`;
+    // Hundredths only when still: enough to tell frames apart, without a blur of digits
+    // during playback.
+    const precise = video.paused || this.dragging;
+    const label = `${timecode(at, precise)} / ${timecode(duration)}`;
     if (this.shownTime !== label) {
       this.shownTime = label;
       this.time.textContent = label;
@@ -576,11 +848,15 @@ class ControlBar {
   }
 
   private onDown = (ev: PointerEvent): void => {
-    if (!this.video) return;
+    const video = this.video;
+    if (!video) return;
     ev.preventDefault();
     ev.stopPropagation();
 
     this.dragging = true;
+    // A playing video fights the drag for the decoder; hold it still and carry on after.
+    this.resumeAfterDrag = !video.paused;
+    if (this.resumeAfterDrag) video.pause();
     this.hit.setPointerCapture(ev.pointerId);
     this.seekTo(ev.clientX);
 
@@ -596,6 +872,8 @@ class ControlBar {
   private onUp = (): void => {
     this.dragging = false;
     this.hit.removeEventListener('pointermove', this.onMove);
+    if (this.resumeAfterDrag) void this.video?.play().catch(() => {});
+    this.resumeAfterDrag = false;
     // A drag ends in a click. Swallow exactly one, or releasing the scrubber opens the
     // post underneath.
     window.addEventListener('click', swallowOnce, { capture: true, once: true });
@@ -608,7 +886,8 @@ class ControlBar {
     if (!video || !Number.isFinite(video.duration)) return;
     const r = this.track.getBoundingClientRect();
     if (r.width === 0) return;
-    video.currentTime = clamp((clientX - r.left) / r.width, 0, 1) * video.duration;
+    this.dragAt = clamp((clientX - r.left) / r.width, 0, 1);
+    seek(video, this.dragAt * video.duration);
     this.paint();
   }
 }

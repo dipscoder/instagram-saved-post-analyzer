@@ -340,6 +340,14 @@ before being acted on.
 - [ ] Reel transcription with `gpt-transcribe`, on audio the page already loads
 - [ ] A labelled test set and an accuracy eval for the two-call filing
 
+## Phase 37 — A better video player
+- [x] Smooth scrubbing: one seek in flight per video, the slider follows the pointer, and
+      playback pauses for the drag
+- [x] Frame-by-frame stepping from the bar or `,` / `.`, anchored on the presented frame,
+      with a precise timecode while paused
+- [x] Save the frame on screen as a full-resolution PNG, or copy it with Shift-click
+- [x] 200 checks
+
 ---
 
 ## Not done — needs the user

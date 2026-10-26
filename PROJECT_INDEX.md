@@ -39,7 +39,7 @@ copying the same explanation into all four.
   the account's `analyze` function and no OpenAI key is needed in the browser.
 - The library and popup share one responsive visual system. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **183 checks**. It does not replace a live
+- The regression suite currently contains **200 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question
@@ -58,7 +58,7 @@ Paths are under `extension/` unless they start with `shared/`.
 | Server analysis, daily cap, deploy | `supabase/functions/analyze/`, `supabase/migrations/` |
 | In-page library and post detail | `src/page/library.ts`, `src/page/library.css.ts` |
 | Popup setup and controls | `src/popup/popup.ts`, `public/popup.html` |
-| Reel controls | `src/page/video.ts` |
+| Reel controls, frame stepping, stills | `src/page/video.ts`, `src/page/frames.ts` |
 | Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/background/media.ts`, `src/config.ts` |
 | Database schema and access rules | `supabase/migrations/` |
 | Cross-context contracts | `src/messaging.ts` |

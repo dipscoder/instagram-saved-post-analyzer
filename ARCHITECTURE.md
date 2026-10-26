@@ -436,11 +436,33 @@ Two modes, toggled in settings:
 
 | | |
 |---|---|
-| **overlay** (default) | our bar: play/pause, elapsed/duration, drag-to-seek, mute |
+| **overlay** (default) | our bar: play/pause, frame step, elapsed/duration, drag-to-seek, save frame, mute |
 | **native** | the browser's own strip, plus the old `z-index` lift — volume and PiP, at the mercy of the catcher |
 
 Ending a drag installs a one-shot capture-phase `click` swallow, or releasing the scrubber
 would open the post underneath.
+
+**Scrubbing is one seek at a time.** Setting `currentTime` while a seek is still decoding
+abandons it, so the old drag, which seeked on every pointer move, finished 4 of 122 seeks
+and showed a frozen picture until release. Now each video has at most one seek in flight
+and the newest target waits behind it, applied on `seeked`; the same drag shows 46 of 47.
+The slider is painted from the pointer, not the playhead, and a playing video is paused
+for the drag and resumed after, so playback is not fighting the decoder.
+
+**Frame stepping is anchored on the frame on screen.** Browsers do not expose a frame
+rate. `requestVideoFrameCallback` reports each presented frame's own timestamp, so while
+the bar is on a player we keep the current frame's start and the gaps between consecutive
+frames during playback; the smallest believable gap is the frame length (30 fps until
+playback says otherwise). A step seeks half a frame into the neighbour, which lands
+inside it whatever the rounding. Repeated steps before a seek lands build on the pending
+target. The arithmetic is pure (`page/frames.ts`) and checked by `npm run verify`.
+
+**Stills are read, not fetched.** The camera button draws the video element into a canvas
+at `videoWidth × videoHeight` and downloads it as PNG (Shift-click: clipboard). Instagram
+streams through MediaSource, which is same-origin, so the canvas is not tainted; a video
+served cross-origin without CORS reports that it cannot be captured rather than being
+downloaded again. The download link lives inside our bar, so its click stops there like
+every other click on the bar.
 
 **Sound has to be held down.** Unmuting a reel only lasted until the next pause. Nothing
 here sets `muted`; Instagram does, as part of its own play/pause handling — autoplay policy
