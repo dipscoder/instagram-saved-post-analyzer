@@ -5,8 +5,8 @@ A Chrome extension (Manifest V3, TypeScript) that does two things to Instagram:
 1. **Turns the saved-posts grid into a searchable library.** Every saved post gets a
    one-line summary and a category, so you can find the pasta recipe without scrolling
    through 400 identical thumbnails.
-2. **Gives Instagram videos real seek controls.** A scrubber, arrow-key seeking, and no
-   more forced looping.
+2. **Gives Instagram videos real seek controls.** A smooth scrubber, frame-by-frame
+   stepping, full-resolution stills, arrow-key seeking, and no more forced looping.
 
 Loaded unpacked. Not published. Your API key is stored only in your browser and is sent
 only to the model provider you choose when making an authenticated request.
@@ -249,6 +249,7 @@ extension/src/
     library.ts             in-page library (Shadow DOM), filters, sort, indexing panel
     library.css.ts         its styles
     video.ts               body-level control bar, geometric targeting, observers
+    frames.ts              pure: frame length, step targets, timecodes, still filenames
 
   popup/popup.ts           setup screen + control room                 → popup.js
 
@@ -322,6 +323,12 @@ ours. Tell them apart by the buttons: Chrome's has a fullscreen icon and a `⋮`
 has neither. Instagram's click-catcher swallows clicks on Chrome's strip, which is why our
 bar renders outside their DOM. Turn **Extension video controls** on in the popup; profiles
 created before v2 are switched over automatically on the next worker start.
+
+**Stepping and stills.** Hover a video: the bar's ⏮ ⏭ buttons, or `,` and `.`, pause and
+move exactly one frame; hold the key to keep going. The camera button saves the frame on
+screen as a PNG at the video's own resolution (a 1080 × 1920 reel gives a 1080 × 1920
+image), named after the post and the moment. Shift-click it to copy the frame instead.
+The video is only read, never reloaded or re-requested.
 
 **Reels stop at the end instead of looping.** Deliberate: `loop` is removed, because a
 looping video restarts under you mid-scrub and hides where the end is.

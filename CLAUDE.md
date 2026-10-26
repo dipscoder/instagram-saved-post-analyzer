@@ -15,7 +15,7 @@ version plus the things that are easy to break without noticing.
 
 ```bash
 npm run typecheck    # tsc across every workspace
-npm run verify       # 183 pure-function checks, no browser needed — run this
+npm run verify       # 200 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -119,11 +119,11 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 
 ## State
 
-The work through Phase 36 is the current implementation: paid-result ledger,
+The work through Phase 37 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
 resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
-the ledger, and server-side analysis with a daily cap). `npm run verify` currently
-contains 183 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+the ledger, and server-side analysis with a daily cap), and frame-accurate video controls. `npm run verify` currently
+contains 200 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

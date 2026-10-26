@@ -44,6 +44,14 @@ import {
 } from '../src/background/sync-plan';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
+import {
+  DEFAULT_FRAME_SECONDS,
+  frameDuration,
+  frameFilename,
+  shortcodeFrom,
+  stepTarget,
+  timecode,
+} from '../src/page/frames';
 
 let failures = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -765,6 +773,36 @@ console.log('\nreasoning-model request contracts');
   } finally {
     globalThis.fetch = originalFetch;
   }
+}
+
+console.log('\nvideo frames');
+{
+  const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+  check('frame length defaults to 30 fps with nothing observed', frameDuration([]) === DEFAULT_FRAME_SECONDS);
+  check('frame length is the smallest believable gap (a dropped frame doubles one)',
+    near(frameDuration([1 / 15, 1 / 30, 1 / 30]), 1 / 30));
+  check('60 fps is learned', near(frameDuration([1 / 60, 1 / 60, 1 / 30]), 1 / 60));
+  check('a zero or absurd gap is ignored', near(frameDuration([0, 0.0001, 2, 1 / 25]), 1 / 25));
+
+  const f = 1 / 30;
+  const next = stepTarget(1, f, 1, 10);
+  check('next frame lands inside the following frame, not on its edge', next > 1 + f && next < 1 + 2 * f);
+  const prev = stepTarget(1, f, -1, 10);
+  check('previous frame lands inside the preceding frame', prev > 1 - f && prev < 1);
+  check('stepping back from the first frame stays at 0', stepTarget(0, f, -1, 10) === 0);
+  check('stepping past the end stays on the last frame', stepTarget(10, f, 1, 10) === 10 - f / 2);
+
+  check('timecode while playing is m:ss', timecode(67.48) === '1:07');
+  check('timecode when still shows hundredths', timecode(67.48, true) === '1:07.48');
+  check('timecode never shows 60 seconds', timecode(59.999, true) === '0:59.99');
+  check('timecode of a missing duration is 0:00', timecode(NaN) === '0:00');
+
+  check('shortcode from a reel path', shortcodeFrom('/reel/C8xYz12AbCd/') === 'C8xYz12AbCd');
+  check('shortcode from a post link', shortcodeFrom('https://www.instagram.com/p/AbC_d-123/?img_index=2') === 'AbC_d-123');
+  check('no shortcode on the saved grid', shortcodeFrom('/someone/saved/') === null);
+  check('frame filename names the post and the moment',
+    frameFilename('C8xYz12AbCd', 72.48) === 'instagram-C8xYz12AbCd-1m12.480s.png');
+  check('frame filename without a post', frameFilename(null, 3.5) === 'instagram-video-0m03.500s.png');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);
