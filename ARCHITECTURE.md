@@ -436,7 +436,7 @@ Two modes, toggled in settings:
 
 | | |
 |---|---|
-| **overlay** (default) | our bar: play/pause, frame step, elapsed/duration, drag-to-seek, save frame, mute |
+| **overlay** (default) | our bar: play/pause, elapsed/duration, drag-to-seek, mute (frame step and save frame behind `FRAME_TOOLS`, off for now) |
 | **native** | the browser's own strip, plus the old `z-index` lift — volume and PiP, at the mercy of the catcher |
 
 Ending a drag installs a one-shot capture-phase `click` swallow, or releasing the scrubber
@@ -448,6 +448,10 @@ and showed a frozen picture until release. Now each video has at most one seek i
 and the newest target waits behind it, applied on `seeked`; the same drag shows 46 of 47.
 The slider is painted from the pointer, not the playhead, and a playing video is paused
 for the drag and resumed after, so playback is not fighting the decoder.
+
+**Frame stepping and stills are switched off for now** by `FRAME_TOOLS` in `page/video.ts`,
+while they are redesigned; the bar shows neither and `,` / `.` pass through to the page.
+What follows is how they work when on.
 
 **Frame stepping is anchored on the frame on screen.** Browsers do not expose a frame
 rate. `requestVideoFrameCallback` reports each presented frame's own timestamp, so while

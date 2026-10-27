@@ -5,8 +5,8 @@ A Chrome extension (Manifest V3, TypeScript) that does two things to Instagram:
 1. **Turns the saved-posts grid into a searchable library.** Every saved post gets a
    one-line summary and a category, so you can find the pasta recipe without scrolling
    through 400 identical thumbnails.
-2. **Gives Instagram videos real seek controls.** A smooth scrubber, frame-by-frame
-   stepping, full-resolution stills, arrow-key seeking, and no more forced looping.
+2. **Gives Instagram videos real seek controls.** A smooth scrubber, arrow-key seeking,
+   and no more forced looping.
 
 Loaded unpacked. Not published. Your API key is stored only in your browser and is sent
 only to the model provider you choose when making an authenticated request.
@@ -324,7 +324,8 @@ has neither. Instagram's click-catcher swallows clicks on Chrome's strip, which 
 bar renders outside their DOM. Turn **Extension video controls** on in the popup; profiles
 created before v2 are switched over automatically on the next worker start.
 
-**Stepping and stills.** Hover a video: the bar's ⏮ ⏭ buttons, or `,` and `.`, pause and
+**Stepping and stills** are switched off for now (`FRAME_TOOLS` in `page/video.ts`) while
+they are redesigned. When on: hover a video: the bar's ⏮ ⏭ buttons, or `,` and `.`, pause and
 move exactly one frame; hold the key to keep going. The camera button saves the frame on
 screen as a PNG at the video's own resolution (a 1080 × 1920 reel gives a 1080 × 1920
 image), named after the post and the moment. Shift-click it to copy the frame instead.
