@@ -21,7 +21,7 @@ import {
   type SafeSettings,
   type Stats,
 } from '../messaging';
-import { IDLE_PROGRESS, type IndexProgress, type ProviderId, type Settings } from '../types';
+import { IDLE_PROGRESS, type IndexProgress, type ProviderId, type Settings, type Theme } from '../types';
 
 interface ModelMeta {
   id: string;
@@ -73,6 +73,8 @@ let accountMode: 'sign-up' | 'sign-in' = remembered('signedInBefore') ? 'sign-in
 /** Signed in, posts are analysed by the account and no key of your own is needed. */
 let signedIn = false;
 
+// Before anything awaits, so a dark popup never opens white first.
+applyTheme(cachedTheme());
 void init();
 
 async function init(): Promise<void> {
@@ -91,6 +93,7 @@ async function init(): Promise<void> {
   }
   settings = res.settings;
   providers = res.providers;
+  applyTheme(settings.theme);
 
   wire();
   await loadAccount();
@@ -98,6 +101,11 @@ async function init(): Promise<void> {
   await refresh();
   void loadLibraryUrl();
   subscribe((msg) => {
+    if (msg.type === 'settings') {
+      settings = msg.settings;
+      applyTheme(settings.theme);
+      return;
+    }
     if (msg.type === 'harvest') harvesting = msg.action === 'start';
     else if (msg.type === 'progress') {
       progress = msg.progress;
@@ -183,6 +191,14 @@ function wire(): void {
     screen = 'home';
     render();
   });
+  $('themeBtn').addEventListener('click', () => {
+    const next: Theme = settings.theme === 'dark' ? 'light' : 'dark';
+    settings = { ...settings, theme: next };
+    applyTheme(next);
+    // The library on instagram.com follows through the settings broadcast.
+    void send({ type: 'theme:set', theme: next }).catch(() => {});
+  });
+
   $('navBtn').addEventListener('click', () => {
     screen = screen === 'home' ? 'setup' : 'home';
     render();
@@ -691,6 +707,33 @@ function canIndex(): boolean {
 }
 
 /** Popup-only preferences. Storage can be unavailable, and these are only conveniences. */
+/**
+ * Light or dark, on <html>. The setting lives in the worker; this copy in localStorage
+ * only exists so the popup can paint in the right colours before the worker answers.
+ */
+function applyTheme(theme: Theme | undefined): void {
+  const next: Theme = theme === 'dark' ? 'dark' : 'light';
+  document.documentElement.dataset['theme'] = next;
+  const btn = document.getElementById('themeBtn');
+  if (btn) {
+    btn.title = next === 'dark' ? 'Switch to light' : 'Switch to dark';
+    btn.setAttribute('aria-label', btn.title);
+  }
+  try {
+    localStorage.setItem('theme', next);
+  } catch {
+    // The worker's copy is the real one.
+  }
+}
+
+function cachedTheme(): Theme {
+  try {
+    return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 function remembered(key: string): boolean {
   try {
     return localStorage.getItem(key) === '1';

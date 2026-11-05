@@ -349,6 +349,14 @@ before being acted on.
 - [ ] Frame stepping and stills are off (`FRAME_TOOLS = false`) pending a redesign
 - [x] 200 checks
 
+## Phase 38 — Light theme and a calmer design
+- [x] Light by default with a dark toggle in the library and the popup, synced through
+      the worker (`theme:set`, the only setting the library may change)
+- [x] Library redesign: warm neutral canvas, boxless cards with 4:5 thumbnails, coloured
+      category dots, a plain-language progress line, details folded away
+- [x] Popup redesign on the same tokens, ink primary buttons, no glow
+- [x] 203 checks
+
 ---
 
 ## Not done — needs the user

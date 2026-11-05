@@ -52,6 +52,7 @@ export function migrate(raw: Partial<Settings> | undefined): Settings {
     next.scrubberSkin = DEFAULT_SETTINGS.scrubberSkin;
   }
   if ((next.scrubberSkin as string) === 'thin') next.scrubberSkin = 'overlay';
+  if (next.theme !== 'dark') next.theme = 'light';
 
   // A provider or model that no longer exists is not a harmless stale string. An unknown
   // provider threw out of the categoriser's loop; an unknown model made `usdFor` return 0,
