@@ -112,6 +112,9 @@ export type ProviderId = 'openai';
  */
 export type VideoControls = 'overlay' | 'native';
 
+/** The popup and the library share one appearance, light unless you switch it. */
+export type Theme = 'light' | 'dark';
+
 /** Bump when a stored default needs revisiting. Migrations live in settings.ts. */
 export const SETTINGS_VERSION = 2;
 
@@ -122,6 +125,7 @@ export interface Settings {
   apiKey: string;
   autoIndex: boolean;
   scrubberSkin: VideoControls;
+  theme: Theme;
   settingsVersion: number;
 }
 
@@ -131,6 +135,7 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: '',
   autoIndex: true,
   scrubberSkin: 'overlay',
+  theme: 'light',
   settingsVersion: SETTINGS_VERSION,
 };
 

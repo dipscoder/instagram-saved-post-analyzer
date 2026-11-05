@@ -380,6 +380,10 @@ console.log('\nsettings migration');
   check('a removed provider\'s key is dropped', removed.apiKey === '', removed.apiKey);
   check('an OpenAI key survives migration',
     migrate({ provider: 'openai', apiKey: 'sk-keep-me' } as never).apiKey === 'sk-keep-me');
+
+  check('the theme is light until you switch it', fresh.theme === 'light');
+  check('a dark choice survives migration', migrate({ theme: 'dark', settingsVersion: 2 } as never).theme === 'dark');
+  check('an unknown theme falls back to light', migrate({ theme: 'sepia' } as never).theme === 'light');
 }
 
 console.log('\nroute fences');

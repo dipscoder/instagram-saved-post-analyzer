@@ -404,6 +404,19 @@ strips `sk-*` and `Bearer …` shapes out of anything headed for a log or the UI
 
 ---
 
+## 5a. Theme
+
+Light is the default; dark is a choice, stored as `Settings.theme` in the worker like any
+other setting. The library sets `data-theme` on its shadow host and the popup on `<html>`;
+both stylesheets define their colours as tokens, so a theme is one attribute, not a second
+stylesheet. The system's `prefers-color-scheme` is deliberately ignored: the person asked
+for light unless they say otherwise.
+
+The library on instagram.com may change exactly one setting, through `theme:set`, so the
+content script never needs `settings:set`. The worker broadcasts the new safe settings and
+both surfaces repaint. The popup also caches the theme in its own `localStorage`, so it
+paints in the right colours before the worker answers.
+
 ## 6. Video controls
 
 `page/video.ts`, ISOLATED world, `instagram.com/*`.
