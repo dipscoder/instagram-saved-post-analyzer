@@ -346,6 +346,7 @@ before being acted on.
 - [x] Frame-by-frame stepping from the bar or `,` / `.`, anchored on the presented frame,
       with a precise timecode while paused
 - [x] Save the frame on screen as a full-resolution PNG, or copy it with Shift-click
+- [ ] Frame stepping and stills are off (`FRAME_TOOLS = false`) pending a redesign
 - [x] 200 checks
 
 ---

@@ -51,6 +51,13 @@ import { frameDuration, frameFilename, shortcodeFrom, stepTarget, timecode } fro
 /** Room left for Instagram's own reel chrome along the bottom of the viewport. */
 const BOTTOM_KEEP_OUT_PX = 56;
 
+/**
+ * Frame stepping (buttons and `,` / `.`) and saving stills. Switched off for now while
+ * the feature is redesigned; the code stays so turning it back on is this one line.
+ * Smooth scrubbing does not depend on it.
+ */
+const FRAME_TOOLS = false;
+
 const SEEK_STEP_SECONDS = 5;
 const BAR_HEIGHT = 36;
 /** Below this player width the frame-step buttons give their room back to the slider. */
@@ -336,7 +343,7 @@ function retarget(): void {
 // --- keyboard ---------------------------------------------------------------
 
 function onKeyDown(ev: KeyboardEvent): void {
-  const step = ev.key === ',' ? -1 : ev.key === '.' ? 1 : 0;
+  const step = !FRAME_TOOLS ? 0 : ev.key === ',' ? -1 : ev.key === '.' ? 1 : 0;
   if (!step && ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   // Never steal keys from a text field or Instagram's own story navigation. The
@@ -640,11 +647,10 @@ class ControlBar {
     this.hit.append(this.track);
     this.root.append(
       this.playBtn,
-      this.prevBtn,
-      this.nextBtn,
+      ...(FRAME_TOOLS ? [this.prevBtn, this.nextBtn] : []),
       this.time,
       this.hit,
-      this.shotBtn,
+      ...(FRAME_TOOLS ? [this.shotBtn] : []),
       this.muteBtn,
       this.toast,
     );
@@ -802,7 +808,7 @@ class ControlBar {
       ),
     )}px`;
 
-    const steps = r.width >= STEP_BUTTONS_MIN_PX;
+    const steps = FRAME_TOOLS && r.width >= STEP_BUTTONS_MIN_PX;
     if (this.shownSteps !== steps) {
       this.shownSteps = steps;
       this.prevBtn.style.display = this.nextBtn.style.display = steps ? 'flex' : 'none';
