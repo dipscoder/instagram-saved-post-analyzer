@@ -17,3 +17,8 @@ dist/
 supabase/functions/*/dist/
 supabase/.temp/
 supabase/.branches/
+
+# Next.js build output
+web/.next/
+web/next-env.d.ts
+web/*.tsbuildinfo

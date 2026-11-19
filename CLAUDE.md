@@ -2,8 +2,8 @@
 
 Chrome MV3 extension (TypeScript, esbuild, **loaded unpacked — not published**), growing
 into extension + Supabase backend + web app. The repo is npm workspaces: `extension/`,
-`shared/` (pure taxonomy, digest, filing prompt) and `supabase/` (migrations and the
-`analyze` Edge Function), with `web/` reserved. **OpenAI is the
+`shared/` (pure taxonomy, digest, filing prompt, search filter) and `supabase/` (migrations and the
+`analyze` Edge Function), and `web/` (the Next.js library app). **OpenAI is the
 only model provider** — don't add others back. It turns
 Instagram's saved-posts grid into a searchable, AI-categorised library, and gives Instagram
 videos real seek controls.
@@ -15,7 +15,7 @@ version plus the things that are easy to break without noticing.
 
 ```bash
 npm run typecheck    # tsc across every workspace
-npm run verify       # 227 pure-function checks, no browser needed — run this
+npm run verify       # 234 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -123,7 +123,7 @@ The work through Phase 38 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
 resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
 the ledger, and server-side analysis with a daily cap), frame-accurate video controls, and a light theme with a dark toggle. `npm run verify` currently
-contains 227 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 234 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository
