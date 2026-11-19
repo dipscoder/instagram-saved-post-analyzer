@@ -343,6 +343,8 @@ function retarget(): void {
 // --- keyboard ---------------------------------------------------------------
 
 function onKeyDown(ev: KeyboardEvent): void {
+  // Off means off: with Instagram's own controls chosen, its keys stay Instagram's.
+  if (mode === 'native') return;
   const step = !FRAME_TOOLS ? 0 : ev.key === ',' ? -1 : ev.key === '.' ? 1 : 0;
   if (!step && ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;

@@ -8,7 +8,7 @@
 import { startBridge } from './capture/bridge';
 import { isLibraryMounted, mountLibrary, unmountLibrary } from './page/library';
 import { setScrubberSkin, startVideoControls } from './page/video';
-import { isSavedRoute } from './routes';
+import { collectionFromPath } from './routes';
 import { send, subscribe, type SafeSettings } from './messaging';
 
 startBridge();
@@ -40,11 +40,21 @@ async function boot(): Promise<void> {
   });
 }
 
+/** The collection the pill is mounted for, so moving between collections remounts it. */
+let mountedFor: string | null = null;
+
+/**
+ * Show the pill inside a saved collection and nowhere else — not on the `/saved/`
+ * overview, not on the feed. Capture keeps its own, separate fence (`isSavedRoute`).
+ */
 function syncLibraryToRoute(): void {
-  if (isSavedRoute()) {
-    if (!isLibraryMounted()) mountLibrary();
-  } else if (isLibraryMounted()) {
-    unmountLibrary();
+  const collection = collectionFromPath();
+  if (collection?.id === mountedFor && isLibraryMounted()) return;
+  if (isLibraryMounted()) unmountLibrary();
+  mountedFor = null;
+  if (collection) {
+    mountLibrary(collection);
+    mountedFor = collection.id;
   }
 }
 
