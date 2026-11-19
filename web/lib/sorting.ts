@@ -64,7 +64,7 @@ export class SortError extends Error {
 export async function sortBatch(shortcodes: string[], signal: AbortSignal): Promise<SortReply> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  if (!token) throw new SortError('Sign in again to sort.', 401);
+  if (!token) throw new SortError('Sign in again to index.', 401);
   const res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
     method: 'POST',
     headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -74,7 +74,7 @@ export async function sortBatch(shortcodes: string[], signal: AbortSignal): Prom
   const body = (await res.json().catch(() => ({}))) as Partial<SortReply> & { error?: string };
   if (!res.ok) {
     const message =
-      res.status === 404 ? 'Sorting is not set up on the server yet.' : (body.error ?? `Sorting failed (${res.status}).`);
+      res.status === 404 ? 'Indexing is not set up on the server yet. Deploy the sort function.' : (body.error ?? `Indexing failed (${res.status}).`);
     throw new SortError(message, res.status);
   }
   return { sorted: body.sorted ?? 0, unreadable: body.unreadable ?? [], failed: body.failed ?? [], usd: body.usd ?? 0 };

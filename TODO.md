@@ -359,6 +359,15 @@ before being acted on.
 
 ---
 
+## Phase 39 — The web app is the product
+- [x] Extension popup cut to sign in, Find new posts and Open your library
+- [x] In-page library overlay removed; the pill only finds posts, removes strays, and links to the web app
+- [x] The extension never indexes on its own; indexing runs from the web app on the server
+- [x] Web app: Index bar on every view, Settings sheet (account, spend, Clear library)
+- [x] `library_state.cleared_at`: a clear in the web app empties each extension's copy on its next sync
+- [ ] Delete the extension's now-dormant indexing code (categorizer, providers, own-key
+      settings, ledger import/export, run queue) once server indexing has run live
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

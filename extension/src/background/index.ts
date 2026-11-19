@@ -14,7 +14,7 @@ import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './provider
 import { reserveRanks } from './order';
 import { resetSpend } from './spend';
 import { getAccount, signIn, signOut, signUp } from './account';
-import { getSyncStatus, resetSync, scheduleSync, syncNow, wipeAccount } from './sync';
+import { getSyncStatus, onLibraryCleared, resetSync, scheduleSync, syncNow } from './sync';
 import {
   clearKey,
   getSafeSettings,
@@ -132,6 +132,13 @@ function broadcast(msg: Broadcast): void {
   }
 }
 
+// Clear Library in the web app: this browser's copy goes too, so it cannot sync it back.
+onLibraryCleared(async () => {
+  setHarvest('stop');
+  await categorizer.startOver();
+  await forgetCollections();
+});
+
 chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
   // A content script runs inside instagram.com. Nothing there may sign in, out or
   // anywhere else on the user's behalf.
@@ -181,20 +188,7 @@ async function handle(req: Request): Promise<unknown> {
           broadcast({ type: 'posts:updated' });
         }
 
-        const settings = await getSettings();
-        // Auto-index picks up newly captured posts without the user asking, but only
-        // when something can answer (an account or a key) and a run isn't already in flight.
-        // `isRunning()` alone was not enough: a paused run is not running, so the next
-        // captured tile restarted the very spend the user had just stopped.
-        if (
-          settings.autoIndex &&
-          (await canIndex()) &&
-          !harvesting &&
-          !categorizer.isRunning() &&
-          !categorizer.isPaused()
-        ) {
-          void categorizer.start().catch(reportFailure);
-        }
+        // Indexing is the web app's job; the extension only collects and syncs.
       }
       return { inserted, refreshed };
     }
@@ -262,6 +256,10 @@ async function handle(req: Request): Promise<unknown> {
       setHarvest('start');
       return categorizer.progress();
 
+    case 'find:stop':
+      setHarvest('stop');
+      return categorizer.progress();
+
     case 'index:pause':
       setHarvest('stop');
       categorizer.pause();
@@ -280,11 +278,8 @@ async function handle(req: Request): Promise<unknown> {
       // popup/content port to connect replayed "start" and silently began another sweep.
       if (req.reason === 'rate-limited') categorizer.pause();
       if (harvesting) setHarvest('stop');
-      // Reaching the end is the hand-over: sort what was found, as the button promised.
-      // A pause or a rate-limit leaves the found posts waiting for the user.
-      if (req.reason === 'complete' && (await canIndex()) && !categorizer.isRunning()) {
-        void categorizer.start().then(() => trackCompletion()).catch(reportFailure);
-      }
+      // Finishing a sweep sends what it found to the account; indexing happens there.
+      scheduleSync(500);
       return { stopped: true, reason: req.reason };
 
     case 'index:quote':
@@ -413,15 +408,6 @@ async function handle(req: Request): Promise<unknown> {
 
     case 'account:sync':
       await syncNow();
-      return accountState();
-
-    case 'account:start-over':
-      // The account copy goes first: if that fails, nothing local is lost and the user
-      // can simply try again. Paid summaries go too; the spend counter stays.
-      setHarvest('stop');
-      await wipeAccount();
-      await categorizer.startOver();
-      await forgetCollections();
       return accountState();
 
     default: {

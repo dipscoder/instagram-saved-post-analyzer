@@ -50,6 +50,8 @@ const PULLED_KEY = 'syncPulled';
 const COLLECTIONS_SYNC_KEY = 'syncCollections';
 /** The newest `updated_at` among verdicts already pulled from the account. */
 const VERDICT_CURSOR_KEY = 'syncVerdictCursor';
+/** The account's `library_state.cleared_at` this browser last acted on. */
+const CLEARED_KEY = 'syncClearedAt';
 const UPSERT_BATCH = 500;
 /** Deletes go in the query string, so they are batched smaller. */
 const DELETE_BATCH = 100;
@@ -104,39 +106,47 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 /** Forget what was uploaded, so the next sync pulls and sends everything again. */
 export async function resetSync(): Promise<void> {
   await clearStores();
-  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY, VERDICT_CURSOR_KEY]);
+  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY, VERDICT_CURSOR_KEY, CLEARED_KEY]);
+}
+
+type ClearHandler = () => Promise<void>;
+let onCleared: ClearHandler | null = null;
+
+/** What to do locally when the library was cleared from the web app. */
+export function onLibraryCleared(handler: ClearHandler): void {
+  onCleared = handler;
 }
 
 /**
- * Deletes the account's copy of the library: posts, stored thumbnails, collection names
- * and the paid verdicts (Clear Library is the one sanctioned exception to invariant 4;
- * see the clear_library migration). Waits out any sync in flight first, so it cannot re-upload behind the delete.
+ * Follows a Clear Library pressed in the web app. The account stamps `cleared_at`; a
+ * browser that has not acted on that stamp yet empties its own copy, ledger included,
+ * so its next upload cannot bring the old library back.
+ *
+ * A browser with no stamp on record clears only if it last synced before the stamp: it
+ * held the library that was cleared. A browser new to the account just adopts it.
  */
-export async function wipeAccount(): Promise<void> {
-  if (timer) clearTimeout(timer);
-  timer = null;
-  await running?.catch(() => {});
-  const userId = await currentUserId();
-  if (userId) {
-    // Removing shifts the listing, so each round lists from the start until it is empty.
-    for (;;) {
-      const { data, error } = await supabase.storage.from(BUCKET).list(userId, { limit: PAGE });
-      if (error) throw new Error(error.message);
-      if (!data?.length) break;
-      const removed = await supabase.storage.from(BUCKET).remove(data.map((f) => `${userId}/${f.name}`));
-      if (removed.error) throw new Error(removed.error.message);
-    }
-    // Posts, collections and the paid verdicts go together, server-side, in one call.
-    const { error } = await supabase.rpc('clear_library');
-    if (error) throw new Error(error.message);
+async function followServerClear(): Promise<void> {
+  const { data, error } = await supabase.from('library_state').select('cleared_at').maybeSingle();
+  // Before the migration runs the table does not exist; sync carries on as before.
+  if (error) return;
+  const stamp = (data as { cleared_at: string } | null)?.cleared_at ?? '';
+  const stored = (await chrome.storage.local.get(CLEARED_KEY))[CLEARED_KEY] as string | undefined;
+  if (stamp === (stored ?? '')) return;
+  // No stamp on record: clear only if this browser synced before the stamp was set.
+  const { lastSyncAt } = await getSyncStatus();
+  const missed = stored !== undefined ? stamp !== '' : stamp !== '' && lastSyncAt !== null && lastSyncAt < Date.parse(stamp);
+  if (missed) {
+    await onCleared?.();
+    await resetSync();
   }
-  await resetSync();
+  await chrome.storage.local.set({ [CLEARED_KEY]: stamp });
 }
 
 async function syncOnce(): Promise<void> {
   const userId = await currentUserId();
   if (!userId) return;
   await claim(userId);
+  await followServerClear();
 
   const posts = await readMap<{ shortcode: string; hash: string }>(SYNC_STORE);
   const thumbs = await readMap<ThumbState>(THUMB_STORE);

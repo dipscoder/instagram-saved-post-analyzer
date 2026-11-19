@@ -68,6 +68,7 @@ export type Request =
   | { type: 'index:start' }
   /** Scroll the open collection to find posts; sorting follows when it reaches the end. */
   | { type: 'find:start' }
+  | { type: 'find:stop' }
   | { type: 'index:pause' }
   | { type: 'index:reindex' }
   /** What a re-index would actually cost, given what the ledger already holds. */
@@ -93,9 +94,7 @@ export type Request =
   | { type: 'account:sign-in'; email: string; password: string }
   | { type: 'account:sign-up'; email: string; password: string }
   | { type: 'account:sign-out' }
-  | { type: 'account:sync' }
-  /** Clean slate: deletes posts, thumbnails and collections here and on the account. */
-  | { type: 'account:start-over' };
+  | { type: 'account:sync' };
 
 export type Response =
   | { ok: true; value: unknown }

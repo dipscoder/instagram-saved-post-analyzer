@@ -24,7 +24,7 @@ import { reserveRanks } from '../src/background/order';
 import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { IDLE_PROGRESS, toRecord } from '../src/types';
-import { flowButton, flowStatus } from '../src/page/flow';
+import { pillButton, pillStatus, type PillState } from '../src/page/flow';
 import { listCollections, validCollection } from '../src/background/collections';
 import { applyResult } from '../src/background/filing';
 import {
@@ -889,25 +889,21 @@ console.log('\ninstagram collections');
     listCollections({ '7': 1 }, {})[0]?.name === 'Collection');
 }
 
-console.log('\none indexing button');
+console.log('\nthe pill');
 {
-  const p = (over: Partial<typeof IDLE_PROGRESS>) => ({ ...IDLE_PROGRESS, ...over });
-  check('nothing found yet: find', flowButton(p({}), false).action === 'find');
-  check('finding: pause', flowButton(p({ pending: 4 }), true).action === 'pause');
-  check('indexing: pause', flowButton(p({ phase: 'running', pending: 4, runTotal: 4 }), false).action === 'pause');
-  const waiting = flowButton(p({ phase: 'done', total: 40, pending: 34 }), false);
-  check('found posts waiting: index, never find', waiting.action === 'index' && waiting.label === 'Index 34 posts', waiting);
-  check('one post reads naturally', flowButton(p({ pending: 1 }), false).label === 'Index 1 post');
-  const paused = flowButton(p({ phase: 'paused', pending: 10, runTotal: 20, runCompleted: 10 }), false);
-  check('a paused run resumes indexing, not finding', paused.action === 'index' && paused.label === 'Resume indexing', paused);
-  check('all indexed: find new posts',
-    flowButton(p({ phase: 'done', total: 40, categorized: 40 }), false).label === 'Find new posts');
-  check('status while finding counts what waits',
-    flowStatus(p({ pending: 12 }), true) === 'Finding posts · 12 to index');
-  check('status while indexing', flowStatus(p({ phase: 'running', runTotal: 30, runCompleted: 7 }), false) === 'Indexing 7 of 30');
-  check('status when done', flowStatus(p({ phase: 'done', total: 40, categorized: 40 }), false) === '40 posts, all indexed');
+  const s = (over: Partial<PillState>): PillState => ({
+    finding: false, total: 0, strays: 0, confirming: false, message: null, ...over,
+  });
+  check('nothing found yet: find', pillButton(s({})).action === 'find');
+  check('finding: stop', pillButton(s({ finding: true, strays: 3 })).action === 'stop');
+  check('the extension never offers to index', !['Index', 'Sort'].some((w) => pillButton(s({ total: 40 })).label.includes(w)));
+  check('strays need two presses',
+    pillButton(s({ strays: 3 })).action === 'remove' && pillButton(s({ strays: 3, confirming: true })).action === 'confirm-remove');
+  check('status while finding', pillStatus(s({ finding: true, total: 1200 })) === 'Finding posts · 1,200 posts so far');
+  check('status when idle', pillStatus(s({ total: 1 })) === '1 post found · synced to your library');
+  check('status for strays', pillStatus(s({ total: 9, strays: 2 })) === '2 posts no longer saved on Instagram');
   check('a rate-limit message is shown as is',
-    flowStatus(p({ phase: 'paused', message: 'Instagram rate-limited the page.' }), false) === 'Instagram rate-limited the page.');
+    pillStatus(s({ total: 9, message: 'Instagram rate-limited the page.' })) === 'Instagram rate-limited the page.');
 }
 
 console.log('\nweb app search');

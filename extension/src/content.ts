@@ -6,7 +6,7 @@
  */
 
 import { startBridge } from './capture/bridge';
-import { isLibraryMounted, mountLibrary, unmountLibrary } from './page/library';
+import { isPillMounted, mountPill, unmountPill } from './page/pill';
 import { setScrubberSkin, startVideoControls } from './page/video';
 import { collectionFromPath } from './routes';
 import { send, subscribe, type SafeSettings } from './messaging';
@@ -27,7 +27,7 @@ async function boot(): Promise<void> {
   }
 
   startVideoControls(settings?.scrubberSkin);
-  syncLibraryToRoute();
+  syncPillToRoute();
   watchRouteChanges();
 
   // Keep the video controls in step with the settings toggle without a reload.
@@ -47,13 +47,13 @@ let mountedFor: string | null = null;
  * Show the pill inside a saved collection and nowhere else — not on the `/saved/`
  * overview, not on the feed. Capture keeps its own, separate fence (`isSavedRoute`).
  */
-function syncLibraryToRoute(): void {
+function syncPillToRoute(): void {
   const collection = collectionFromPath();
-  if (collection?.id === mountedFor && isLibraryMounted()) return;
-  if (isLibraryMounted()) unmountLibrary();
+  if (collection?.id === mountedFor && isPillMounted()) return;
+  if (isPillMounted()) unmountPill();
   mountedFor = null;
   if (collection) {
-    mountLibrary(collection);
+    mountPill(collection);
     mountedFor = collection.id;
   }
 }
@@ -74,7 +74,7 @@ function watchRouteChanges(): void {
   const check = (): void => {
     if (location.pathname === lastPath) return;
     lastPath = location.pathname;
-    syncLibraryToRoute();
+    syncPillToRoute();
   };
 
   window.addEventListener('popstate', check);

@@ -1,12 +1,13 @@
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
-import { LogOut, Search } from 'lucide-react';
+import { Search, Settings } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mark } from '@/components/logo';
 import { PostCard } from '@/components/post-card';
 import { PostSheet } from '@/components/post-sheet';
 import { FilterChips, Sidebar } from '@/components/sidebar';
+import { SettingsSheet } from '@/components/settings-sheet';
 import { SortPanel } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,6 @@ import {
   type Post,
   type View,
 } from '@/lib/library';
-import { supabase } from '@/lib/supabase';
 
 /** One loaded view: what it shows and whether more pages exist. */
 interface Entry {
@@ -76,6 +76,7 @@ export function Library({ session }: { session: Session }) {
   const inflight = useRef(new Map<string, AbortController>());
   const [, setVersion] = useState(0);
   const [open, setOpen] = useState<Post | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const userId = session.user.id;
   const key = viewKey(view, debounced);
@@ -197,8 +198,8 @@ export function Library({ session }: { session: Session }) {
         </label>
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggle />
-          <Button variant="ghost" size="icon" onClick={() => void supabase.auth.signOut()} aria-label="Sign out" title={`Sign out ${session.user.email ?? ''}`}>
-            <LogOut />
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
+            <Settings />
           </Button>
         </div>
       </header>
@@ -219,7 +220,10 @@ export function Library({ session }: { session: Session }) {
               </span>
             </div>
 
-            {view.kind === 'needs-look' && !debounced && facets && <SortPanel facets={facets} onSorted={refresh} />}
+            {/* Indexing is offered wherever there is something to index, not only in Needs a look. */}
+            {!debounced && facets && (facets.unsorted > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
+              <SortPanel facets={facets} onSorted={refresh} />
+            )}
 
             {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
 
@@ -229,7 +233,7 @@ export function Library({ session }: { session: Session }) {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {debounced
                     ? 'Try fewer or different words.'
-                    : 'Open a saved collection on Instagram with the extension installed, and posts appear here as they sync.'}
+                    : 'Open your saved posts on Instagram and press Find new posts in the Saved Index extension. Posts appear here as they sync.'}
                 </p>
               </div>
             )}
@@ -258,6 +262,7 @@ export function Library({ session }: { session: Session }) {
         </main>
       </div>
 
+      <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} session={session} facets={facets} onCleared={refresh} />
       <PostSheet post={open} thumb={open ? knownThumbnail(open) : undefined} onClose={() => setOpen(null)} />
     </div>
   );

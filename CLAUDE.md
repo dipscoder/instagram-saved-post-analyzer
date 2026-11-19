@@ -15,7 +15,7 @@ version plus the things that are easy to break without noticing.
 
 ```bash
 npm run typecheck    # tsc across every workspace
-npm run verify       # 261 pure-function checks, no browser needed — run this
+npm run verify       # 258 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -61,9 +61,15 @@ mid-sweep.
 saved — free to rebuild by scrolling. `analysis` is work that was *bought* with the user's
 own API key and is irreproducible. `prune` and `resetCategories` touch only the first. The account's
 `verdicts` table has no delete policy for the same reason.
-See ARCHITECTURE §3b. The one sanctioned exception is the popup's **Clear Library**
-(two presses, names the summary count): `ledger.clearAll()` locally and the
-`clear_library()` RPC on the account. Nothing else may call either.
+See ARCHITECTURE §3b. The one sanctioned exception is **Clear library** in the web app's
+Settings (two presses, names the counts): the `clear_library()` RPC erases the account's
+copy and stamps `library_state.cleared_at`, and each extension then runs
+`ledger.clearAll()` on its next sync (`followServerClear` in sync.ts). Nothing else may
+call either.
+
+**The extension is a collector.** It signs in, finds posts and syncs them. Indexing and
+every other control live in the web app; don't add settings or actions back to the popup
+or the pill.
 
 **5. Every spend is the user's money.** Before writing anything that calls a model, ask
 what happens when it runs twice. Anything that can re-bill a library needs a quote *and* a
@@ -125,7 +131,7 @@ The work through Phase 38 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
 resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
 the ledger, and server-side analysis with a daily cap), frame-accurate video controls, and a light theme with a dark toggle. `npm run verify` currently
-contains 261 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 258 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository
