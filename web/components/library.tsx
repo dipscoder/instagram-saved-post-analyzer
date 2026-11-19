@@ -7,6 +7,7 @@ import { Mark } from '@/components/logo';
 import { PostCard } from '@/components/post-card';
 import { PostSheet } from '@/components/post-sheet';
 import { FilterChips, Sidebar } from '@/components/sidebar';
+import { SortPanel } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import {
@@ -81,8 +82,17 @@ export function Library({ session }: { session: Session }) {
   const current = useRef(key);
   current.current = key;
 
+  // Bumped when the library changes underneath the cache, e.g. after sorting.
+  const [generation, setGeneration] = useState(0);
+
   useEffect(() => {
     fetchFacets().then(setFacets, (e: Error) => setFacetError(e.message));
+  }, [generation]);
+
+  const refresh = useCallback(() => {
+    for (const controller of inflight.current.values()) controller.abort();
+    entries.current.clear();
+    setGeneration((g) => g + 1);
   }, []);
 
   useEffect(() => {
@@ -154,7 +164,7 @@ export function Library({ session }: { session: Session }) {
   useEffect(() => {
     for (const [k, controller] of inflight.current) if (k !== key) controller.abort();
     void load(view, debounced, 0);
-  }, [key, view, debounced, load]);
+  }, [key, view, debounced, load, generation]);
 
   // Hovering a sidebar row starts loading it, so the click usually lands on a full grid.
   const prefetch = useCallback((v: View) => void load(v, '', 0), [load]);
@@ -209,7 +219,7 @@ export function Library({ session }: { session: Session }) {
               </span>
             </div>
 
-            {view.kind === 'needs-look' && !debounced && facets && <NeedsLookNote facets={facets} />}
+            {view.kind === 'needs-look' && !debounced && facets && <SortPanel facets={facets} onSorted={refresh} />}
 
             {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
 
@@ -249,27 +259,6 @@ export function Library({ session }: { session: Session }) {
       </div>
 
       <PostSheet post={open} thumb={open ? knownThumbnail(open) : undefined} onClose={() => setOpen(null)} />
-    </div>
-  );
-}
-
-function NeedsLookNote({ facets }: { facets: Facets }) {
-  const unsure = facets.needsLook - facets.unsorted;
-  return (
-    <div className="mb-6 rounded-lg border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
-      {facets.unsorted > 0 && (
-        <p>
-          <span className="font-medium text-foreground">{facets.unsorted.toLocaleString()} not sorted yet.</span> Open a saved
-          collection on Instagram and press <span className="font-medium text-foreground">Sort</span> in the Saved Index pill.
-        </p>
-      )}
-      {unsure > 0 && (
-        <p className={facets.unsorted > 0 ? 'mt-1' : ''}>
-          <span className="font-medium text-foreground">{unsure.toLocaleString()} the model wasn’t sure about.</span> Rather than
-          guess, it left them here for you.
-        </p>
-      )}
-      <p className="mt-1">Sorting and fixing categories right here is coming with the next analysis update.</p>
     </div>
   );
 }

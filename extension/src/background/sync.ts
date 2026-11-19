@@ -26,6 +26,7 @@ import {
   planThumbnails,
   toVerdictRow,
   afterCopy,
+  adoptVerdicts,
   type ThumbFormat,
   type ThumbState,
 } from './sync-plan';
@@ -47,6 +48,8 @@ const OWNER_KEY = 'syncOwner';
 const PULLED_KEY = 'syncPulled';
 /** Digest of the collection names last uploaded, so unchanged names are not re-sent. */
 const COLLECTIONS_SYNC_KEY = 'syncCollections';
+/** The newest `updated_at` among verdicts already pulled from the account. */
+const VERDICT_CURSOR_KEY = 'syncVerdictCursor';
 const UPSERT_BATCH = 500;
 /** Deletes go in the query string, so they are batched smaller. */
 const DELETE_BATCH = 100;
@@ -101,7 +104,7 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 /** Forget what was uploaded, so the next sync pulls and sends everything again. */
 export async function resetSync(): Promise<void> {
   await clearStores();
-  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY]);
+  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY, VERDICT_CURSOR_KEY]);
 }
 
 async function syncOnce(): Promise<void> {
@@ -113,6 +116,7 @@ async function syncOnce(): Promise<void> {
   const thumbs = await readMap<ThumbState>(THUMB_STORE);
   try {
     if (!(await isPulled(userId))) await pull(userId, thumbs);
+    await pullNewVerdicts();
 
     const records = await db.all();
     const plan = planSync(records, hashes(posts));
@@ -273,6 +277,44 @@ async function pull(userId: string, thumbs: Map<string, ThumbState>): Promise<vo
   await chrome.storage.local.set({ [PULLED_KEY]: userId });
 }
 
+/**
+ * Verdicts the account gained since the last look: posts sorted in the web app, or by
+ * this extension in another browser. They go into the ledger and onto the matching local
+ * posts, so the extension shows them sorted and never pays for them again. Cheap when
+ * nothing changed: one request that returns no rows.
+ */
+async function pullNewVerdicts(): Promise<void> {
+  const stored = (await chrome.storage.local.get(VERDICT_CURSOR_KEY))[VERDICT_CURSOR_KEY];
+  const since = typeof stored === 'string' ? stored : null;
+  let latest = since;
+  const verdicts: ledger.Verdict[] = [];
+  for (;;) {
+    let query = supabase.from('verdicts').select('*').order('updated_at').limit(PAGE);
+    if (latest) query = query.gt('updated_at', latest);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    for (const row of rows) {
+      latest = String(row['updated_at']);
+      const verdict = ledger.parseVerdict(fromVerdictRow(row));
+      if (verdict) verdicts.push(verdict);
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  if (verdicts.length) {
+    await ledger.merge(verdicts);
+    await writeStore(
+      LEDGER_SYNC_STORE,
+      verdicts.map((v) => ({ shortcode: v.shortcode, hash: digest(toVerdictRow(v)) })),
+      [],
+    );
+    const adopted = adoptVerdicts(await db.all(), verdicts);
+    if (adopted.length) await db.updateMany(adopted);
+  }
+  if (latest !== since) await chrome.storage.local.set({ [VERDICT_CURSOR_KEY]: latest });
+}
+
 /** Every row of `table` the caller can see, a page at a time. */
 async function* pages(
   table: 'verdicts' | 'posts',
@@ -295,7 +337,7 @@ async function claim(userId: string): Promise<void> {
   const stored = await chrome.storage.local.get(OWNER_KEY);
   if (stored[OWNER_KEY] === userId) return;
   await clearStores();
-  await chrome.storage.local.remove(PULLED_KEY);
+  await chrome.storage.local.remove([PULLED_KEY, VERDICT_CURSOR_KEY]);
   await chrome.storage.local.set({ [OWNER_KEY]: userId, [STATUS_KEY]: IDLE });
 }
 

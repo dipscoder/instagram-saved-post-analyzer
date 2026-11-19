@@ -38,8 +38,8 @@ import { RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 import type { PostRecord } from '../types';
 import { LEDGER_STORE, openDb } from './db';
 
-/** Bumped only for a change to this record's own shape. */
-export const LEDGER_VERSION = 2;
+import { LEDGER_VERSION } from '@saved-index/shared/filing';
+export { LEDGER_VERSION };
 
 export interface Verdict {
   /** Primary key, shared with the post it describes. */

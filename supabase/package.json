@@ -5,7 +5,7 @@
   "description": "Database migrations and Edge Functions for the Saved Index account.",
   "type": "module",
   "scripts": {
-    "build": "esbuild functions/analyze/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=functions/analyze/dist/index.js --log-level=warning",
+    "build": "esbuild functions/analyze/index.ts functions/sort/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outdir=functions --entry-names=[dir]/dist/[name] --log-level=warning",
     "typecheck": "tsc -p ."
   },
   "dependencies": {

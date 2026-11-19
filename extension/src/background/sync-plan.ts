@@ -9,7 +9,7 @@
 
 import { hashText } from '@saved-index/shared/hash';
 import type { PostRecord } from '../types';
-import type { Verdict } from './ledger';
+import { applyVerdict, type Verdict } from './ledger';
 
 /** One row of `public.posts`. `user_id` is filled in by the database from the session. */
 export interface PostRow {
@@ -212,4 +212,20 @@ const LEGACY_EDGE_PX = 480;
 
 function iso(ms: number | null): string | null {
   return ms === null ? null : new Date(ms).toISOString();
+}
+
+/**
+ * Local posts that a verdict from the account should update: ones never sorted here, or
+ * sorted longer ago than the account's answer. This is how a post sorted in the web app
+ * shows up sorted in the extension, without the extension paying for it again.
+ */
+export function adoptVerdicts(records: Iterable<PostRecord>, verdicts: readonly Verdict[]): PostRecord[] {
+  const byShortcode = new Map(verdicts.map((v) => [v.shortcode, v]));
+  const adopted: PostRecord[] = [];
+  for (const r of records) {
+    const v = byShortcode.get(r.shortcode);
+    if (!v || v.modelUsed === 'skipped') continue;
+    if (r.categorizedAt === null || r.categorizedAt < v.categorizedAt) adopted.push(applyVerdict(r, v));
+  }
+  return adopted;
 }
