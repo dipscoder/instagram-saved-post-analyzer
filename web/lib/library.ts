@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 /** The columns the library shows. Everything else on the row stays in the database. */
 const POST_COLUMNS =
   'shortcode, permalink, handle, caption, hashtags, thumbnail_url, thumbnail_stored, is_video, ' +
-  'duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank';
+  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank';
 
 export interface Post {
   shortcode: string;
@@ -15,6 +15,7 @@ export interface Post {
   hashtags: string[];
   thumbnail_url: string;
   thumbnail_stored: boolean;
+  thumbnail_format: 'jpg' | 'webp' | null;
   is_video: boolean;
   duration_sec: number | null;
   audio_track_name: string | null;
@@ -42,6 +43,8 @@ export interface Facet {
 export interface Facets {
   total: number;
   needsLook: number;
+  /** Of those, never sorted at all (the rest the model filed as not sure). */
+  unsorted: number;
   categories: Facet[];
   collections: Facet[];
 }
@@ -49,7 +52,7 @@ export interface Facets {
 export const PAGE_SIZE = 60;
 
 /** One page of posts for a view and a search, newest saved first. */
-export async function fetchPosts(view: View, query: string, page: number): Promise<Post[]> {
+export async function fetchPosts(view: View, query: string, page: number, signal?: AbortSignal): Promise<Post[]> {
   let q = supabase
     .from('posts')
     .select(POST_COLUMNS)
@@ -62,21 +65,43 @@ export async function fetchPosts(view: View, query: string, page: number): Promi
   if (view.kind === 'needs-look') q = q.or(`category.is.null,category.eq.${UNCATEGORIZED}`);
   for (const filter of searchFilters(query)) q = q.or(filter);
 
+  if (signal) q = q.abortSignal(signal);
   const { data, error } = await q.returns<Post[]>();
   if (error) throw new Error(error.message);
   return data ?? [];
 }
 
 /**
- * Sidebar counts. Only two narrow columns are read, a page at a time, so a 20k library
- * costs a few small requests rather than one huge one.
+ * Sidebar counts, from one grouped query on the server (`library_facets`). Until that
+ * migration has run, falls back to reading two narrow columns a page at a time.
  */
 export async function fetchFacets(): Promise<Facets> {
-  const byCategory = new Map<string, number>();
-  const byCollection = new Map<string, number>();
-  let total = 0;
-  let needsLook = 0;
+  const [rpc, names] = await Promise.all([
+    supabase.rpc('library_facets'),
+    supabase.from('collections').select('id, name').returns<{ id: string; name: string }[]>(),
+  ]);
+  const nameOf = new Map((names.data ?? []).map((n) => [n.id, n.name]));
+  type FacetRow = { kind: string; key: string; count: number };
+  const rows: FacetRow[] = rpc.error ? await facetRowsByScan() : ((rpc.data ?? []) as FacetRow[]);
 
+  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, categories: [], collections: [] };
+  for (const row of rows) {
+    const count = Number(row.count);
+    if (row.kind === 'total') facets.total = count;
+    else if (row.kind === 'unsorted') facets.unsorted = count;
+    else if (row.kind === 'unsure') facets.needsLook += count;
+    else if (row.kind === 'category') facets.categories.push({ key: row.key, label: row.key, count });
+    else if (row.kind === 'collection') facets.collections.push({ key: row.key, label: nameOf.get(row.key) ?? 'Collection', count });
+  }
+  facets.needsLook += facets.unsorted;
+  facets.categories.sort((a, b) => a.label.localeCompare(b.label));
+  facets.collections.sort((a, b) => a.label.localeCompare(b.label));
+  return facets;
+}
+
+async function facetRowsByScan(): Promise<{ kind: string; key: string; count: number }[]> {
+  const counts = new Map<string, number>();
+  const bump = (k: string) => counts.set(k, (counts.get(k) ?? 0) + 1);
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('posts')
@@ -86,46 +111,57 @@ export async function fetchFacets(): Promise<Facets> {
       .returns<Pick<Post, 'category' | 'collections'>[]>();
     if (error) throw new Error(error.message);
     for (const row of data ?? []) {
-      total++;
-      if (!row.category || row.category === UNCATEGORIZED) needsLook++;
-      else byCategory.set(row.category, (byCategory.get(row.category) ?? 0) + 1);
-      for (const id of row.collections ?? []) byCollection.set(id, (byCollection.get(id) ?? 0) + 1);
+      bump('total\u0000');
+      if (!row.category) bump('unsorted\u0000');
+      else if (row.category === UNCATEGORIZED) bump('unsure\u0000');
+      else bump(`category\u0000${row.category}`);
+      for (const id of row.collections ?? []) bump(`collection\u0000${id}`);
     }
     if (!data || data.length < 1000) break;
   }
+  return [...counts].map(([k, count]) => {
+    const [kind, key] = k.split('\u0000') as [string, string];
+    return { kind, key, count };
+  });
+}
 
-  const { data: names } = await supabase.from('collections').select('id, name').returns<{ id: string; name: string }[]>();
-  const nameOf = new Map((names ?? []).map((n) => [n.id, n.name]));
+/** Signed thumbnail URLs already in hand, by shortcode, so switching views re-signs nothing. */
+const signed = new Map<string, { url: string; until: number }>();
+const SIGN_SECONDS = 3600;
 
-  const sorted = (m: Map<string, number>, label: (k: string) => string): Facet[] =>
-    [...m].map(([key, count]) => ({ key, label: label(key), count })).sort((a, b) => a.label.localeCompare(b.label));
-
-  return {
-    total,
-    needsLook,
-    categories: sorted(byCategory, (k) => k),
-    collections: sorted(byCollection, (k) => nameOf.get(k) ?? 'Collection'),
-  };
+/** The URL a post's thumbnail can be shown from right now, if one is known. */
+export function knownThumbnail(post: Post): string | undefined {
+  const hit = signed.get(post.shortcode);
+  if (hit && hit.until > Date.now()) return hit.url;
+  return post.thumbnail_stored ? undefined : post.thumbnail_url || undefined;
 }
 
 /**
- * Thumbnails live in a private bucket at `{user_id}/{shortcode}.jpg`. One batch request
- * signs a page of them for an hour. Instagram's own URL is the fallback, though it expires.
+ * Thumbnails live in a private bucket at `{user_id}/{shortcode}.{webp|jpg}`. One batch
+ * request signs whatever a page still needs, for an hour. Instagram's own URL is the
+ * fallback, though it expires.
  */
-export async function signThumbnails(userId: string, posts: Post[]): Promise<Record<string, string>> {
-  const stored = posts.filter((p) => p.thumbnail_stored);
-  const urls: Record<string, string> = {};
-  if (stored.length > 0) {
-    const { data } = await supabase.storage
-      .from('thumbnails')
-      .createSignedUrls(stored.map((p) => `${userId}/${p.shortcode}.jpg`), 3600);
-    for (const item of data ?? []) {
-      const shortcode = item.path?.split('/')[1]?.replace(/\.jpg$/, '');
-      if (shortcode && item.signedUrl) urls[shortcode] = item.signedUrl;
-    }
+export async function signThumbnails(userId: string, posts: Post[]): Promise<void> {
+  const now = Date.now();
+  const need = posts.filter((p) => p.thumbnail_stored && !((signed.get(p.shortcode)?.until ?? 0) > now));
+  if (need.length === 0) return;
+  const paths = need.map((p) => `${userId}/${p.shortcode}.${p.thumbnail_format === 'webp' ? 'webp' : 'jpg'}`);
+  const { data } = await supabase.storage.from('thumbnails').createSignedUrls(paths, SIGN_SECONDS);
+  // Re-sign five minutes before the URL actually lapses.
+  const until = now + (SIGN_SECONDS - 300) * 1000;
+  for (const item of data ?? []) {
+    const shortcode = item.path?.split('/')[1]?.replace(/\.(webp|jpg)$/, '');
+    if (shortcode && item.signedUrl) signed.set(shortcode, { url: item.signedUrl, until });
   }
-  for (const p of posts) if (!urls[p.shortcode] && p.thumbnail_url) urls[p.shortcode] = p.thumbnail_url;
-  return urls;
+}
+
+/** Instagram handles arrive with or without a leading @; shown with exactly one. */
+export function handleOf(post: Pick<Post, 'handle'>): string {
+  return post.handle.replace(/^@+/, '').trim();
+}
+
+export function profileUrl(handle: string): string {
+  return `https://www.instagram.com/${encodeURIComponent(handle)}/`;
 }
 
 /**

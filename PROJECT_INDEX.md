@@ -41,7 +41,7 @@ copying the same explanation into all four.
 - The library and popup share one responsive visual system, light by default with a
   synced dark toggle. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **245 checks**. It does not replace a live
+- The regression suite currently contains **251 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question

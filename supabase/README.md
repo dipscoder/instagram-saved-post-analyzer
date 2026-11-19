@@ -8,6 +8,8 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261024090000_thumbnails_and_verdicts.sql` | The private `thumbnails` bucket, `public.verdicts` (the paid-analysis ledger, never deleted), and `posts.thumbnail_stored` |
 | `migrations/20261024140000_usage.sql` | `public.usage` (spend per user per UTC day) and `record_usage()`, which only ever adds |
 | `migrations/20261119120000_collections.sql` | `posts.collections` (ids of the Instagram collections a post was seen in) and `public.collections` (their names) |
+| `migrations/20261119150000_sharper_thumbnails.sql` | `posts.thumbnail_format` and WebP in the `thumbnails` bucket (800px copies, replacing the first 480px JPEGs) |
+| `migrations/20261119160000_library_facets.sql` | `library_facets()`: the web app's sidebar counts in one grouped query, under the caller's own RLS |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
 
 ## Applying a migration

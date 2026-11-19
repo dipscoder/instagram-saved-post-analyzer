@@ -21,6 +21,7 @@ import {
   type SafeSettings,
   type Stats,
 } from '../messaging';
+import { WEB_APP_URL } from '../config';
 import { IDLE_PROGRESS, type IndexProgress, type ProviderId, type Settings, type Theme } from '../types';
 
 interface ModelMeta {
@@ -89,13 +90,14 @@ async function init(): Promise<void> {
     // until one of them is switched on — so an unguarded throw here left a blank
     // 380x560 box with no message and no way out.
     $('setup').classList.add('on');
-    $('footLabel').textContent = 'extension not responding — reopen this popup';
+    setStatus('setupStatus', 'bad', 'The extension is not responding. Reopen this popup.');
     return;
   }
   settings = res.settings;
   providers = res.providers;
   applyTheme(settings.theme);
 
+  $<HTMLAnchorElement>('openWeb').href = WEB_APP_URL;
   wire();
   await loadAccount();
   screen = canIndex() ? 'home' : 'setup';
@@ -320,12 +322,13 @@ function renderAccount(state: AccountState): void {
   }
   $('signedOut').hidden = signedIn;
   $('signedIn').hidden = !signedIn;
+  $('accountTools').hidden = !signedIn;
   $('accountEmail').textContent = state.email ?? '';
   $('avatar').textContent = state.email?.[0]?.toUpperCase() ?? '';
   $('accountSync').textContent = state.error
     ? 'Sync failed'
     : state.lastSyncAt
-      ? `${state.synced} posts, ${state.thumbnails} thumbnails · synced ${timeAgo(state.lastSyncAt)}`
+      ? `Synced ${timeAgo(state.lastSyncAt)} · ${state.synced} posts`
       : 'Not synced yet';
 
   if (state.confirmEmail) {
@@ -519,21 +522,15 @@ function render(): void {
   // changes: re-appending on every progress push would blur a half-typed email.
   const slot = $(screen === 'setup' ? 'accountSlotSetup' : 'accountSlotHome');
   if ($('account').parentElement !== slot) slot.append($('account'));
-  // Always available from the home screen. Hiding it when there was no key meant a user
-  // who pressed "Skip" had no route back to setup at all — and the disabled primary
-  // button's own recovery branch was unreachable for the same reason.
-  $<HTMLButtonElement>('navBtn').hidden = screen === 'setup' && !canIndex();
-  $('navBtn').textContent = screen === 'home' ? 'Setup' : 'Done';
+  // Setup's key and model live under Settings on the home screen, so the header only
+  // offers a way back out of setup.
+  $<HTMLButtonElement>('navBtn').hidden = screen === 'home' || !canIndex();
+  $('navBtn').textContent = 'Done';
 
   renderSelects();
   renderSetup();
   renderHome();
 
-  $('footLabel').textContent = signedIn
-    ? 'Analysed by your account'
-    : settings.hasKey
-      ? `${providerLabel(settings.provider)} · ${settings.keyMask}`
-      : 'No key connected';
   $('ownKeyNote').hidden = !signedIn;
 }
 
@@ -605,7 +602,7 @@ function renderHome(): void {
   // starts a full re-index. Show what that button would cost instead.
   const finished = pending === 0 && total > 0 && !active;
   $('fLeft').textContent = fmtUsd(finished && quote ? quote.usd : estimateUsd);
-  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'Left, at most';
+  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'To sort the rest, at most';
   const progressTotal = progress.runTotal || total;
   const progressDone = progress.runTotal ? progress.runCompleted : categorized;
   const percent = Math.round(progressTotal ? (progressDone / progressTotal) * 100 : 0);
@@ -650,7 +647,9 @@ function renderHome(): void {
           ? `Confirm — re-index ${total} posts`
           : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
         : 'Find new posts';
-  primary.disabled = !canIndex();
+  // With nothing to sort with, the button is the way back to setup rather than a dead
+  // grey bar: someone who pressed Skip still needs a route to sign in or add a key.
+  if (!canIndex()) primary.textContent = 'Sign in to start';
 
   if (confirming === 'reindex' && quote) {
     setStatus(

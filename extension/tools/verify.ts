@@ -42,6 +42,7 @@ import {
   fromVerdictRow,
   planSync,
   planThumbnails,
+  afterCopy,
   toRow,
   toVerdictRow,
 } from '../src/background/sync-plan';
@@ -96,7 +97,12 @@ const a = extractPosts(rest);
 check('one post', a.length === 1, a.length);
 check('shortcode', a[0]?.shortcode === 'C8xK2mLp3qR', a[0]?.shortcode);
 check('handle', a[0]?.handle === '@cafe.oshi', a[0]?.handle);
-check('smallest thumbnail chosen', a[0]?.thumbnailUrl === 'https://cdn/small.jpg', a[0]?.thumbnailUrl);
+check('the grid-size thumbnail is chosen, not the 150px one', a[0]?.thumbnailUrl === 'https://cdn/big.jpg', a[0]?.thumbnailUrl);
+{
+  const sized = extractPosts({ items: [{ media: { ...(rest as { items: { media: object }[] }).items[0]!.media,
+    image_versions2: { candidates: [1080, 750, 640, 320, 150].map((w) => ({ url: `https://cdn/${w}.jpg`, width: w, height: w * 1.25 })) } } }] });
+  check('the smallest candidate at least 640px wide wins', sized[0]?.thumbnailUrl === 'https://cdn/640.jpg', sized[0]?.thumbnailUrl);
+}
 check('isVideo from media_type 2', a[0]?.isVideo === true);
 check('duration', a[0]?.durationSec === 47.3);
 check('hashtags parsed', JSON.stringify(a[0]?.hashtags) === '["recipe","food"]', a[0]?.hashtags);
@@ -654,9 +660,22 @@ console.log('\naccount sync plan');
   check('an expired thumbnail URL is not retried', planThumbnails([older], inAccount, failed).length === 0);
   check('a fresh URL retries a failed thumbnail',
     planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=2` }], inAccount, failed).length === 1);
-  const stored = new Map([['OLD', { shortcode: 'OLD', stored: true, url: '' }]]);
-  check('a stored thumbnail is never copied again',
+  const stored = new Map([['OLD', { shortcode: 'OLD', stored: true, url: '', format: 'webp' as const }]]);
+  check('a sharp stored thumbnail is never copied again',
     planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=3` }], inAccount, stored).length === 0);
+  const soft = new Map([['OLD', { shortcode: 'OLD', stored: true, url: cdn, format: 'jpg' as const }]]);
+  check('a soft old copy is replaced once a fresh URL arrives',
+    planThumbnails([{ ...older, thumbnailUrl: `${cdn}?v=4` }], inAccount, soft).length === 1 &&
+    planThumbnails([older], inAccount, soft).length === 0);
+  const softState = soft.get('OLD');
+  const small = afterCopy(softState, 'OLD', `${cdn}?v=4`, { sourceEdge: 150 });
+  check('a small source never overwrites the old copy',
+    !small.upload && small.state.stored && small.state.format === 'jpg' && small.state.url.endsWith('v=4'), small);
+  const failedUpgrade = afterCopy(softState, 'OLD', `${cdn}?v=5`, 'failed');
+  check('a failed upgrade keeps the old copy marked stored', !failedUpgrade.upload && failedUpgrade.state.stored);
+  const fresh = afterCopy(undefined, 'NEW', cdn, { sourceEdge: 640 });
+  check('a new copy is stored as WebP', fresh.upload && fresh.state.format === 'webp');
+  check('a first copy that fails is remembered as failed', !afterCopy(undefined, 'NEW', cdn, 'failed').state.stored);
 }
 
 console.log('\naccount ledger');

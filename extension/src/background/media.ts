@@ -43,19 +43,39 @@ export function isInstagramCdn(url: string): boolean {
   }
 }
 
-/** Long edge of a stored thumbnail: sharp on a grid tile, about 30 KB as JPEG. */
-const STORED_EDGE_PX = 480;
+/**
+ * The stored copy: 800px on the long edge as WebP. That is a 4:5 tile at 640×800, sharp on
+ * a retina grid, and about 50 KB, so a 20k library is around 1 GB. The first version kept
+ * 480px JPEGs made from a 150px source, which no setting could rescue.
+ */
+export const STORED_EDGE_PX = 800;
+const STORED_QUALITY = 0.8;
 
-/** Re-encodes an image as a JPEG no larger than STORED_EDGE_PX on its long edge. */
-export async function shrinkToJpeg(image: Blob): Promise<Blob> {
+/** What the model is sent. `detail: low` looks at 512px whatever it is given. */
+const MODEL_EDGE_PX = 512;
+
+/** A thumbnail redrawn no larger than `edge` on its long side, and the source's own long edge. */
+async function redraw(image: Blob, edge: number, type: string, quality: number): Promise<{ blob: Blob; sourceEdge: number }> {
   const bitmap = await createImageBitmap(image);
-  const scale = Math.min(1, STORED_EDGE_PX / Math.max(bitmap.width, bitmap.height));
+  const sourceEdge = Math.max(bitmap.width, bitmap.height);
+  const scale = Math.min(1, edge / sourceEdge);
   const width = Math.max(1, Math.round(bitmap.width * scale));
   const height = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = new OffscreenCanvas(width, height);
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not draw the thumbnail.');
+  context.imageSmoothingQuality = 'high';
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
-  return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  return { blob: await canvas.convertToBlob({ type, quality }), sourceEdge };
+}
+
+/** The account's copy of a thumbnail, and how large its source was. */
+export function toStoredThumbnail(image: Blob): Promise<{ blob: Blob; sourceEdge: number }> {
+  return redraw(image, STORED_EDGE_PX, 'image/webp', STORED_QUALITY);
+}
+
+/** A thumbnail at the size the model actually reads, so a request carries no dead weight. */
+export async function toModelImage(image: Blob): Promise<Blob> {
+  return (await redraw(image, MODEL_EDGE_PX, 'image/jpeg', 0.85)).blob;
 }

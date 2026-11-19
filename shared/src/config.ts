@@ -8,3 +8,9 @@
 
 export const SUPABASE_URL = 'https://siwmxcsrzdvvtouolvph.supabase.co';
 export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_-5zL55keE4N3Qea9sVXD8Q_imtI1lys';
+
+/**
+ * Where the web app lives. Local until it is deployed; change this one line when it has a
+ * real address and the extension's "Open your library" button follows.
+ */
+export const WEB_APP_URL = 'http://localhost:3000/';

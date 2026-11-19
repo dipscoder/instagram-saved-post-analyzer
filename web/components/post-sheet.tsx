@@ -3,7 +3,7 @@
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
-import { instagramUrl, type Post } from '@/lib/library';
+import { handleOf, instagramUrl, profileUrl, type Post } from '@/lib/library';
 
 export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?: string; onClose: () => void }) {
   return (
@@ -21,7 +21,15 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                   {post.category && post.category !== 'Uncategorized' ? post.category : 'Unknown'}
                   {post.subcategory && <span className="font-normal text-muted-foreground"> · {post.subcategory}</span>}
                 </SheetTitle>
-                <SheetDescription className="mt-0.5 text-[13px] text-muted-foreground">@{post.handle || 'instagram'}</SheetDescription>
+                <SheetDescription className="mt-0.5 text-[13px] text-muted-foreground">
+                  {handleOf(post) ? (
+                    <a href={profileUrl(handleOf(post))} target="_blank" rel="noopener noreferrer" className="hover:text-foreground hover:underline">
+                      @{handleOf(post)}
+                    </a>
+                  ) : (
+                    'Unknown account'
+                  )}
+                </SheetDescription>
               </div>
               {post.summary && <p className="text-sm leading-relaxed">{post.summary}</p>}
               {post.tags.length > 0 && (
@@ -31,7 +39,10 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                   ))}
                 </div>
               )}
-              {post.audio_track_name && <p className="text-[13px] text-muted-foreground">Audio: {post.audio_track_name}</p>}
+              {post.audio_track_name && <p className="text-[13px] text-muted-foreground">Audio · {post.audio_track_name}</p>}
+              {post.is_video && post.duration_sec ? (
+                <p className="text-[13px] text-muted-foreground">Video · {Math.round(post.duration_sec)}s</p>
+              ) : null}
               {post.caption && (
                 <div>
                   <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Caption</p>
