@@ -25,12 +25,12 @@ import {
   subscribe,
   type Broadcast,
   type SafeSettings,
-  type ReindexQuote,
   type SortKey,
   type Stats,
 } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed, type SavedCollection } from '../routes';
+import { flowButton, flowStatus } from './flow';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '@saved-index/shared/taxonomy';
 import { IDLE_PROGRESS, type IndexProgress, type PostRecord, type Theme } from '../types';
 import { styles } from './library.css';
@@ -77,8 +77,6 @@ interface State {
   error: string | null;
   /** Post opened inside the library; Instagram itself stays one explicit action away. */
   detail: PostRecord | null;
-  confirmingReindexAll: boolean;
-  reindexQuote: ReindexQuote | null;
   confirmingPost: string | null;
   actionMessage: string | null;
   /** Shared with the popup through settings; light until either one switches it. */
@@ -107,8 +105,6 @@ const state: State = {
   sweepWasFullFeed: false,
   error: null,
   detail: null,
-  confirmingReindexAll: false,
-  reindexQuote: null,
   confirmingPost: null,
   actionMessage: null,
   theme: 'light',
@@ -195,8 +191,6 @@ export function unmountLibrary(): void {
   state.strays = 0;
   state.error = null;
   state.detail = null;
-  state.confirmingReindexAll = false;
-  state.reindexQuote = null;
   state.confirmingPost = null;
   state.actionMessage = null;
   unsubscribe?.();
@@ -247,11 +241,6 @@ function onBroadcast(msg: Broadcast): void {
     return;
   }
   if (msg.type !== 'progress') return;
-
-  if (msg.progress.phase === 'running' || msg.progress.pending > 0) {
-    state.confirmingReindexAll = false;
-    state.reindexQuote = null;
-  }
 
   const moved =
     msg.progress.categorized !== state.stats.categorized ||
@@ -530,45 +519,18 @@ function renderPill(): void {
 }
 
 function pillStatus(): string {
-  const p = state.progress;
-  if (state.harvesting) return `Scanning · ${p.total} found`;
-  if (p.phase === 'running') return `Sorting ${p.runCompleted} of ${p.runTotal}`;
-  if (p.phase === 'error') return p.message ?? 'Something went wrong';
-  if (p.phase === 'paused' && p.message) return p.message;
-  if (state.strays > 0 && !state.straysDismissed) {
+  if (state.strays > 0 && !state.straysDismissed && !state.harvesting) {
     return `${state.strays} no longer saved · review in the library`;
   }
-  return indexLabel();
+  return flowStatus(state.progress, state.harvesting);
 }
 
 function pillActionLabel(): string {
-  const p = state.progress;
-  if (state.harvesting || p.phase === 'running') return 'Pause';
-  if (p.phase === 'paused' || p.phase === 'error') return 'Resume';
-  if (p.pending > 0) return `Index ${p.pending}`;
-  return state.stats.total === 0 ? 'Index this collection' : 'Scan for new';
+  return flowButton(state.progress, state.harvesting).label;
 }
 
-/**
- * Start, pause or resume — never a re-index. Re-billing posts that already have a verdict
- * needs a quote and a confirmation, and those live in the library, not in a one-click pill.
- */
 async function onPillAction(): Promise<void> {
-  if (state.progress.phase === 'running' || state.harvesting) {
-    stopHarvesting();
-    await send({ type: 'index:pause' }).catch(() => {});
-    return;
-  }
-  try {
-    await send({ type: 'index:start' });
-  } catch (err) {
-    state.progress = {
-      ...state.progress,
-      phase: 'error',
-      message: err instanceof Error ? err.message : String(err),
-    };
-    render();
-  }
+  await onIndexAction();
 }
 
 const ICON_SUN =
@@ -689,7 +651,6 @@ function listKey(): string {
     state.explainOpen,
     state.strays,
     state.straysDismissed,
-    state.confirmingReindexAll,
     state.actionMessage ?? '',
     state.error ?? '',
   ].join('|') + '|';
@@ -906,8 +867,8 @@ function blockingState(): HTMLElement | null {
     );
   }
   if (state.progress.phase === 'error') {
-    return empty('Indexing stopped', state.progress.message ?? 'Something went wrong.', {
-      label: 'Retry',
+    return empty('Sorting stopped', state.progress.message ?? 'Something went wrong.', {
+      label: 'Try again',
       run: () => void onIndexAction(),
     });
   }
@@ -915,8 +876,8 @@ function blockingState(): HTMLElement | null {
     return empty(
       'Nothing captured yet',
       'Instagram sends about a dozen posts per request, so the library fills as you scroll. ' +
-        'Index now does that scrolling for you, at a human pace, until it reaches the end.',
-      { label: 'Index now', run: () => void onIndexAction() },
+        'Find new posts does that scrolling for you, at a human pace, then sorts what it found.',
+      { label: 'Find new posts', run: () => void onIndexAction() },
     );
   }
   return null;
@@ -1005,27 +966,10 @@ function indexPanel(): HTMLElement | null {
 
   if (state.harvesting) {
     el.append(
-      h(
-        'div',
-        'panel-note',
-        'Scanning your saved feed — posts found after this run started wait for the next run.',
-      ),
+      h('div', 'panel-note', 'Scrolling this collection to find posts. Sorting starts when it reaches the end.'),
     );
   }
   if (p.phase === 'error' && p.message) el.append(h('div', 'panel-note bad', p.message));
-  if (state.confirmingReindexAll && state.reindexQuote) {
-    const q = state.reindexQuote;
-    el.append(
-      h(
-        'div',
-        'panel-note bad',
-        q.billable === 0
-          ? 'Every answer is already in the ledger, so this pass is free. Press confirm to continue.'
-          : `${q.billable} of ${q.total} posts may be sent to the model again (about ${fmtUsd(q.usd)}).`,
-      ),
-    );
-  }
-
   const toggle = h('button', 'link', state.explainOpen ? 'Hide details' : 'Details and how it works');
   toggle.addEventListener('click', () => {
     state.explainOpen = !state.explainOpen;
@@ -1047,18 +991,18 @@ function indexPanel(): HTMLElement | null {
       facts,
       h('div', 'explain', [
         explainRow(
-          '1 · Capture — free',
+          '1 · Find — free',
           'Instagram sends about a dozen posts per request, so a post can only be captured ' +
-            'once it has loaded. Scrolling captures them. Index now scrolls for you with ' +
-            'randomised pauses and stops the moment Instagram rate-limits the page. No extra ' +
-            'requests are ever made to Instagram.',
+            'once it has loaded. Find new posts scrolls for you with randomised pauses and ' +
+            'stops the moment Instagram rate-limits the page. No extra requests are ever ' +
+            'made to Instagram.',
         ),
         explainRow(
-          '2 · Categorise — the part that costs',
+          '2 · Sort — the part that costs',
           'Hashtag and keyword rules label what they can for nothing. The rest go to your ' +
             'model in batches of 25 captions. Only posts with no usable caption cost a look at ' +
-            'the thumbnail. Each run freezes its post count when it starts, so newly found ' +
-            'posts wait for the next run instead of moving the finish line.',
+            'the thumbnail. Sorting starts by itself when finding reaches the end, and never ' +
+            'scrolls.',
         ),
         explainRow(
           'Where it all lives',
@@ -1074,13 +1018,7 @@ function indexPanel(): HTMLElement | null {
 }
 
 function panelTitle(): string {
-  const p = state.progress;
-  if (p.phase === 'running') return `Indexing · ${p.runCompleted} of ${p.runTotal}`;
-  if (p.phase === 'error') return 'Indexing stopped';
-  if (p.phase === 'paused') return `Paused · ${p.runCompleted} of ${p.runTotal}`;
-  if (state.harvesting) return 'Looking for more saved posts';
-  if (p.pending > 0) return `${p.pending} post${p.pending === 1 ? '' : 's'} waiting to be indexed`;
-  return `${p.total} post${p.total === 1 ? '' : 's'} indexed`;
+  return flowStatus(state.progress, state.harvesting);
 }
 
 /** One line under the title: where things stand and what it has cost. */
@@ -1351,46 +1289,22 @@ function empty(
 
 // --- actions ----------------------------------------------------------------
 
+/**
+ * The one indexing button, wherever it appears: pause, sort what was found, or find more.
+ * The label comes from the same rules (page/flow.ts), so it always says what will happen.
+ */
 async function onIndexAction(): Promise<void> {
-  if (state.progress.phase === 'running' || state.harvesting) {
-    state.confirmingReindexAll = false;
-    stopHarvesting();
-    await send({ type: 'index:pause' });
-    return;
-  }
-
-  if (state.progress.pending > 0) {
-    state.confirmingReindexAll = false;
-    state.reindexQuote = null;
-  }
-
-  // Everything captured is already categorised, so the only useful action left is a
-  // fresh pass over the lot.
-  if (state.progress.phase === 'done' && state.progress.pending === 0 && state.stats.total > 0) {
-    if (!state.confirmingReindexAll) {
-      try {
-        state.reindexQuote = await send<ReindexQuote>({ type: 'index:quote' });
-        state.confirmingReindexAll = true;
-        render();
-      } catch (err) {
-        state.error = err instanceof Error ? err.message : String(err);
-        render();
-      }
-      return;
-    }
-    state.confirmingReindexAll = false;
-  }
-
-  // Two halves, and they run together: the harvester scrolls the page so the capture
-  // layer sees every saved post, while the worker categorises whatever has landed.
-  // Only the page can scroll, so the harvester has to live here, not in the worker.
+  const { action } = flowButton(state.progress, state.harvesting);
   try {
-    await send({
-      type:
-        state.progress.phase === 'done' && state.progress.pending === 0
-          ? 'index:reindex'
-          : 'index:start',
-    });
+    if (action === 'pause') {
+      stopHarvesting();
+      await send({ type: 'index:pause' });
+    } else if (action === 'sort') {
+      await send({ type: 'index:start' });
+    } else {
+      // The worker answers with a harvest broadcast, which starts the scroll here.
+      await send({ type: 'find:start' });
+    }
   } catch (err) {
     state.progress = {
       ...state.progress,
@@ -1482,20 +1396,7 @@ function indexLabel(): string {
 }
 
 function primaryLabel(): string {
-  if (state.harvesting || state.progress.phase === 'running') return 'Pause';
-  switch (state.progress.phase) {
-    case 'paused':
-    case 'error':
-      return 'Resume';
-    case 'done':
-      if (state.progress.pending > 0) return `Index ${state.progress.pending}`;
-      if (state.confirmingReindexAll) return 'Confirm re-index';
-      return state.reindexQuote
-        ? `Re-index · ${fmtUsd(state.reindexQuote.usd)}`
-        : 'Re-index';
-    default:
-      return state.stats.total === 0 ? 'Index now' : 'Keep indexing';
-  }
+  return flowButton(state.progress, state.harvesting).label;
 }
 
 function modKeyLabel(): string {
