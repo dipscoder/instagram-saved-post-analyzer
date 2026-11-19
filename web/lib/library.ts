@@ -105,15 +105,15 @@ async function facetRowsByScan(): Promise<{ kind: string; key: string; count: nu
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('posts')
-      .select('category, collections')
+      .select('category, collections, categorized_at')
       .order('shortcode')
       .range(from, from + 999)
-      .returns<Pick<Post, 'category' | 'collections'>[]>();
+      .returns<(Pick<Post, 'category' | 'collections'> & { categorized_at: string | null })[]>();
     if (error) throw new Error(error.message);
     for (const row of data ?? []) {
       bump('total\u0000');
-      if (!row.category) bump('unsorted\u0000');
-      else if (row.category === UNCATEGORIZED) bump('unsure\u0000');
+      if (!row.categorized_at) bump('unsorted\u0000');
+      else if (!row.category || row.category === UNCATEGORIZED) bump('unsure\u0000');
       else bump(`category\u0000${row.category}`);
       for (const id of row.collections ?? []) bump(`collection\u0000${id}`);
     }

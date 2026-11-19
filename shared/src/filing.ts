@@ -4,7 +4,7 @@
  * the account's) must file a post the same way.
  */
 
-import { TAXONOMY_PROMPT_BLOCK } from './taxonomy';
+import { normalizeCategory, normalizeSubcategory, TAXONOMY_PROMPT_BLOCK, type RuleMatch } from './taxonomy';
 
 /** One post's answer. A shape over parsed JSON: every field is coerced before use. */
 export interface ModelResult {
@@ -78,3 +78,112 @@ export function resultsFrom(parsed: { results?: ModelResult[] } | ModelResult[])
 export function parseResults(text: string): ModelResult[] {
   return resultsFrom(parseJsonLoose<{ results?: ModelResult[] } | ModelResult[]>(text));
 }
+
+// --- one post, filed the same way everywhere -----------------------------------------
+
+/** What filing reads from a post: the extension's record and the account's row both map to it. */
+export interface FilingInput {
+  handle: string;
+  caption: string;
+  hashtags: string[];
+  altText: string | null;
+  isVideo: boolean;
+  durationSec: number | null;
+  audioTrackName: string | null;
+}
+
+/** The categorisation a post ends up with. */
+export interface Filed {
+  category: string | null;
+  subcategory: string | null;
+  tags: string[];
+  summary: string | null;
+}
+
+/** Bumped only for a change to a verdict record's own shape. */
+export const LEDGER_VERSION = 2;
+
+const CAPTION_CHAR_BUDGET = 400;
+
+/**
+ * Everything about a post that reaches the model, minus the batch position.
+ *
+ * The ledger hashes exactly this, so "has anything changed since we paid for the answer?"
+ * compares the bytes that were actually sent. The id is excluded deliberately: it is a
+ * position within one batch, and hashing it would make an identical post look different
+ * for no reason other than where it landed in a list. The server files with this same
+ * function, so a verdict it writes is fresh to the extension and never bought twice.
+ */
+export function signature(p: FilingInput): string {
+  const parts = [p.handle];
+  if (p.isVideo) parts.push(p.durationSec ? `video ${Math.round(p.durationSec)}s` : 'video');
+  if (p.audioTrackName) parts.push(`audio: ${p.audioTrackName}`);
+
+  const lines = [parts.join(' | ')];
+  const caption = p.caption.replace(/\s+/g, ' ').trim().slice(0, CAPTION_CHAR_BUDGET);
+  lines.push(`caption: ${caption || '(none)'}`);
+  if (p.altText) lines.push(`alt text: ${p.altText.replace(/\s+/g, ' ').slice(0, 200)}`);
+  if (p.hashtags.length) lines.push(`hashtags: ${p.hashtags.slice(0, 12).join(' ')}`);
+  return lines.join('\n');
+}
+
+/** Enough to file from text alone. Anything else falls through to the thumbnail. */
+export function hasTextSignal(p: Pick<FilingInput, 'caption' | 'hashtags' | 'altText'>): boolean {
+  return (
+    p.caption.trim().length >= 15 ||
+    p.hashtags.length >= 2 ||
+    (p.altText ?? '').trim().length >= 25
+  );
+}
+
+/**
+ * A model's answer as a filing. A low-confidence answer is worse than no answer: it
+ * buries the post under a category you will never think to look in. Keep the summary,
+ * drop the guess, and the post shows up under Uncategorized, still searchable.
+ *
+ * Every field is coerced rather than trusted. `ModelResult` is a TypeScript shape over
+ * `JSON.parse` output and guarantees nothing at runtime.
+ */
+export function filedFromResult(p: FilingInput, r: ModelResult): Filed {
+  const confidence = text(r.confidence).toLowerCase();
+  const confident = confidence === 'high' || confidence === 'medium';
+  const category = confident ? normalizeCategory(text(r.category)) : null;
+  return {
+    category,
+    subcategory: normalizeSubcategory(category, text(r.subcategory)),
+    tags: [
+      ...new Set(
+        (Array.isArray(r.tags) ? r.tags : [])
+          .map((t) => String(t).trim().toLowerCase().slice(0, 48))
+          .filter(Boolean),
+      ),
+    ].slice(0, 4),
+    summary: (text(r.summary) || firstLine(p.caption) || '').replace(/\s+/g, ' ').slice(0, 160) || null,
+  };
+}
+
+/** A filing from the free keyword rules. */
+export function filedByRules(p: FilingInput, hit: RuleMatch): Filed {
+  return {
+    category: hit.category,
+    subcategory: hit.subcategory,
+    tags: p.hashtags.slice(0, 4),
+    summary: firstLine(p.caption) || firstLine(p.altText ?? '') || hit.category,
+  };
+}
+
+export function firstLine(caption: string): string {
+  const line = caption.split('\n').find((l) => l.trim().length > 0) ?? '';
+  return line.trim().slice(0, 120);
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * The most sorting one post on the account's server costs, rounded up, for the quote
+ * shown before a run. A post filed alone with its picture costs about $0.0006; one in a
+ * batch of 25 costs a fraction of that, and keyword rules cost nothing.
+ */
+export const SERVER_QUOTE_USD_PER_POST = 0.0008;

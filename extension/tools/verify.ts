@@ -43,9 +43,18 @@ import {
   planSync,
   planThumbnails,
   afterCopy,
+  adoptVerdicts,
   toRow,
   toVerdictRow,
 } from '../src/background/sync-plan';
+import {
+  MAX_SORT_POSTS,
+  parseSortRequest,
+  planSort,
+  verdictRow,
+  type SortRow,
+} from '../../supabase/functions/sort/plan';
+import { signature as extensionSignature } from '../src/background/filing';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
 import {
@@ -915,6 +924,51 @@ console.log('\nweb app search');
   check('one term matches text by substring and arrays by element',
     one.includes('caption.ilike.*tokyo*') && one.includes('tags.cs.{tokyo}'), one);
   check('an empty query adds no filter', searchFilters('  !! ').length === 0);
+}
+
+console.log('\nserver sorting');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
+    duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
+    ...over,
+  });
+  const textual = row({ shortcode: 'T', caption: 'A slow Sunday walk along the canal, thinking about nothing much' });
+  const ruled = row({ shortcode: 'R', caption: 'Easy pasta recipe for dinner', hashtags: ['recipe', 'food', 'cooking'] });
+  const picture = row({ shortcode: 'P', thumbnail_stored: true, thumbnail_format: 'webp' });
+  const blank = row({ shortcode: 'B' });
+  const done = row({ shortcode: 'D', caption: textual.caption, categorized_at: '2026-11-19T10:00:00Z' });
+  const plan = planSort([textual, ruled, picture, blank, done]);
+  check('an already sorted post is never sent again', ![...plan.text, ...plan.vision, ...plan.unreadable].some((r) => r.shortcode === 'D') && !plan.ruled.some((r) => r.row.shortcode === 'D'));
+  check('keyword rules file a post for free', plan.ruled.length === 1 && plan.ruled[0]!.row.shortcode === 'R', plan.ruled);
+  check('a post with text goes to the text batch', plan.text.map((r) => r.shortcode).join() === 'T');
+  check('a post with only a stored thumbnail goes to vision', plan.vision.map((r) => r.shortcode).join() === 'P');
+  check('a post with neither is reported, not billed', plan.unreadable.map((r) => r.shortcode).join() === 'B');
+  const many = planSort(Array.from({ length: 6 }, (_, i) => row({ shortcode: `V${i}`, thumbnail_stored: true })));
+  check('at most four vision posts per request', many.vision.length === 4 && many.unreadable.length === 2);
+
+  const post = toRecord({
+    shortcode: 'T', permalink: '', handle: '@cafe.oshi', caption: textual.caption, hashtags: [],
+    thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null,
+  });
+  const v = verdictRow(textual, { category: 'Travel', subcategory: null, tags: [], summary: 'x' }, 'm', new Date());
+  check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(extensionSignature(post)));
+
+  check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).join() === 'A,B');
+  let refused = 0;
+  for (const bad of [{}, { shortcodes: [] }, { shortcodes: ['a/b'] }, { shortcodes: Array(MAX_SORT_POSTS + 1).fill('A') }]) {
+    try { parseSortRequest(bad); } catch { refused++; }
+  }
+  check('a malformed sort request is refused', refused === 4);
+
+  const verdict = (shortcode: string, at: number, modelUsed = 'm') => ({
+    shortcode, category: 'Travel', subcategory: null, tags: [], summary: 's', modelUsed, categorizedAt: at,
+    inputHash: 'h', taxonomyHash: 't', rulesHash: 'r', ledgerVersion: 2,
+  });
+  const unsorted = { ...post, shortcode: 'U' };
+  const newer = { ...post, shortcode: 'N', category: 'Food', categorizedAt: 5_000 };
+  const adopted = adoptVerdicts([unsorted, newer, { ...post, shortcode: 'K' }], [verdict('U', 1_000), verdict('N', 2_000), verdict('K', 1_000, 'skipped')]);
+  check('a server verdict sorts a post the extension never sorted', adopted.length === 1 && adopted[0]!.shortcode === 'U' && adopted[0]!.category === 'Travel', adopted);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);

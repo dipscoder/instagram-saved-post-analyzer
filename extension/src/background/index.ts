@@ -386,6 +386,8 @@ async function handle(req: Request): Promise<unknown> {
     }
 
     case 'account:get':
+      // Opening the popup is a good moment to pick up posts sorted in the web app.
+      scheduleSync(500);
       return accountState();
 
     case 'account:sign-in':

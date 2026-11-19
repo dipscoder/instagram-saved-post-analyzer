@@ -32,5 +32,10 @@ views. Sidebar counts come from `library_facets()`, one grouped query, with a sc
 fallback until that migration runs. A view that is loading shows skeletons sized to its
 known count, never "nothing here".
 
+**Sorting.** Needs a look has a Sort button for posts never sorted. The first press
+fetches them and shows the most the run can cost; the second sends them to the `sort`
+Edge Function in batches (25 with text, 4 that need their picture), newest saved first,
+with Stop. See `lib/sorting.ts` and `supabase/README.md`.
+
 **Not yet.** Vector search (Phase 3 adds embeddings and hybrid search behind the same box),
 editing a category from the panel, and deployment to Vercel.
