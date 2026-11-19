@@ -248,16 +248,19 @@ async function handle(req: Request): Promise<unknown> {
       return { post, progress: await categorizer.progress() };
     }
 
+    // Sorting and finding are separate on purpose (see page/flow.ts): sorting never
+    // scrolls, and finding hands over to sorting itself when it reaches the end.
     case 'index:start': {
       if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
-      // Freeze the queue before scrolling starts. A response can arrive immediately
-      // after the harvest broadcast; reversing these two lines let it sneak into what
-      // was supposed to be a fixed-size run.
       await categorizer.start();
-      setHarvest('start');
       trackCompletion();
       return categorizer.progress();
     }
+
+    case 'find:start':
+      // Free: scrolling only lets Instagram load what it would load anyway.
+      setHarvest('start');
+      return categorizer.progress();
 
     case 'index:pause':
       setHarvest('stop');
@@ -269,7 +272,6 @@ async function handle(req: Request): Promise<unknown> {
       // Without the catch, a failed `resetCategories` rejected into `void`: the page was
       // already scrolling, the button already said Pause, and nothing ever ran.
       await categorizer.reindex();
-      setHarvest('start');
       trackCompletion();
       return categorizer.progress();
 
@@ -278,6 +280,11 @@ async function handle(req: Request): Promise<unknown> {
       // popup/content port to connect replayed "start" and silently began another sweep.
       if (req.reason === 'rate-limited') categorizer.pause();
       if (harvesting) setHarvest('stop');
+      // Reaching the end is the hand-over: sort what was found, as the button promised.
+      // A pause or a rate-limit leaves the found posts waiting for the user.
+      if (req.reason === 'complete' && (await canIndex()) && !categorizer.isRunning()) {
+        void categorizer.start().then(() => trackCompletion()).catch(reportFailure);
+      }
       return { stopped: true, reason: req.reason };
 
     case 'index:quote':

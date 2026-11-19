@@ -28,8 +28,9 @@ copying the same explanation into all four.
   `supabase/` (migrations and the `analyze` Edge Function). `web/` is reserved for the
   planned web app. OpenAI is the only model provider.
 - Saved-post capture is restricted by route, payload context, and DOM scope.
-- An indexing run freezes its initial pending shortcodes, processes exactly that set, and
-  leaves posts discovered while scrolling for the next run.
+- Finding and sorting are separate (`src/page/flow.ts`): Find new posts scrolls the open
+  collection and hands over to sorting when it reaches the end; sorting never scrolls. A
+  sorting run freezes its starting set and processes exactly that set.
 - Classification uses deterministic rules first, batched text analysis second, and a
   bounded thumbnail fallback only when text is insufficient.
 - Individual posts can be re-indexed from their detail view. The action intentionally
@@ -40,7 +41,7 @@ copying the same explanation into all four.
 - The library and popup share one responsive visual system, light by default with a
   synced dark toggle. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **227 checks**. It does not replace a live
+- The regression suite currently contains **238 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question

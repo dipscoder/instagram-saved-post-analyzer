@@ -74,15 +74,21 @@ you press it, how many posts actually need the model and what they will cost.
 
 ## How indexing actually works
 
-This is the part that looks like one thing and is really two. Only the second half costs
-money.
+Two jobs, and one button that only ever does what its label says. Only the second job
+costs money.
 
-**1 — Capture (free).** Instagram sends about a dozen posts per network request. A post
-cannot be captured before it has loaded, so *the library fills as you scroll*. If you have
-1,000 saved posts and 30 are on screen, 30 is what exists so far. An indexing run snapshots
-those 30 before auto-scroll begins and stops after those 30; posts discovered during the
-scan are shown as waiting for the next run. Auto-scroll pages to the bottom with randomised
-800–2000 ms pauses and stops immediately if Instagram returns a 429. It makes no requests
+| The button says | What happens |
+|---|---|
+| **Find new posts** | Scrolls the open collection to the end, then sorts what it found by itself |
+| **Sort 34 posts** | Sorts posts already found. Never scrolls |
+| **Resume sorting** | Carries on a paused sort where it stopped. Never scrolls |
+| **Pause** | Stops whichever job is running |
+
+**1 — Find (free).** Instagram sends about a dozen posts per network request. A post
+cannot be found before it has loaded, so *the library fills as you scroll*. If you have
+1,000 saved posts and 30 are on screen, 30 is what exists so far. Find new posts scrolls to
+the bottom with randomised 800–2000 ms pauses and stops immediately if Instagram returns a
+429; posts found before a pause or a 429 wait under **Sort**. It makes no requests
 of its own — it reads the responses the page was fetching anyway.
 
 Capture only runs on your saved page, only reads the part of a response that Instagram
@@ -90,8 +96,8 @@ names as the saved feed, and only scrapes inside the saved grid. All three matte
 `/graphql/query` is one endpoint for the whole site: without them, opening a saved reel
 meant the "more from this creator" strip got indexed too.
 
-**Something in your library you never saved?** Press **Index now** and let it run to the
-end. A completed sweep sees everything still saved, so anything it doesn't find is offered
+**Something in your library you never saved?** Open **All posts**, press **Find new
+posts** and let it run to the end. A completed sweep sees everything still saved, so anything it doesn't find is offered
 up for removal — posts you have unsaved since, and anything an older build picked up
 elsewhere. Everything genuine keeps the summary you already paid for.
 
@@ -327,7 +333,7 @@ button on *our* control bar, which is what records that you want sound. Instagra
 speaker icon doesn't.
 
 **Only a handful of posts show up.** That is capture working as designed — see *How
-indexing actually works* above. Press **Index now** and leave the tab open.
+indexing actually works* above. Press **Find new posts** and leave the tab open.
 
 **The video scrubber won't seek.** You are looking at the browser's own control strip, not
 ours. Tell them apart by the buttons: Chrome's has a fullscreen icon and a `⋮` menu, ours
