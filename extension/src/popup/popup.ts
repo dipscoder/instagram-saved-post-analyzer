@@ -484,8 +484,15 @@ async function onPrimary(): Promise<void> {
   }
   confirming = null;
 
-  const type =
-    active ? 'index:pause' : finished ? 'index:reindex' : 'index:start';
+  // Same rules as the pill: sorting never scrolls, finding scrolls the open collection
+  // and sorts what it found. Re-index stays here, behind its quote and confirmation.
+  const type = active
+    ? 'index:pause'
+    : finished
+      ? 'index:reindex'
+      : progress.pending > 0
+        ? 'index:start'
+        : 'find:start';
 
   try {
     progress = await send<IndexProgress>({ type });
@@ -493,11 +500,11 @@ async function onPrimary(): Promise<void> {
     return fail('homeStatus')(err);
   }
 
-  if (type === 'index:start' && progress.total === 0) {
+  if (type === 'find:start') {
     setStatus(
       'homeStatus',
       '',
-      'Open your saved posts on Instagram — there is nothing captured to index yet.',
+      'Finding happens in an open saved collection on Instagram. Open one and it starts scrolling there.',
     );
   }
   render();
@@ -607,42 +614,42 @@ function renderHome(): void {
 
   $('homeTitle').textContent =
     harvesting && total === 0
-      ? 'Scanning saved posts'
+      ? 'Finding posts'
       : total === 0
-      ? 'Nothing captured yet'
+      ? 'Nothing found yet'
       : running
-        ? `Indexing ${progress.runTotal} detected posts`
+        ? `Sorting ${progress.runCompleted} of ${progress.runTotal}`
         : harvesting
-          ? 'Scanning saved posts'
+          ? 'Finding posts'
           : pending > 0
-            ? `${pending} post${pending === 1 ? '' : 's'} waiting`
-            : 'Everything captured is indexed';
+            ? `${pending} post${pending === 1 ? '' : 's'} found, not sorted yet`
+            : 'Everything found is sorted';
 
   $('homeBody').textContent =
     harvesting && total === 0
-      ? 'Keep the Instagram tab open. Posts found in this scan will wait for the next indexing run.'
+      ? 'Keep the Instagram tab open. Sorting starts by itself when it reaches the end.'
       : total === 0
-      ? 'Open your saved posts on Instagram. Posts are captured as they load, so the ' +
-        'library fills as you scroll — or press the button below and it scrolls for you.'
+      ? 'Open a saved collection on Instagram and press Find new posts in the corner. ' +
+        'It scrolls for you, then sorts what it found.'
       : running
-        ? `This run stops after its starting set. New posts found while scanning wait for the next run.`
+        ? 'Sorting never scrolls. Pause any time; it picks up where it stopped.'
         : harvesting
-          ? 'Keep the Instagram tab open. Scanning does not send extra Instagram requests.'
+          ? 'Keep the Instagram tab open. Finding does not send extra Instagram requests.'
           : pending > 0
-            ? 'Captured but not summarised yet. Indexing always resumes where it stopped.'
-            : 'New saves are captured as you scroll and categorised in the background.';
+            ? 'Press Sort to categorise them. It picks up where it stopped.'
+            : 'New saves are found as you scroll and sorted in the background.';
 
   const primary = $<HTMLButtonElement>('primary');
   primary.classList.toggle('danger', confirming === 'reindex');
   primary.textContent = active
     ? 'Pause'
     : pending > 0
-      ? `Index ${pending} post${pending === 1 ? '' : 's'}`
+      ? `Sort ${pending} post${pending === 1 ? '' : 's'}`
       : total > 0
         ? confirming === 'reindex'
           ? `Confirm — re-index ${total} posts`
           : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
-        : 'Index now';
+        : 'Find new posts';
   primary.disabled = !canIndex();
 
   if (confirming === 'reindex' && quote) {

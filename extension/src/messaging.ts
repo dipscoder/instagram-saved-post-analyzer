@@ -64,7 +64,10 @@ export type Request =
   | { type: 'posts:strays'; since: number }
   | { type: 'posts:prune'; since: number }
   | { type: 'post:reindex'; shortcode: string }
+  /** Sort the posts already found. Never scrolls. */
   | { type: 'index:start' }
+  /** Scroll the open collection to find posts; sorting follows when it reaches the end. */
+  | { type: 'find:start' }
   | { type: 'index:pause' }
   | { type: 'index:reindex' }
   /** What a re-index would actually cost, given what the ledger already holds. */
