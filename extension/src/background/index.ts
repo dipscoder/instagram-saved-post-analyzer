@@ -330,6 +330,13 @@ async function handle(req: Request): Promise<unknown> {
       return safe;
     }
 
+    case 'theme:set': {
+      await setSettings({ theme: req.theme === 'dark' ? 'dark' : 'light' });
+      const safe = await getSafeSettings();
+      broadcast({ type: 'settings', settings: safe });
+      return safe;
+    }
+
     case 'settings:clear-key': {
       // Stop first: a run that loses its key mid-flight would otherwise fail noisily.
       categorizer.pause();

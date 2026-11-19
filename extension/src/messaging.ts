@@ -72,6 +72,8 @@ export type Request =
   | { type: 'library:url' }
   | { type: 'settings:get' }
   | { type: 'settings:set'; patch: Partial<Settings> }
+  /** The one setting the library on instagram.com may change. */
+  | { type: 'theme:set'; theme: Settings['theme'] }
   | { type: 'settings:clear-key' }
   | { type: 'settings:test-key' }
   /** Test before persistence so an invalid replacement never becomes the active key. */

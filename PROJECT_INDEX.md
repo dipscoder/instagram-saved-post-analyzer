@@ -37,9 +37,10 @@ copying the same explanation into all four.
 - Indexed posts and purchased analysis live in IndexedDB and, when signed in, mirror to a
   Supabase account (posts, thumbnails, and the ledger). Signed in, analysis runs through
   the account's `analyze` function and no OpenAI key is needed in the browser.
-- The library and popup share one responsive visual system. Expired or unavailable media
+- The library and popup share one responsive visual system, light by default with a
+  synced dark toggle. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **200 checks**. It does not replace a live
+- The regression suite currently contains **203 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question

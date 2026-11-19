@@ -18,6 +18,7 @@ import {
   send,
   subscribe,
   type Broadcast,
+  type SafeSettings,
   type ReindexQuote,
   type SortKey,
   type Stats,
@@ -25,7 +26,7 @@ import {
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed } from '../routes';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '@saved-index/shared/taxonomy';
-import { IDLE_PROGRESS, type IndexProgress, type PostRecord } from '../types';
+import { IDLE_PROGRESS, type IndexProgress, type PostRecord, type Theme } from '../types';
 import { styles } from './library.css';
 
 const NAV_RAIL_PX = 72; // Instagram's own icon rail; left visible and usable
@@ -72,6 +73,8 @@ interface State {
   reindexQuote: ReindexQuote | null;
   confirmingPost: string | null;
   actionMessage: string | null;
+  /** Shared with the popup through settings; light until either one switches it. */
+  theme: Theme;
 }
 
 const state: State = {
@@ -99,6 +102,7 @@ const state: State = {
   reindexQuote: null,
   confirmingPost: null,
   actionMessage: null,
+  theme: 'light',
 };
 
 let host: HTMLDivElement | null = null;
@@ -123,6 +127,7 @@ let elSort: HTMLSelectElement | null = null;
 let elSeg: HTMLElement | null = null;
 let elWhere: HTMLElement | null = null;
 let elBack: HTMLButtonElement | null = null;
+let elTheme: HTMLElement | null = null;
 
 export function mountLibrary(): void {
   if (host) return;
@@ -139,11 +144,15 @@ export function mountLibrary(): void {
   const sheet = document.createElement('style');
   sheet.textContent = styles;
   shadow.append(sheet, buildShell());
+  applyTheme(state.theme);
   document.body.appendChild(host);
 
   document.addEventListener('keydown', onShortcut, true);
   setPageInert(true);
   unsubscribe = subscribe(onBroadcast);
+  void send<{ settings: SafeSettings }>({ type: 'settings:get' })
+    .then((res) => applyTheme(res.settings.theme))
+    .catch(() => {});
   void refresh();
   render();
 }
@@ -182,7 +191,7 @@ export function unmountLibrary(): void {
   shadow = null;
   elApp = elRestore = elRail = elMain = elIndexLabel = null;
   elTitle = elCount = elSeg = elWhere = null;
-  elBack = null;
+  elBack = elTheme = null;
   elSearch = null;
   elSort = null;
 }
@@ -206,6 +215,10 @@ function setPageInert(on: boolean): void {
 }
 
 function onBroadcast(msg: Broadcast): void {
+  if (msg.type === 'settings') {
+    applyTheme(msg.settings.theme);
+    return;
+  }
   if (msg.type === 'posts:updated') {
     queueRefresh();
     return;
@@ -349,10 +362,17 @@ function buildShell(): DocumentFragment {
   header.append(search);
 
   const right = h('div', 'header-right');
-  elIndexLabel = h('span', 'mono muted');
+  elIndexLabel = h('span', 'status-label');
   elIndexLabel.setAttribute('aria-live', 'polite');
+  elTheme = h('button', 'icon-btn');
+  elTheme.addEventListener('click', () => {
+    const next: Theme = state.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    // The popup follows through the settings broadcast.
+    void send({ type: 'theme:set', theme: next }).catch(() => {});
+  });
   elWhere = whereSwitch();
-  right.append(elIndexLabel, elWhere);
+  right.append(elIndexLabel, elTheme, elWhere);
   header.append(right);
 
   // --- toolbar: how *this* list is presented. Persistent, so an open <select> or a
@@ -363,7 +383,7 @@ function buildShell(): DocumentFragment {
   elBack.addEventListener('click', closeDetail);
   toolbar.append(elBack);
   elTitle = h('h1', 'title');
-  elCount = h('span', 'mono muted');
+  elCount = h('span', 'count-label');
   // Announced, because a search that returns nothing is otherwise completely silent.
   elCount.setAttribute('aria-live', 'polite');
   toolbar.append(elTitle, elCount);
@@ -414,7 +434,7 @@ function buildShell(): DocumentFragment {
   elRestore = h('button', 'restore', [
     h('span', 'brand-mark'),
     h('span', '', 'Saved Index'),
-    h('span', 'mono restore-key', shortcutLabel()),
+    h('span', 'restore-key', shortcutLabel()),
   ]);
   elRestore.title = `Show the library (${shortcutLabel()})`;
   elRestore.addEventListener('click', () => setVisible(true));
@@ -478,6 +498,24 @@ function onShortcut(ev: KeyboardEvent): void {
   setVisible(!state.visible);
 }
 
+const ICON_SUN =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>';
+const ICON_MOON =
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
+const ICON_PLAY = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>';
+
+/** Light or dark, on the shadow host so every token in library.css follows. */
+function applyTheme(theme: Theme | undefined): void {
+  state.theme = theme === 'dark' ? 'dark' : 'light';
+  host?.setAttribute('data-theme', state.theme);
+  if (elTheme) {
+    const toDark = state.theme === 'light';
+    elTheme.innerHTML = toDark ? ICON_MOON : ICON_SUN;
+    elTheme.title = toDark ? 'Switch to dark' : 'Switch to light';
+    elTheme.setAttribute('aria-label', elTheme.title);
+  }
+}
+
 function shortcutLabel(): string {
   return navigator.userAgent.includes('Mac') ? '⌥S' : 'Alt+S';
 }
@@ -502,6 +540,9 @@ function render(): void {
   if (elSearch.value !== state.search) elSearch.value = state.search;
   if (elSort.value !== state.sort) elSort.value = state.sort;
   elIndexLabel.textContent = indexLabel();
+  const busy = state.harvesting || state.progress.phase === 'running';
+  const done = state.stats.total > 0 && state.stats.categorized === state.stats.total;
+  elIndexLabel.className = `status-label${busy ? ' busy' : done ? ' done' : ''}`;
 
   const names = [...state.selected];
   elTitle.textContent = state.detail
@@ -568,6 +609,10 @@ function listKey(): string {
     state.sort,
     [...state.selected].join(','),
     state.progress.phase,
+    // The panel's counts and spend. They only move when a batch lands, so this adds no
+    // rebuilds beyond the ones the batch already causes; without them the panel could
+    // keep a count from before the first progress push.
+    progressKey(state.progress),
     state.harvesting,
     state.panelDismissed,
     state.explainOpen,
@@ -583,12 +628,17 @@ function listKey(): string {
   return key;
 }
 
+function progressKey(p: IndexProgress): string {
+  return [p.total, p.categorized, p.pending, p.runTotal, p.runCompleted, fmtUsd(p.spentUsd), fmtUsd(p.estimateUsd)].join(':');
+}
+
 function railRows(): Node[] {
   const rows: Node[] = [];
 
   const all = h('button', `rail-row${state.selected.size === 0 ? ' on' : ''}`, [
+    h('span', 'dot dot-all'),
     h('span', '', 'All saved'),
-    h('span', 'mono count', String(state.stats.total)),
+    h('span', 'count', String(state.stats.total)),
   ]);
   all.dataset['focus'] = 'rail:all';
   all.addEventListener('click', () => {
@@ -628,9 +678,12 @@ function railRows(): Node[] {
  */
 function railRow(name: string, count: number): HTMLElement {
   const on = state.selected.has(name);
+  const dot = h('span', name === UNCATEGORIZED ? 'dot dot-none' : 'dot');
+  dot.style.setProperty('--hue', String(hueFor(name)));
   const row = h('button', `rail-row${on ? ' on' : ''}`, [
+    dot,
     h('span', '', name),
-    h('span', 'mono count', String(count)),
+    h('span', 'count', String(count)),
   ]);
   row.dataset['focus'] = `rail:${name}`;
   row.setAttribute('aria-pressed', String(on));
@@ -721,7 +774,7 @@ function mainRows(): Node[] {
       state.limit += PAGE_SIZE;
       void refresh();
     });
-    more.append(btn, h('span', 'mono muted', `${state.posts.length} of ${state.matches}`));
+    more.append(btn, h('span', 'muted num', `${state.posts.length} of ${state.matches}`));
     rows.push(more);
   }
 
@@ -824,7 +877,9 @@ function indexPanel(): HTMLElement | null {
   const el = h('div', `panel ${p.phase}`);
 
   const top = h('div', 'panel-top');
-  top.append(h('span', 'panel-title', panelTitle()));
+  top.append(
+    h('div', 'panel-text', [h('span', 'panel-title', panelTitle()), h('span', 'panel-sub', panelSub())]),
+  );
 
   const actions = h('div', 'panel-actions');
   const primary = h('button', 'pill', primaryLabel());
@@ -849,17 +904,6 @@ function indexPanel(): HTMLElement | null {
   track.append(fill);
   el.append(track);
 
-  const facts = h('div', 'facts');
-  facts.append(
-    fact(String(p.total), 'captured'),
-    fact(String(p.categorized), 'indexed'),
-    fact(String(Math.max(0, p.runTotal - p.runCompleted)), 'in this run'),
-    fact(String(p.pending), 'waiting total'),
-    fact(fmtUsd(p.spentUsd), 'spent'),
-    fact(fmtUsd(p.estimateUsd), 'left, at most'),
-  );
-  el.append(facts);
-
   if (state.harvesting) {
     el.append(
       h(
@@ -883,7 +927,7 @@ function indexPanel(): HTMLElement | null {
     );
   }
 
-  const toggle = h('button', 'link', state.explainOpen ? 'Hide details' : 'How does this work?');
+  const toggle = h('button', 'link', state.explainOpen ? 'Hide details' : 'Details and how it works');
   toggle.addEventListener('click', () => {
     state.explainOpen = !state.explainOpen;
     render();
@@ -891,7 +935,17 @@ function indexPanel(): HTMLElement | null {
   el.append(toggle);
 
   if (state.explainOpen) {
+    const facts = h('div', 'facts');
+    facts.append(
+      fact(String(p.total), 'Captured'),
+      fact(String(p.categorized), 'Indexed'),
+      fact(String(Math.max(0, p.runTotal - p.runCompleted)), 'In this run'),
+      fact(String(p.pending), 'Waiting'),
+      fact(fmtUsd(p.spentUsd), 'Spent'),
+      fact(fmtUsd(p.estimateUsd), 'Left, at most'),
+    );
     el.append(
+      facts,
       h('div', 'explain', [
         explainRow(
           '1 · Capture — free',
@@ -930,8 +984,16 @@ function panelTitle(): string {
   return `${p.total} post${p.total === 1 ? '' : 's'} indexed`;
 }
 
+/** One line under the title: where things stand and what it has cost. */
+function panelSub(): string {
+  const p = state.progress;
+  const parts = [`${p.categorized} of ${p.total} indexed`, `${fmtUsd(p.spentUsd)} spent`];
+  if (p.estimateUsd > 0) parts.push(`up to ${fmtUsd(p.estimateUsd)} to finish`);
+  return parts.join(' · ');
+}
+
 function fact(value: string, label: string): HTMLElement {
-  return h('div', 'fact', [h('span', 'mono fact-value', value), h('span', 'cap', label)]);
+  return h('div', 'fact', [h('span', 'fact-value', value), h('span', 'cap', label)]);
 }
 
 function explainRow(title: string, body: string): HTMLElement {
@@ -960,32 +1022,39 @@ function card(post: PostRecord): HTMLElement {
   });
 
   const thumb = mediaPreview(post, 'thumb', true);
-  if (post.isVideo) thumb.append(h('span', 'mono kind', 'REEL'));
-  if (post.durationSec) thumb.append(h('span', 'mono dur', fmtDuration(post.durationSec)));
+  if (post.isVideo) {
+    const badge = h('span', 'badge');
+    badge.innerHTML = ICON_PLAY;
+    if (post.durationSec) badge.append(fmtDuration(post.durationSec));
+    badge.title = 'Reel';
+    thumb.append(badge);
+  }
   el.append(thumb);
 
-  // The summary line keeps its box whether or not it is filled, so a card never
+  const body = h('div', 'card-body');
+  // The summary keeps two lines of room whether or not it is filled, so a card never
   // jumps when its summary lands.
-  el.append(
+  body.append(
     post.categorizedAt
       ? h('div', 'summary', post.summary ?? post.caption.slice(0, 90))
-      : h('div', 'summary mono queued', 'in queue'),
+      : h('div', 'summary queued', 'Waiting to be indexed'),
   );
 
   const meta = h('div', 'meta');
-  meta.append(chipFor(post.category), h('span', 'mono handle', post.handle));
+  meta.append(chipFor(post.category), h('span', 'handle', post.handle ? `@${post.handle.replace(/^@/, '')}` : ''));
 
   // Grid cards are tight, so only the publish date is on the face of them and the rest
   // is on hover. The list view has the room to say which date is which.
   if (state.view === 'list' && post.firstSeenAt) {
-    meta.append(h('span', 'mono added', `added ${fmtDate(post.firstSeenAt)}`));
+    meta.append(h('span', 'added', `added ${fmtDate(post.firstSeenAt)}`));
   }
   if (post.postedAt) {
-    const date = h('span', 'mono date', fmtDate(post.postedAt));
+    const date = h('span', 'date', fmtDate(post.postedAt));
     date.title = dateDetail(post);
     meta.append(date);
   }
-  el.append(meta);
+  body.append(meta);
+  el.append(body);
 
   return el;
 }
@@ -996,7 +1065,7 @@ function detailView(post: PostRecord): HTMLElement {
 
   const info = h('div', 'detail-info');
   info.append(
-    h('div', 'detail-heading', [chipFor(post.category), h('span', 'mono handle', post.handle)]),
+    h('div', 'detail-heading', [chipFor(post.category), h('span', 'handle', post.handle)]),
     h(
       'p',
       'detail-summary',

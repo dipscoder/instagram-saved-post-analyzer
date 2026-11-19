@@ -131,6 +131,9 @@ clip you saved yesterday. **Newest post** and **Oldest post** use the publish da
 **Library ↔ Instagram** in the header switches between the two; `⌥S` / `Alt+S` does the
 same from the keyboard. Instagram's own grid is underneath either way, untouched.
 
+**Light and dark.** Everything starts light. The sun/moon button in the library header or
+the popup header switches both at once, and the choice is remembered.
+
 ---
 
 ## Is it safe?

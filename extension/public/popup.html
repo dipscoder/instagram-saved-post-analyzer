@@ -4,49 +4,50 @@
     <meta charset="utf-8" />
     <title>Saved Index</title>
     <style>
-      /* System type and grouped lists, as in Apple's own apps, carried by one brand: a
-         coral-to-violet gradient kept for the icon, the main button and progress, with a
-         single violet tint for everything interactive. Light and dark follow the OS. */
+      /* System type and grouped lists, as in Apple's own apps, on warm neutrals. Light
+         unless you switch it: the setting is shared with the library on instagram.com,
+         and popup.ts sets data-theme on <html> before the first paint. */
       :root {
-        color-scheme: light dark;
+        color-scheme: light;
         --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
         --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
-        --brand: linear-gradient(120deg, #ff6a55, #f03e86 50%, #7a4cff);
+        --brand: linear-gradient(135deg, #ff6a55, #f03e86 52%, #7a4cff);
 
-        --bg: #f5f3f0;
+        --bg: #f7f6f3;
         --card: #ffffff;
-        --fill: rgba(23, 21, 28, 0.06);
-        --separator: rgba(23, 21, 28, 0.1);
-        --label: #17151c;
-        --label-2: rgba(23, 21, 28, 0.58);
-        --label-3: rgba(23, 21, 28, 0.3);
-        --accent: #6e44f5;
-        --accent-tint: rgba(110, 68, 245, 0.1);
+        --fill: rgba(28, 25, 23, 0.06);
+        --separator: rgba(28, 25, 23, 0.09);
+        --label: #1c1917;
+        --label-2: #6b655e;
+        --label-3: #b1aca5;
+        --accent: #6d4aff;
+        --accent-tint: #f0ecff;
+        --ink: #1c1917;
+        --on-ink: #ffffff;
         --green: #1e9e57;
-        --red: #e5484d;
-        --bar: rgba(245, 243, 240, 0.82);
-        --shadow: 0 1px 2px rgba(23, 21, 28, 0.04), 0 0 0 0.5px rgba(23, 21, 28, 0.05);
-        --glow: 0 6px 18px rgba(240, 62, 134, 0.28);
+        --red: #d92d48;
+        --bar: rgba(247, 246, 243, 0.86);
+        --shadow: 0 1px 2px rgba(28, 25, 23, 0.05), 0 0 0 0.5px rgba(28, 25, 23, 0.06);
         --raised: #ffffff;
       }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #0e0d11;
-          --card: #1a191f;
-          --fill: rgba(255, 255, 255, 0.08);
-          --separator: rgba(255, 255, 255, 0.09);
-          --label: #f4f2f7;
-          --label-2: rgba(244, 242, 247, 0.6);
-          --label-3: rgba(244, 242, 247, 0.3);
-          --accent: #a48bff;
-          --accent-tint: rgba(164, 139, 255, 0.14);
-          --green: #3ecf7a;
-          --red: #ff6369;
-          --bar: rgba(14, 13, 17, 0.82);
-          --shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.06);
-          --glow: 0 6px 20px rgba(240, 62, 134, 0.22);
-          --raised: #3a3842;
-        }
+      :root[data-theme="dark"] {
+        color-scheme: dark;
+        --bg: #121211;
+        --card: #1c1c1a;
+        --fill: rgba(255, 255, 255, 0.08);
+        --separator: rgba(255, 255, 255, 0.08);
+        --label: #f5f5f4;
+        --label-2: #aaa49c;
+        --label-3: #6f6a63;
+        --accent: #a78bfa;
+        --accent-tint: rgba(167, 139, 250, 0.15);
+        --ink: #f5f5f4;
+        --on-ink: #121211;
+        --green: #3ecf7a;
+        --red: #ff6b81;
+        --bar: rgba(18, 18, 17, 0.86);
+        --shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+        --raised: #36352f;
       }
 
       /* The UA's [hidden] rule loses to any author `display`, so it is restated here. */
@@ -82,10 +83,18 @@
       .brand { display: flex; align-items: center; gap: 9px; }
       .brand img { width: 26px; height: 26px; }
       .brand b { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; }
+      .header-actions { display: flex; align-items: center; gap: 4px; }
       .nav {
-        height: 26px; padding: 0 11px; border-radius: 13px;
-        background: var(--accent-tint); color: var(--accent); font-size: 12px; font-weight: 600;
+        height: 28px; padding: 0 12px; border-radius: 14px;
+        background: var(--fill); color: var(--label); font-size: 12px; font-weight: 600;
       }
+      .nav:hover { background: var(--separator); }
+      .icon-btn {
+        width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--label-2);
+      }
+      .icon-btn:hover { background: var(--fill); color: var(--label); }
+      .icon-btn svg { display: block; }
+      :root[data-theme="dark"] .icon-moon, :root:not([data-theme="dark"]) .icon-sun { display: none; }
 
       main { flex: 1; overflow-y: auto; padding: 4px 16px 24px; }
       section { display: none; flex-direction: column; }
@@ -102,7 +111,7 @@
       /* --- onboarding hero ------------------------------------------------------ */
 
       .hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 12px 4px; }
-      .hero img { width: 72px; height: 72px; filter: drop-shadow(0 10px 18px rgba(240, 62, 134, 0.3)); }
+      .hero img { width: 64px; height: 64px; filter: drop-shadow(0 10px 20px rgba(240, 62, 134, 0.22)); }
       .hero h1 { margin: 14px 0 4px; font-size: 24px; font-weight: 700; letter-spacing: -0.025em; }
       .hero p { margin: 0; max-width: 280px; font-size: 13px; color: var(--label-2); }
 
@@ -181,13 +190,13 @@
       .btn {
         width: 100%; height: 40px; margin-top: 12px; border-radius: 12px;
         font-size: 14px; font-weight: 600; text-align: center;
-        background: var(--brand); color: #fff; box-shadow: var(--glow);
-        transition: filter 120ms ease, transform 120ms ease, opacity 120ms ease;
+        background: var(--ink); color: var(--on-ink);
+        transition: opacity 120ms ease, transform 120ms ease;
       }
-      .btn:hover:not(:disabled) { filter: brightness(1.06) saturate(1.05); }
+      .btn:hover:not(:disabled) { opacity: 0.86; }
       .btn:active:not(:disabled) { transform: scale(0.985); }
-      .btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
-      .btn.danger { background: var(--red); box-shadow: none; }
+      .btn:disabled { opacity: 0.35; cursor: default; }
+      .btn.danger { background: var(--red); color: #fff; }
       .text-btn { display: block; margin: 14px auto 0; padding: 4px 8px; color: var(--accent); font-size: 12px; font-weight: 500; }
 
       /* --- status lines --------------------------------------------------------- */
@@ -205,8 +214,8 @@
       .card-head a { font-weight: 600; }
       .summary h1 { margin: 8px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.25; }
       .summary p { margin: 4px 0 0; font-size: 12px; color: var(--label-2); }
-      .track { height: 6px; margin-top: 14px; border-radius: 3px; background: var(--fill); overflow: hidden; }
-      .track i { display: block; height: 100%; border-radius: inherit; background: var(--brand); transition: width 300ms ease; }
+      .track { height: 4px; margin-top: 14px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+      .track i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 300ms ease; }
       .stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 14px; }
       .stat { display: flex; flex-direction: column; gap: 1px; padding-left: 12px; border-left: 0.5px solid var(--separator); }
       .stat:first-child { padding-left: 0; border-left: 0; }
@@ -232,7 +241,13 @@
   <body>
     <header>
       <div class="brand"><img src="icons/icon128.png" alt="" /><b>Saved Index</b></div>
-      <button class="nav" id="navBtn" hidden>Settings</button>
+      <div class="header-actions">
+        <button class="icon-btn" id="themeBtn" type="button" title="Switch to dark" aria-label="Switch to dark">
+          <svg class="icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          <svg class="icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
+        </button>
+        <button class="nav" id="navBtn" hidden>Settings</button>
+      </div>
     </header>
 
     <main>
