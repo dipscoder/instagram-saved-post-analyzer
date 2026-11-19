@@ -10,8 +10,10 @@
 -- 2. `apply_verdicts` writes a batch of server verdicts to both tables in one
 --    transaction. It runs as the caller, so Row Level Security still limits it to the
 --    caller's own rows.
+--
+-- Safe to run again: every statement replaces or skips what is already there.
 
-create function public.keep_newer_verdict() returns trigger
+create or replace function public.keep_newer_verdict() returns trigger
 language plpgsql
 set search_path = ''
 as $$
@@ -29,11 +31,12 @@ begin
 end;
 $$;
 
+drop trigger if exists posts_keep_newer_verdict on public.posts;
 create trigger posts_keep_newer_verdict
   before update on public.posts
   for each row execute function public.keep_newer_verdict();
 
-create function public.keep_newer_ledger_entry() returns trigger
+create or replace function public.keep_newer_ledger_entry() returns trigger
 language plpgsql
 set search_path = ''
 as $$
@@ -45,14 +48,15 @@ begin
 end;
 $$;
 
+drop trigger if exists verdicts_keep_newer on public.verdicts;
 create trigger verdicts_keep_newer
   before update on public.verdicts
   for each row execute function public.keep_newer_ledger_entry();
 
 -- Lets the extension ask for only the verdicts that changed since it last looked.
-create index verdicts_user_updated on public.verdicts (user_id, updated_at);
+create index if not exists verdicts_user_updated on public.verdicts (user_id, updated_at);
 
-create function public.apply_verdicts(p_verdicts jsonb)
+create or replace function public.apply_verdicts(p_verdicts jsonb)
 returns integer
 language plpgsql
 security invoker
