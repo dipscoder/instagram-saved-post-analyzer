@@ -154,6 +154,7 @@ svg { display: block; }
 :host([data-theme="dark"]) .rail-row.on { background: var(--surface-2); }
 .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: oklch(0.7 0.13 var(--hue)); }
 .dot-all { background: var(--ink); }
+.dot-collection { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
 .dot-none { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
 .rail-row .count { flex: none; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .divider { height: 1px; margin: 12px 10px; background: var(--line); }

@@ -134,6 +134,11 @@ names it, offers **Index this collection**, and opens the library on request. Th
 never opens by itself, and the extension never listens to keys you type on Instagram.
 **Library ↔ Instagram** in the library header, or Esc, takes you back to Instagram's grid.
 
+**Your collections carry over.** Each time you browse one of your own collections, its
+posts are tagged with it, and it appears under **Collections** in the library's sidebar.
+Categories still work inside a collection. Taking a post out of a collection on Instagram
+is not noticed yet, so a post stays listed under every collection it was seen in.
+
 **Light and dark.** Everything starts light. The sun/moon button in the library header or
 the popup header switches both at once, and the choice is remembered.
 

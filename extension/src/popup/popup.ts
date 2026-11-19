@@ -50,6 +50,7 @@ let stats: Stats = {
   total: 0,
   categorized: 0,
   byCategory: {},
+  collections: [],
   lastRunAt: null,
   ledgerCount: 0,
 };

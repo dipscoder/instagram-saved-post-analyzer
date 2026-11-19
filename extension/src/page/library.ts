@@ -50,6 +50,8 @@ interface State {
   sort: SortKey;
   /** One category unless you ⌘/Ctrl-click to build a comparison. */
   selected: Set<string>;
+  /** One of the user's Instagram collections, by id, or null for all of them. */
+  collection: string | null;
   view: 'grid' | 'list';
   visible: boolean;
   loading: boolean;
@@ -87,11 +89,12 @@ const state: State = {
   posts: [],
   matches: 0,
   limit: PAGE_SIZE,
-  stats: { total: 0, categorized: 0, byCategory: {}, lastRunAt: null, ledgerCount: 0 },
+  stats: { total: 0, categorized: 0, byCategory: {}, collections: [], lastRunAt: null, ledgerCount: 0 },
   progress: IDLE_PROGRESS,
   search: '',
   sort: 'saved',
   selected: new Set(),
+  collection: null,
   view: 'grid',
   visible: false,
   loading: true,
@@ -316,6 +319,7 @@ async function refresh(withStats = true): Promise<void> {
         categories: [...state.selected],
         limit: state.limit,
         sort: state.sort,
+        collection: state.collection,
       }),
       withStats ? send<Stats>({ type: 'posts:stats' }) : Promise.resolve(null),
       detailShortcode
@@ -611,13 +615,13 @@ function render(): void {
   elIndexLabel.className = `status-label${busy ? ' busy' : done ? ' done' : ''}`;
 
   const names = [...state.selected];
+  const where = state.stats.collections.find((c) => c.id === state.collection)?.name;
+  const scope = names.length === 1 ? names[0]! : names.length ? 'Comparing' : null;
   elTitle.textContent = state.detail
     ? 'Post details'
-    : names.length === 1
-      ? names[0]!
-      : names.length
-        ? 'Comparing'
-        : 'All saved';
+    : where && scope
+      ? `${where} · ${scope}`
+      : (where ?? scope ?? 'All saved');
   elCount.textContent = state.detail ? '' : countLabel();
   elBack.hidden = !state.detail;
   elSort.parentElement!.style.display = state.detail ? 'none' : 'flex';
@@ -674,6 +678,7 @@ function listKey(): string {
     state.search,
     state.sort,
     [...state.selected].join(','),
+    state.collection ?? '',
     state.progress.phase,
     // The panel's counts and spend. They only move when a batch lands, so this adds no
     // rebuilds beyond the ones the batch already causes; without them the panel could
@@ -701,7 +706,8 @@ function progressKey(p: IndexProgress): string {
 function railRows(): Node[] {
   const rows: Node[] = [];
 
-  const all = h('button', `rail-row${state.selected.size === 0 ? ' on' : ''}`, [
+  const everything = state.selected.size === 0 && state.collection === null;
+  const all = h('button', `rail-row${everything ? ' on' : ''}`, [
     h('span', 'dot dot-all'),
     h('span', '', 'All saved'),
     h('span', 'count', String(state.stats.total)),
@@ -709,9 +715,19 @@ function railRows(): Node[] {
   all.dataset['focus'] = 'rail:all';
   all.addEventListener('click', () => {
     state.selected.clear();
+    state.collection = null;
     refreshFromTop();
   });
-  rows.push(all, h('div', 'divider'), h('div', 'rail-label', 'Categories'));
+  rows.push(all);
+
+  // Your own Instagram collections, as you filed them. A collection narrows the library
+  // and the categories below still apply within it.
+  if (state.stats.collections.length) {
+    rows.push(h('div', 'divider'), h('div', 'rail-label', 'Collections'));
+    for (const c of state.stats.collections) rows.push(collectionRow(c.id, c.name, c.count));
+  }
+
+  rows.push(h('div', 'divider'), h('div', 'rail-label', 'Categories'));
 
   let shown = 0;
   for (const name of CATEGORY_NAMES) {
@@ -736,6 +752,23 @@ function railRows(): Node[] {
   rows.push(foot);
 
   return rows;
+}
+
+/** One collection at a time; clicking the open one again goes back to all of them. */
+function collectionRow(id: string, name: string, count: number): HTMLElement {
+  const on = state.collection === id;
+  const row = h('button', `rail-row${on ? ' on' : ''}`, [
+    h('span', 'dot dot-collection'),
+    h('span', '', name),
+    h('span', 'count', String(count)),
+  ]);
+  row.dataset['focus'] = `collection:${id}`;
+  row.setAttribute('aria-pressed', String(on));
+  row.addEventListener('click', () => {
+    state.collection = on ? null : id;
+    refreshFromTop();
+  });
+  return row;
 }
 
 /**
@@ -820,7 +853,7 @@ function mainRows(): Node[] {
       empty(
         'Nothing matches',
         'Try a shorter query, or drop a category.',
-        state.search || state.selected.size
+        state.search || state.selected.size || state.collection
           ? { label: 'Clear filters', run: clearFilters }
           : undefined,
       ),
@@ -1434,6 +1467,7 @@ function stopHarvesting(): void {
 
 function clearFilters(): void {
   state.selected.clear();
+  state.collection = null;
   state.search = '';
   refreshFromTop();
 }

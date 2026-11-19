@@ -23,6 +23,7 @@ import { reserveRanks } from '../src/background/order';
 import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
+import { listCollections, validCollection } from '../src/background/collections';
 import { applyResult } from '../src/background/filing';
 import {
   BadRequest,
@@ -320,7 +321,7 @@ console.log('\nrecord migration');
   check('firstSeenAt is null, not guessed', up['firstSeenAt'] === null);
   check('savedRank is null, not guessed', up['savedRank'] === null);
   check('seenInSavedFeed is null so the next sweep decides', up['seenInSavedFeed'] === null);
-  check('stamped to current schema', up['schemaVersion'] === 3, up['schemaVersion']);
+  check('stamped to current schema', up['schemaVersion'] === 4, up['schemaVersion']);
 
   const fromV2 = upgrade({ shortcode: 'x', savedAt: 5, seenInSavedFeed: 99 }, 2);
   check('a v2 record keeps the stamp it already earned', fromV2['seenInSavedFeed'] === 99);
@@ -821,6 +822,41 @@ console.log('\nvideo frames');
   check('frame filename names the post and the moment',
     frameFilename('C8xYz12AbCd', 72.48) === 'instagram-C8xYz12AbCd-1m12.480s.png');
   check('frame filename without a post', frameFilename(null, 3.5) === 'instagram-video-0m03.500s.png');
+}
+
+console.log('\ninstagram collections');
+{
+  const capture = {
+    shortcode: 'Coll123ab', permalink: 'https://www.instagram.com/p/Coll123ab/', handle: 'a',
+    caption: 'c', hashtags: [], thumbnailUrl: 'https://cdn/x.jpg', isVideo: false,
+    durationSec: null, audioTrackName: null, altText: null, postedAt: null,
+  };
+  check('a post captured outside a collection has none', toRecord(capture).collections.length === 0);
+  const inTravel = toRecord(capture, 1, '1792');
+  check('a post captured in a collection records it', inTravel.collections.join() === '1792');
+
+  const alsoFood = mergeCaptured(inTravel, toRecord(capture, 2, '2001'));
+  check('seeing it in a second collection adds that one', alsoFood?.collections.join() === '1792,2001');
+  check('seeing it again in the same collection rewrites nothing',
+    mergeCaptured(inTravel, { ...toRecord(capture, 1, '1792'), thumbnailUrl: inTravel.thumbnailUrl }) === null);
+  const fromAll = mergeCaptured(inTravel, { ...toRecord(capture, 3), caption: 'new' });
+  check('seeing it under All posts never removes a collection', fromAll?.collections.join() === '1792');
+
+  check('an older record gains an empty collection list',
+    Array.isArray(upgrade({ shortcode: 'Old12', caption: 'x' }, 3)['collections']));
+  check('the account row carries collections', toRow(inTravel).collections.join() === '1792');
+
+  check('a numeric collection is accepted', validCollection({ id: '1792', name: 'Travel' })?.name === 'Travel');
+  check('a non-numeric id is refused', validCollection({ id: 'all-posts', name: 'All' }) === null);
+  check('a forged object is refused', validCollection({ id: ['1'], name: 'x' }) === null);
+  check('a missing collection is null', validCollection(undefined) === null);
+  check('a long name is cut to 100', validCollection({ id: '1', name: 'x'.repeat(500) })?.name.length === 100);
+  check('control characters are stripped', validCollection({ id: '1', name: 'a\u0007b' })?.name === 'ab');
+  const listed = listCollections({ '2': 3, '1': 5, '9': 0 }, { '1': 'Travel', '2': 'Food' });
+  check('the sidebar lists collections with posts, by name',
+    listed.map((c) => `${c.name}:${c.count}`).join() === 'Food:3,Travel:5', listed);
+  check('a collection with no known name still shows',
+    listCollections({ '7': 1 }, {})[0]?.name === 'Collection');
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);

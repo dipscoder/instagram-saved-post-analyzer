@@ -40,7 +40,7 @@ copying the same explanation into all four.
 - The library and popup share one responsive visual system, light by default with a
   synced dark toggle. Expired or unavailable media
   uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **212 checks**. It does not replace a live
+- The regression suite currently contains **227 checks**. It does not replace a live
   Instagram/provider smoke test.
 
 ## Code map by question
@@ -90,7 +90,7 @@ The detailed version is in [`CLAUDE.md`](CLAUDE.md). In short:
    or a real provider key. Follow the checklist below.
 3. **Virtualise only when needed.** Rendering is capped and avoids redundant rebuilds, but
    a library of several thousand posts will eventually benefit from windowed rows.
-4. **Collections are flattened.** Folder-aware browsing has not been implemented.
+4. **Collection membership only grows.** Posts record the Instagram collections they were seen in, but removing a post from a collection is not detected.
 5. **Offline recovery is manual.** Network failures are represented correctly, but an
    indexing run does not automatically resume when connectivity returns.
 

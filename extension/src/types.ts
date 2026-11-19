@@ -1,6 +1,6 @@
 /** The record shape stored in IndexedDB, keyed on `shortcode`. */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface PostRecord {
   /** Primary key. Instagram's per-post code, e.g. "C8xK2mLp3qR". */
@@ -46,6 +46,14 @@ export interface PostRecord {
    */
   seenInSavedFeed: number | null;
 
+  /**
+   * Ids of the user's own Instagram collections this post was seen in. Grows only: a
+   * collection is never swept as a census, so leaving one can't be detected here, and a
+   * wrong "removed" would hide a post from the folder the user filed it in. All posts and
+   * Audio are not collections in this sense and are never recorded.
+   */
+  collections: string[];
+
   // --- categorisation output; null until a tier has run ---
   category: string | null;
   subcategory: string | null;
@@ -81,9 +89,14 @@ export type CapturedPost = Pick<
   | 'postedAt'
 >;
 
-export function toRecord(p: CapturedPost, savedRank: number | null = null): PostRecord {
+export function toRecord(
+  p: CapturedPost,
+  savedRank: number | null = null,
+  collection: string | null = null,
+): PostRecord {
   return {
     ...p,
+    collections: collection ? [collection] : [],
     // Capture only runs on the saved route now, so reaching here is the confirmation.
     seenInSavedFeed: Date.now(),
     firstSeenAt: Date.now(),
