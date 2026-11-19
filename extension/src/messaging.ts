@@ -43,13 +43,20 @@ export type SortKey = 'saved' | 'newest' | 'oldest';
 /** content script / popup → service worker */
 export type Request =
   /** `pageId` identifies the visit, which is what makes feed order into save order. */
-  | { type: 'posts:captured'; posts: CapturedPost[]; pageId: string }
+  | {
+      type: 'posts:captured';
+      posts: CapturedPost[];
+      pageId: string;
+      /** The user's own collection on screen, if any. Page-influenced: validated in the worker. */
+      collection?: SavedCollectionRef | null;
+    }
   | {
       type: 'posts:query';
       search: string;
       categories: string[];
       limit: number;
       sort: SortKey;
+      collection?: string | null;
     }
   | { type: 'posts:stats' }
   | { type: 'post:get'; shortcode: string }
@@ -96,10 +103,18 @@ export interface ReindexQuote {
   usd: number;
 }
 
+/** One of the user's own Instagram collections: numeric id and the name from its URL. */
+export interface SavedCollectionRef {
+  id: string;
+  name: string;
+}
+
 export interface Stats {
   total: number;
   categorized: number;
   byCategory: Record<string, number>;
+  /** The user's Instagram collections that hold at least one post, by name. */
+  collections: (SavedCollectionRef & { count: number })[];
   lastRunAt: number | null;
   /** Verdicts on file — the work that survives a prune, a re-index or a reinstall. */
   ledgerCount: number;

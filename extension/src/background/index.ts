@@ -32,6 +32,7 @@ import {
   type Stats,
 } from '../messaging';
 import { savedFeedPath } from '../routes';
+import { collectionNames, listCollections, rememberCollection, validCollection } from './collections';
 import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
@@ -162,9 +163,12 @@ async function handle(req: Request): Promise<unknown> {
       // Posts arrive in feed order, which is save order — see background/order.ts. Ranks
       // are reserved for the whole batch at once so a concurrent message can't interleave.
       const ranks = await reserveRanks(req.pageId, posts.length);
+      const collection = validCollection(req.collection);
+      const renamed = collection ? await rememberCollection(collection) : false;
       const { inserted, refreshed } = await db.putIfNew(
-        posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null)),
+        posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null, collection?.id ?? null)),
       );
+      if (renamed) scheduleSync();
       if (inserted > 0 || refreshed > 0) {
         scheduleSync();
         // Push the new total straight away so the library's counts and rows update as
@@ -201,16 +205,20 @@ async function handle(req: Request): Promise<unknown> {
         categories: req.categories,
         limit: req.limit,
         sort: req.sort,
+        collection: typeof req.collection === 'string' ? req.collection : null,
       });
 
     case 'posts:stats': {
-      const [s, ledgerCount, stored] = await Promise.all([
+      const [s, ledgerCount, stored, names] = await Promise.all([
         db.stats(),
         ledger.count(),
         chrome.storage.local.get('lastRunAt'),
+        collectionNames(),
       ]);
+      const { byCollection, ...rest } = s;
       return {
-        ...s,
+        ...rest,
+        collections: listCollections(byCollection, names),
         lastRunAt: (stored['lastRunAt'] as number | undefined) ?? null,
         ledgerCount,
       } satisfies Stats;

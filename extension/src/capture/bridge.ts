@@ -8,7 +8,7 @@
 
 import { extractPosts } from './extract';
 import { scrapeSavedGrid } from './dom-scrape';
-import { isSavedRoute } from '../routes';
+import { collectionFromPath, isSavedRoute } from '../routes';
 import { WIRE, send, type BridgeMessage, type MainWorldMessage } from '../messaging';
 import type { CapturedPost } from '../types';
 
@@ -79,21 +79,27 @@ function handleMessage(ev: MessageEvent): void {
 }
 
 async function ingest(posts: CapturedPost[]): Promise<void> {
+  // Only the user's own collections, which have numeric ids. All posts and Audio are views
+  // of everything, not folders the user filed anything in.
+  const where = collectionFromPath();
+  const collection = where && /^[0-9]+$/.test(where.id) ? where : null;
+
   // Dedupe in-page as well as in the DB — this saves a round trip on every re-render of
-  // an already-seen tile, which on an infinite scroll is most of them.
+  // an already-seen tile, which on an infinite scroll is most of them. Keyed by collection
+  // as well: a post already seen under All posts still has to be reported when it turns
+  // up in a collection, or its membership would never be recorded.
   // The shortcode becomes a database key and part of a permalink, and it arrives from a
   // context the page can write to. Instagram's own codes are short base64url strings.
-  const fresh = posts.filter(
-    (p) => SHORTCODE.test(p.shortcode ?? '') && !seen.has(p.shortcode),
-  );
+  const key = (p: CapturedPost) => `${collection?.id ?? ''}:${p.shortcode}`;
+  const fresh = posts.filter((p) => SHORTCODE.test(p.shortcode ?? '') && !seen.has(key(p)));
   if (!fresh.length) return;
-  for (const p of fresh) seen.add(p.shortcode);
+  for (const p of fresh) seen.add(key(p));
 
   try {
-    await send({ type: 'posts:captured', posts: fresh, pageId });
+    await send({ type: 'posts:captured', posts: fresh, pageId, collection });
   } catch {
     // Service worker asleep or extension reloading; the tile will come round again.
-    for (const p of fresh) seen.delete(p.shortcode);
+    for (const p of fresh) seen.delete(key(p));
   }
 }
 

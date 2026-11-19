@@ -21,7 +21,7 @@ import type { SortKey } from '../messaging';
 import { SCHEMA_VERSION, type PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const STORE = 'posts';
 
 /** The ledger's store. Created here because the upgrade transaction is here. */
@@ -136,6 +136,7 @@ const FIELD_DEFAULTS: Record<string, unknown> = {
   firstSeenAt: null,
   savedRank: null,
   seenInSavedFeed: null,
+  collections: [],
   category: null,
   subcategory: null,
   tags: [],
@@ -161,6 +162,8 @@ const FIELD_DEFAULTS: Record<string, unknown> = {
  *   always the post's own timestamp. `firstSeenAt` and `savedRank` are null because we
  *   never recorded either, and back-dating them from `postedAt` would be a lie that reads
  *   like a fact.
+ * - **v3 → v4, `collections`.** Empty: which collections a post was in was never
+ *   recorded. Browsing a collection fills it in.
  */
 export function upgrade(rec: Record<string, unknown>, from: number): Record<string, unknown> {
   const next = { ...rec };
@@ -341,6 +344,14 @@ export function mergeCaptured(existing: PostRecord, incoming: PostRecord): PostR
   // sort that is both the default and the reason order.ts exists.
   fill('savedRank');
 
+  // Membership only ever grows; see `PostRecord.collections`.
+  const known = existing.collections ?? [];
+  const added = (incoming.collections ?? []).filter((id) => !known.includes(id));
+  if (added.length) {
+    merged.collections = [...known, ...added];
+    changed = true;
+  }
+
   return changed ? merged : null;
 }
 
@@ -394,6 +405,8 @@ export interface QueryOpts {
   categories: string[];
   limit: number;
   sort: SortKey;
+  /** One of the user's Instagram collections, or null for everything. */
+  collection?: string | null;
 }
 
 /**
@@ -421,6 +434,7 @@ export async function query(opts: QueryOpts): Promise<QueryResult> {
 
   for (const r of (await resident()).values()) {
     if (wanted.size && !wanted.has(r.category ?? 'Uncategorized')) continue;
+    if (opts.collection && !(r.collections ?? []).includes(opts.collection)) continue;
     if (!matchesSearch(r, terms)) continue;
     filtered.push(r);
   }
@@ -501,18 +515,21 @@ export async function stats(): Promise<{
   total: number;
   categorized: number;
   byCategory: Record<string, number>;
+  byCollection: Record<string, number>;
 }> {
   const live = await resident();
   const byCategory: Record<string, number> = {};
+  const byCollection: Record<string, number> = {};
   let categorized = 0;
 
   for (const r of live.values()) {
     if (r.categorizedAt !== null) categorized++;
     const key = r.category ?? 'Uncategorized';
     byCategory[key] = (byCategory[key] ?? 0) + 1;
+    for (const id of r.collections ?? []) byCollection[id] = (byCollection[id] ?? 0) + 1;
   }
 
-  return { total: live.size, categorized, byCategory };
+  return { total: live.size, categorized, byCategory, byCollection };
 }
 
 /**

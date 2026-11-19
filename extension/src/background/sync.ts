@@ -16,6 +16,7 @@ import * as ledger from './ledger';
 import { LEDGER_SYNC_STORE, openDb, SYNC_STORE, THUMB_STORE } from './db';
 import { currentUserId, supabase } from './account';
 import { fetchThumbnail, shrinkToJpeg } from './media';
+import { collectionNames } from './collections';
 import { redact } from './providers/index';
 import {
   changed,
@@ -42,6 +43,8 @@ const STATUS_KEY = 'syncStatus';
 const OWNER_KEY = 'syncOwner';
 /** Which account has had its ledger and thumbnail state pulled down. */
 const PULLED_KEY = 'syncPulled';
+/** Digest of the collection names last uploaded, so unchanged names are not re-sent. */
+const COLLECTIONS_SYNC_KEY = 'syncCollections';
 const UPSERT_BATCH = 500;
 /** Deletes go in the query string, so they are batched smaller. */
 const DELETE_BATCH = 100;
@@ -96,7 +99,7 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 /** Forget what was uploaded, so the next sync pulls and sends everything again. */
 export async function resetSync(): Promise<void> {
   await clearStores();
-  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY]);
+  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY]);
 }
 
 async function syncOnce(): Promise<void> {
@@ -140,6 +143,7 @@ async function syncOnce(): Promise<void> {
     }
 
     await pushLedger(userId);
+    await pushCollectionNames(userId);
     const remaining = await copyThumbnails(userId, records, posts, thumbs);
     if (remaining > 0) scheduleSync(NEXT_PASS_MS);
 
@@ -153,6 +157,19 @@ async function syncOnce(): Promise<void> {
       error: message,
     });
   }
+}
+
+/** Uploads collection names when they changed since the last upload. Never deletes. */
+async function pushCollectionNames(userId: string): Promise<void> {
+  const names = await collectionNames();
+  const rows = Object.entries(names).map(([id, name]) => ({ user_id: userId, id, name }));
+  if (!rows.length) return;
+  const hash = digest(rows);
+  const stored = await chrome.storage.local.get(COLLECTIONS_SYNC_KEY);
+  if (stored[COLLECTIONS_SYNC_KEY] === hash) return;
+  const { error } = await supabase.from('collections').upsert(rows, { onConflict: 'user_id,id' });
+  if (error) throw new Error(error.message);
+  await chrome.storage.local.set({ [COLLECTIONS_SYNC_KEY]: hash });
 }
 
 /** Uploads every verdict that is new or changed. Verdicts are never deleted. */

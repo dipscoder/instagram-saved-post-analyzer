@@ -26,6 +26,7 @@ export interface PostRow {
   posted_at: string | null;
   first_seen_at: string | null;
   saved_rank: number | null;
+  collections: string[];
   category: string | null;
   subcategory: string | null;
   tags: string[];
@@ -54,6 +55,7 @@ export function toRow(r: PostRecord): PostRow {
     posted_at: iso(r.postedAt),
     first_seen_at: iso(r.firstSeenAt),
     saved_rank: r.savedRank,
+    collections: r.collections ?? [],
     category: r.category,
     subcategory: r.subcategory,
     tags: r.tags,

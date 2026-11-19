@@ -7,6 +7,7 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261023120000_posts.sql` | `public.posts`: one row per saved post per user, protected by Row Level Security |
 | `migrations/20261024090000_thumbnails_and_verdicts.sql` | The private `thumbnails` bucket, `public.verdicts` (the paid-analysis ledger, never deleted), and `posts.thumbnail_stored` |
 | `migrations/20261024140000_usage.sql` | `public.usage` (spend per user per UTC day) and `record_usage()`, which only ever adds |
+| `migrations/20261119120000_collections.sql` | `posts.collections` (ids of the Instagram collections a post was seen in) and `public.collections` (their names) |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
 
 ## Applying a migration
