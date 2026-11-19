@@ -3,17 +3,16 @@
  *
  * Written by hand rather than checked in as binaries so the artwork is reviewable and
  * reproducible: `node tools/make-icons.mjs` regenerates all three from this source.
- * A squircle in the brand's coral-to-violet gradient holding a white bookmark, with a
- * sparkle cut out of it for the sorting. Below 32px the sparkle would only smudge, so the
- * toolbar icon is the bookmark alone.
+ *
+ * The Notch mark: a solid tile with a bookmark notch cut from its foot, in white on a
+ * near-black squircle. Monochrome on purpose; a dark tile keeps it legible on both light
+ * and dark browser toolbars.
  */
 
 import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const CORAL = [0xff, 0x6a, 0x55];
-const PINK = [0xf0, 0x3e, 0x86];
-const VIOLET = [0x7a, 0x4c, 0xff];
+const INK = [0x18, 0x18, 0x1b];
 const WHITE = [0xff, 0xff, 0xff];
 /** Samples per axis per pixel. Coverage by supersampling keeps every shape a plain test. */
 const SS = 5;
@@ -21,24 +20,21 @@ const SS = 5;
 /** Each shape is drawn on a 128-unit canvas: a test of whether (x, y) is inside it. */
 const inTile = (x, y) => (Math.abs(x - 64) / 60) ** 5 + (Math.abs(y - 64) / 60) ** 5 <= 1;
 
-function inBookmark(x, y) {
+/** The mark: 52 wide, 70 tall, rounded top corners, a V notch rising 20 from its foot. */
+function inMark(x, y) {
   const dx = Math.abs(x - 64);
-  if (dx > 24 || y < 28 || y > 100) return false;
-  // The notch: a V rising from the two tails at the bottom to y = 82 in the middle.
-  if (y > 82 + (dx / 24) * 18) return false;
-  // Rounded top corners.
-  const r = 9;
-  if (y < 28 + r && dx > 24 - r) return Math.hypot(dx - (24 - r), y - (28 + r)) <= r;
+  const top = 29;
+  const foot = 99;
+  if (dx > 26 || y < top || y > foot) return false;
+  if (y > foot - 20 + (dx / 26) * 20) return false;
+  const r = 7;
+  if (y < top + r && dx > 26 - r) return Math.hypot(dx - (26 - r), y - (top + r)) <= r;
   return true;
 }
-
-/** A four-point sparkle: an astroid, whose concave sides give the pointed star. */
-const inSparkle = (x, y) => Math.abs((x - 64) / 15) ** (2 / 3) + Math.abs((y - 56) / 15) ** (2 / 3) <= 1;
 
 function render(size) {
   const px = new Uint8Array(size * size * 4);
   const unit = 128 / size;
-  const sparkle = size >= 32;
 
   for (let py = 0; py < size; py++) {
     for (let pxl = 0; pxl < size; pxl++) {
@@ -50,20 +46,12 @@ function render(size) {
           const y = (py + (sy + 0.5) / SS) * unit;
           if (!inTile(x, y)) continue;
           tile++;
-          if (inBookmark(x, y) && !(sparkle && inSparkle(x, y))) mark++;
+          if (inMark(x, y)) mark++;
         }
       }
       const i = (py * size + pxl) * 4;
       if (!tile) continue;
-
-      // Diagonal gradient, with a soft light falling from the top edge.
-      const cx = (pxl + 0.5) * unit;
-      const cy = (py + 0.5) * unit;
-      const t = Math.min(1, Math.max(0, (cx * 0.45 + cy) / 175));
-      const bg = t < 0.5 ? mix(CORAL, PINK, t * 2) : mix(PINK, VIOLET, (t - 0.5) * 2);
-      const lit = mix(bg, WHITE, Math.max(0, 0.14 - cy / 128 * 0.28));
-
-      const [r, g, b] = mix(lit, WHITE, mark / tile);
+      const [r, g, b] = mix(INK, WHITE, mark / tile);
       px[i] = r;
       px[i + 1] = g;
       px[i + 2] = b;

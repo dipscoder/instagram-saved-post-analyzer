@@ -20,7 +20,7 @@ import { hashText } from '@saved-index/shared/hash';
 import { applyVerdict, isFresh, parseVerdict, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
-import { isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
+import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
 import { applyResult } from '../src/background/filing';
@@ -399,9 +399,23 @@ console.log('\nroute fences');
   check('a collection is not the full feed', !isFullSavedFeed('/dipscoder/saved/travel/'));
   check('a hashtag page is never the full feed', !isFullSavedFeed('/explore/tags/saved/'));
 
-  check('a collection opens the full saved feed', savedFeedPath('/dipscoder/saved/travel/1792/') === '/dipscoder/saved/');
+  check('a collection opens the full saved feed', savedFeedPath('/dipscoder/saved/travel/1792/') === '/dipscoder/saved/all-posts/');
   check('a non-saved page has no library', savedFeedPath('/dipscoder/') === null);
   check('a hashtag page has no library', savedFeedPath('/explore/tags/saved/') === null);
+
+  // The pill appears inside a collection and nowhere else.
+  check('the saved overview shows no pill', collectionFromPath('/dipscoder/saved/') === null);
+  check('the overview without a slash shows no pill', collectionFromPath('/dipscoder/saved') === null);
+  check('all posts is a collection', collectionFromPath('/dipscoder/saved/all-posts/')?.name === 'All posts');
+  check('audio is a collection', collectionFromPath('/dipscoder/saved/audio/')?.id === 'audio');
+  const travel = collectionFromPath('/dipscoder/saved/travel-ideas/17925063/');
+  check('a named collection carries its id and name',
+    travel?.id === '17925063' && travel.name === 'Travel ideas', travel);
+  check('an encoded collection name is decoded',
+    collectionFromPath('/dipscoder/saved/caf%C3%A9s/1792/')?.name === 'Cafés');
+  check('an unknown saved page shows no pill', collectionFromPath('/dipscoder/saved/travel/') === null);
+  check('a post opened from a collection shows no pill', collectionFromPath('/p/C8xK2mLp3qR/') === null);
+  check('a hashtag page shows no pill', collectionFromPath('/explore/tags/saved/') === null);
 }
 
 console.log('\nhashText');

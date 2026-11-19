@@ -16,9 +16,9 @@ export const styles = /* css */ `
   --text: #1c1917;
   --text-2: #57534e;
   --text-3: #a29d97;
-  --accent: #6d4aff;
-  --accent-strong: #5b36f2;
-  --accent-wash: #f0ecff;
+  --accent: #18181b;
+  --accent-strong: #000000;
+  --accent-wash: #f4f4f5;
   --ink: #1c1917;
   --on-ink: #ffffff;
   --danger: #d92d48;
@@ -43,9 +43,9 @@ export const styles = /* css */ `
   --text: #f5f5f4;
   --text-2: #b4afa8;
   --text-3: #79746d;
-  --accent: #a78bfa;
-  --accent-strong: #c4b1ff;
-  --accent-wash: rgba(167, 139, 250, 0.14);
+  --accent: #fafafa;
+  --accent-strong: #ffffff;
+  --accent-wash: rgba(255, 255, 255, 0.1);
   --ink: #f5f5f4;
   --on-ink: #121211;
   --danger: #ff6b81;
@@ -97,14 +97,10 @@ svg { display: block; }
   padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--canvas);
 }
 .brand { flex: none; width: 196px; display: flex; align-items: center; gap: 10px; }
+/* The Notch mark: a tile with a bookmark notch cut from its foot, in the ink colour. */
 .brand-mark {
-  position: relative; flex: none; width: 28px; height: 28px; border-radius: 8px;
-  background: linear-gradient(135deg, #ff6a55, #f03e86 52%, #7a4cff);
-}
-.brand-mark::before {
-  content: ""; position: absolute; left: 8.5px; top: 6.5px; width: 11px; height: 15px;
-  border-radius: 2.5px 2.5px 1.5px 1.5px; background: #fff;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
+  flex: none; width: 22px; height: 22px; background: var(--text);
+  clip-path: polygon(14% 4%, 86% 4%, 86% 96%, 50% 70%, 14% 96%);
 }
 .brand-name { font: 650 15px/1 var(--display); letter-spacing: -0.02em; }
 .search {
@@ -319,25 +315,29 @@ svg { display: block; }
 /* Empty and restore states */
 .empty { min-height: 440px; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 70px 36px; text-align: center; }
 .empty-mark {
-  position: relative; width: 52px; height: 52px; margin-bottom: 12px; border-radius: 15px;
-  background: linear-gradient(135deg, #ff6a55, #f03e86 52%, #7a4cff); box-shadow: 0 12px 30px rgba(240, 62, 134, 0.22);
-}
-.empty-mark::before {
-  content: ""; position: absolute; left: 16px; top: 12px; width: 20px; height: 27px;
-  border-radius: 4px; background: #fff; clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 73%, 0 100%);
+  width: 44px; height: 44px; margin-bottom: 12px; background: var(--text);
+  clip-path: polygon(14% 4%, 86% 4%, 86% 96%, 50% 70%, 14% 96%);
 }
 .empty-title { font: 700 19px/1.3 var(--display); letter-spacing: -0.02em; }
 .empty-detail { max-width: 400px; color: var(--text-2); font-size: 13.5px; line-height: 1.6; }
-.restore {
-  position: absolute; right: 22px; bottom: 22px; pointer-events: auto;
-  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px 8px 8px;
-  border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--text);
-  font: 600 13px var(--sans); box-shadow: var(--shadow-lg); transition: transform 140ms ease;
+.dock {
+  position: absolute; right: 24px; bottom: 24px; pointer-events: auto;
+  display: flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 120px));
+  padding: 6px 6px 6px 8px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: 500 13px var(--sans); box-shadow: var(--shadow-lg);
 }
-.restore:hover { transform: translateY(-1px); }
-.restore .brand-mark { width: 26px; height: 26px; }
-.restore .brand-mark::before { left: 8px; top: 6px; width: 10px; height: 14px; }
-.restore-key { color: var(--text-3); font-size: 12px; }
+.dock .brand-mark { width: 20px; height: 20px; margin-left: 4px; }
+.dock-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.dock-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-status { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-action, .dock-open {
+  flex: none; min-height: 32px; padding: 0 14px; border-radius: 999px; font: 600 12.5px var(--sans); cursor: pointer;
+}
+.dock-action { border: 0; background: var(--ink); color: var(--on-ink); }
+.dock-action:hover { opacity: 0.86; }
+.dock-open { border: 1px solid var(--line); background: transparent; color: var(--text); }
+.dock-open:hover { background: var(--surface-2); }
+.dock button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 1400px) { .explain { grid-template-columns: 1fr; } .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1050px) {

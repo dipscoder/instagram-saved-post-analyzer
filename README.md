@@ -128,8 +128,11 @@ claims one. What you get instead:
 Save order is the default sort, because ordering saved posts by publish date buries a 2019
 clip you saved yesterday. **Newest post** and **Oldest post** use the publish date.
 
-**Library ↔ Instagram** in the header switches between the two; `⌥S` / `Alt+S` does the
-same from the keyboard. Instagram's own grid is underneath either way, untouched.
+**Where it appears.** Nothing shows on the feed, on profiles or on the Saved overview. Open
+a collection (All posts, Audio, or one of your own) and a small pill in the bottom-right
+names it, offers **Index this collection**, and opens the library on request. The library
+never opens by itself, and the extension never listens to keys you type on Instagram.
+**Library ↔ Instagram** in the library header, or Esc, takes you back to Instagram's grid.
 
 **Light and dark.** Everything starts light. The sun/moon button in the library header or
 the popup header switches both at once, and the choice is remembered.
@@ -311,8 +314,8 @@ parseable JSON. Switch to a stronger model; progress is kept, so it resumes wher
 stopped.
 
 **The library covers something I need.** Switch to **Instagram** in the header, or press
-`⌥S` / `Alt+S`. Instagram's own grid is underneath, untouched, and a chip in the
-bottom-right switches back.
+Esc. Instagram's own grid is underneath, untouched, and the pill in the bottom-right
+opens the library again.
 
 **Reels keep muting themselves when I pause.** Fixed — but the fix only applies to the mute
 button on *our* control bar, which is what records that you want sound. Instagram's own

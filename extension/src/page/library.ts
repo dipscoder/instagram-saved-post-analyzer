@@ -1,5 +1,11 @@
 /**
- * The in-page library that takes over instagram.com/…/saved.
+ * The in-page pill, and the library it opens, inside a saved collection on instagram.com.
+ *
+ * Out of the way by default. Opening a collection shows only a small pill in the corner
+ * (index this collection, or open the library); Instagram stays fully usable underneath,
+ * keyboard included. The library covers the page only when the user asks for it, and
+ * nothing here listens to keys on Instagram's document. The library is a stopgap until the
+ * web app replaces it.
  *
  * Rendered into a Shadow DOM so Instagram's stylesheet can't reach our markup and ours
  * can't leak into theirs. Mounted as a fixed overlay anchored to the right of Instagram's
@@ -24,7 +30,7 @@ import {
   type Stats,
 } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
-import { isFullSavedFeed } from '../routes';
+import { isFullSavedFeed, type SavedCollection } from '../routes';
 import { CATEGORY_NAMES, UNCATEGORIZED } from '@saved-index/shared/taxonomy';
 import { IDLE_PROGRESS, type IndexProgress, type PostRecord, type Theme } from '../types';
 import { styles } from './library.css';
@@ -87,7 +93,7 @@ const state: State = {
   sort: 'saved',
   selected: new Set(),
   view: 'grid',
-  visible: true,
+  visible: false,
   loading: true,
   panelDismissed: false,
   explainOpen: false,
@@ -117,6 +123,11 @@ let unsubscribe: (() => void) | null = null;
 // caret out of the search box, or lose keyboard focus.
 let elApp: HTMLElement | null = null;
 let elRestore: HTMLElement | null = null;
+let elPillName: HTMLElement | null = null;
+let elPillStatus: HTMLElement | null = null;
+let elPillAction: HTMLButtonElement | null = null;
+/** The collection this mount is about. Set on mount; the pill names it. */
+let collection: SavedCollection = { id: 'all-posts', name: 'All posts' };
 let elRail: HTMLElement | null = null;
 let elMain: HTMLElement | null = null;
 let elSearch: HTMLInputElement | null = null;
@@ -129,8 +140,9 @@ let elWhere: HTMLElement | null = null;
 let elBack: HTMLButtonElement | null = null;
 let elTheme: HTMLElement | null = null;
 
-export function mountLibrary(): void {
+export function mountLibrary(where: SavedCollection): void {
   if (host) return;
+  collection = where;
 
   host = document.createElement('div');
   host.setAttribute('data-saved-index', 'library');
@@ -147,7 +159,9 @@ export function mountLibrary(): void {
   applyTheme(state.theme);
   document.body.appendChild(host);
 
-  document.addEventListener('keydown', onShortcut, true);
+  // Listened for on our own shadow root, never on Instagram's document: a key pressed
+  // anywhere on Instagram is Instagram's.
+  shadow.addEventListener('keydown', onLibraryKey as EventListener);
   setPageInert(true);
   unsubscribe = subscribe(onBroadcast);
   void send<{ settings: SafeSettings }>({ type: 'settings:get' })
@@ -161,20 +175,18 @@ export function unmountLibrary(): void {
   if (harvest) void send({ type: 'harvest:finished', reason: 'stopped' }).catch(() => {});
   stopHarvesting();
   setPageInert(false);
-  document.removeEventListener('keydown', onShortcut, true);
   window.clearTimeout(searchDebounce);
   window.clearTimeout(refreshQueued);
   refreshQueued = 0;
 
   // State is a module singleton, so anything not reset here is replayed on the next
   // mount: a remount would paint the previous visit's stale cards, ask for its 2,000-row
-  // page again, and — if the user had switched to Instagram's own grid before leaving —
-  // come back invisible, with a 12px chip as the only clue where the library went.
+  // page again, or come back open over a collection the user only meant to look at.
   state.posts = [];
   state.matches = 0;
   state.limit = PAGE_SIZE;
   state.loading = true;
-  state.visible = true;
+  state.visible = false;
   state.panelDismissed = false;
   state.straysDismissed = false;
   state.strays = 0;
@@ -189,6 +201,7 @@ export function unmountLibrary(): void {
   host?.remove();
   host = null;
   shadow = null;
+  elPillName = elPillStatus = elPillAction = null;
   elApp = elRestore = elRail = elMain = elIndexLabel = null;
   elTitle = elCount = elSeg = elWhere = null;
   elBack = elTheme = null;
@@ -431,13 +444,7 @@ function buildShell(): DocumentFragment {
   // The chip that brings the library back. It lives in here rather than being built on
   // demand in the page so it shares the design system, and so there is exactly one node
   // to reason about when the route changes.
-  elRestore = h('button', 'restore', [
-    h('span', 'brand-mark'),
-    h('span', '', 'Saved Index'),
-    h('span', 'restore-key', shortcutLabel()),
-  ]);
-  elRestore.title = `Show the library (${shortcutLabel()})`;
-  elRestore.addEventListener('click', () => setVisible(true));
+  elRestore = buildPill();
 
   const frag = document.createDocumentFragment();
   frag.append(app, elRestore);
@@ -460,7 +467,7 @@ function whereSwitch(): HTMLElement {
     b.addEventListener('click', () => setVisible(key === 'library'));
     seg.append(b);
   }
-  seg.title = `Switch between the library and Instagram's own grid (${shortcutLabel()})`;
+  seg.title = "Switch between the library and Instagram's own grid";
   return seg;
 }
 
@@ -474,28 +481,90 @@ function setVisible(visible: boolean): void {
 }
 
 /**
- * Alt/Option + S. Modified so it cannot collide with Instagram's own single-key
- * shortcuts, and ignored while you are typing — on a Mac, Option+S is a real character.
+ * Escape closes the library. Only keys pressed inside our own UI reach this: Alt+S used
+ * to be a document-wide shortcut, and a document-wide listener is how Instagram's own
+ * typing ended up being ours.
  */
-function onShortcut(ev: KeyboardEvent): void {
-  // Escape is the first thing anyone tries on a full-viewport overlay. Getting out of the
-  // way is not the same as unmounting: the chip and Alt+S bring it straight back.
-  if (ev.key === 'Escape' && state.visible && host) {
-    setVisible(false);
+function onLibraryKey(ev: KeyboardEvent): void {
+  if (ev.key !== 'Escape' || !state.visible) return;
+  ev.stopPropagation();
+  setVisible(false);
+}
+
+/**
+ * The pill: everything the extension shows on Instagram until the user opens the library.
+ * Names the collection, says what is happening, and offers one action plus a way in.
+ */
+function buildPill(): HTMLElement {
+  const pill = h('div', 'dock');
+  pill.setAttribute('role', 'region');
+  pill.setAttribute('aria-label', 'Saved Index');
+
+  elPillName = h('span', 'dock-name');
+  elPillStatus = h('span', 'dock-status');
+  elPillStatus.setAttribute('aria-live', 'polite');
+  const text = h('span', 'dock-text', [elPillName, elPillStatus]);
+
+  elPillAction = h('button', 'dock-action');
+  elPillAction.addEventListener('click', () => void onPillAction());
+
+  const open = h('button', 'dock-open', 'Open library');
+  open.addEventListener('click', () => setVisible(true));
+
+  pill.append(h('span', 'brand-mark'), text, elPillAction, open);
+  return pill;
+}
+
+function renderPill(): void {
+  if (!elPillName || !elPillStatus || !elPillAction) return;
+  elPillName.textContent = collection.name;
+  elPillStatus.textContent = pillStatus();
+  elPillStatus.title = state.progress.message ?? '';
+  const busy = state.harvesting || state.progress.phase === 'running';
+  elPillAction.textContent = pillActionLabel();
+  elPillAction.classList.toggle('busy', busy);
+}
+
+function pillStatus(): string {
+  const p = state.progress;
+  if (state.harvesting) return `Scanning · ${p.total} found`;
+  if (p.phase === 'running') return `Sorting ${p.runCompleted} of ${p.runTotal}`;
+  if (p.phase === 'error') return p.message ?? 'Something went wrong';
+  if (p.phase === 'paused' && p.message) return p.message;
+  if (state.strays > 0 && !state.straysDismissed) {
+    return `${state.strays} no longer saved · review in the library`;
+  }
+  return indexLabel();
+}
+
+function pillActionLabel(): string {
+  const p = state.progress;
+  if (state.harvesting || p.phase === 'running') return 'Pause';
+  if (p.phase === 'paused' || p.phase === 'error') return 'Resume';
+  if (p.pending > 0) return `Index ${p.pending}`;
+  return state.stats.total === 0 ? 'Index this collection' : 'Scan for new';
+}
+
+/**
+ * Start, pause or resume — never a re-index. Re-billing posts that already have a verdict
+ * needs a quote and a confirmation, and those live in the library, not in a one-click pill.
+ */
+async function onPillAction(): Promise<void> {
+  if (state.progress.phase === 'running' || state.harvesting) {
+    stopHarvesting();
+    await send({ type: 'index:pause' }).catch(() => {});
     return;
   }
-  if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
-  if ((ev.code || '') !== 'KeyS') return;
-
-  // Our own search box is inside a shadow root, and `ev.target` retargets to the host
-  // for anything in there. composedPath()[0] is the node actually focused.
-  const target = (ev.composedPath()[0] ?? ev.target) as HTMLElement | null;
-  if (target?.isContentEditable) return;
-  if (target?.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-
-  ev.preventDefault();
-  ev.stopPropagation();
-  setVisible(!state.visible);
+  try {
+    await send({ type: 'index:start' });
+  } catch (err) {
+    state.progress = {
+      ...state.progress,
+      phase: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+    render();
+  }
 }
 
 const ICON_SUN =
@@ -516,22 +585,19 @@ function applyTheme(theme: Theme | undefined): void {
   }
 }
 
-function shortcutLabel(): string {
-  return navigator.userAgent.includes('Mac') ? '⌥S' : 'Alt+S';
-}
-
 // --- rendering --------------------------------------------------------------
 
 function render(): void {
   if (!host || !elApp || !elRestore || !elRail || !elMain) return;
   if (!elSearch || !elIndexLabel || !elTitle || !elCount || !elSort || !elSeg || !elWhere || !elBack) return;
 
-  // Hidden means *out of the way*, not unmounted: the host stays put so the chip and the
-  // keyboard shortcut keep working, and stops intercepting pointer events so Instagram's
-  // own grid underneath is fully usable.
+  // Hidden means *out of the way*, not unmounted: the host stays put so the pill keeps
+  // working, and stops intercepting pointer events so Instagram's own grid underneath is
+  // fully usable.
   host.style.pointerEvents = state.visible ? 'auto' : 'none';
   elApp.style.display = state.visible ? 'flex' : 'none';
   elRestore.style.display = state.visible ? 'none' : 'flex';
+  renderPill();
   for (const btn of elWhere.children) {
     const on = ((btn as HTMLElement).dataset['where'] === 'library') === state.visible;
     btn.classList.toggle('on', on);
