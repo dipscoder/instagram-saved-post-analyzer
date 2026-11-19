@@ -205,6 +205,12 @@
       .summary { margin-top: 12px; padding: 14px 16px 16px; }
       .card-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--label-2); }
       .card-head a { font-weight: 600; }
+      /* The two steps, so "find" and "index" are never one blurred idea. */
+      .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+      .step { border: 1px solid var(--separator); border-radius: 8px; padding: 6px 8px; font-size: 11px; line-height: 1.35; color: var(--label-2); }
+      .step b { display: block; font-size: 12px; color: var(--label); }
+      .step.on { border-color: var(--label); }
+      .step.done b::after { content: " ✓"; }
       .summary h1 { margin: 8px 0 0; font-size: 20px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.25; }
       .summary p { margin: 4px 0 0; font-size: 12px; color: var(--label-2); }
       .track { height: 4px; margin-top: 14px; border-radius: 3px; background: var(--fill); overflow: hidden; }
@@ -308,7 +314,7 @@
         <div class="hero">
           <img src="icons/icon128.png" alt="" />
           <h1>Saved Index</h1>
-          <p>Your Instagram saves, sorted and searchable.</p>
+          <p>Your Instagram saves, organised and searchable.</p>
         </div>
 
         <div id="accountSlotSetup"></div>
@@ -340,7 +346,7 @@
 
         <div class="group spend">
           <div class="spend-cell"><span>Spent so far</span><b class="money" id="fSpent">$0.00</b></div>
-          <div class="spend-cell"><span id="fLeftCap">To sort the rest</span><b class="money" id="fLeft">$0.00</b></div>
+          <div class="spend-cell"><span id="fLeftCap">To index the rest</span><b class="money" id="fLeft">$0.00</b></div>
         </div>
 
         <div class="group summary">
@@ -348,15 +354,19 @@
             <span>Indexing</span>
             <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram ↗</a>
           </div>
+          <div class="steps">
+            <div class="step" id="stepFind"><b>1 · Find</b>Scrolls your saves on Instagram. Free.</div>
+            <div class="step" id="stepIndex"><b>2 · Index</b>AI files each post by topic, with a summary and tags.</div>
+          </div>
           <h1 id="homeTitle">Nothing found yet</h1>
           <p id="homeBody"></p>
-          <div class="track" id="track" role="progressbar" aria-label="Sorting progress"
+          <div class="track" id="track" role="progressbar" aria-label="Indexing progress"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <i id="fill" style="width: 0%"></i>
           </div>
           <div class="stats">
             <div class="stat"><b id="fCaptured">0</b><span>Found</span></div>
-            <div class="stat"><b id="fIndexed">0</b><span>Sorted</span></div>
+            <div class="stat"><b id="fIndexed">0</b><span>Indexed</span></div>
             <div class="stat"><b id="fQueued">0</b><span id="fQueuedCap">Waiting</span></div>
           </div>
         </div>
@@ -373,7 +383,7 @@
           </div>
 
           <div class="heading">OpenAI key</div>
-          <p class="note top" id="ownKeyNote" hidden>Not needed while you are signed in: your account sorts your posts.</p>
+          <p class="note top" id="ownKeyNote" hidden>Not needed while you are signed in: your account indexes your posts.</p>
           <div class="group">
             <div class="row"><span class="label">Model</span><select id="model2" aria-label="Model"></select></div>
             <div class="row">
@@ -394,7 +404,7 @@
           <div class="heading">Preferences</div>
           <div class="group">
             <div class="row">
-              <label for="autoIndex">Sort new saves automatically<span class="sub">Sort a post as soon as it is found.</span></label>
+              <label for="autoIndex">Index new saves automatically<span class="sub">Index a post as soon as it is found.</span></label>
               <button type="button" class="switch" id="autoIndex" role="switch" aria-checked="false"><i></i></button>
             </div>
             <div class="row">
@@ -411,8 +421,15 @@
             <input id="importFile" type="file" accept="application/json,.json" hidden />
             <button class="row action destructive" id="resetSpend">Reset Spend Counter</button>
           </div>
-          <p class="note">Paid summaries are kept, so the same post is never paid for twice.</p>
+          <p class="note">Paid summaries are kept, so the same post is never paid for twice, unless you clear the library below.</p>
           <div class="status" id="ledgerStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
+
+          <div class="heading">Start over</div>
+          <div class="group">
+            <button class="row action destructive" id="startOver">Clear Library</button>
+          </div>
+          <p class="note">Removes every post, picture, collection and AI summary, here and in your account, so you can find and index from scratch. Indexing again is paid again. The spend counter is kept.</p>
+          <div class="status" id="startOverStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
         </details>
       </section>
     </main>

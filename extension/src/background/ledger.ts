@@ -193,6 +193,21 @@ export async function putMany(verdicts: Verdict[]): Promise<void> {
   });
 }
 
+/**
+ * Erases every paid summary. Only Clear Library calls this, after the user pressed it
+ * twice and was told the summaries go too. Nothing else may: see invariant 4.
+ */
+export async function clearAll(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const t = db.transaction(LEDGER_STORE, 'readwrite');
+    t.objectStore(LEDGER_STORE).clear();
+    t.oncomplete = () => resolve();
+    t.onerror = t.onabort = () => reject(t.error ?? new Error('ledger clear failed'));
+  });
+  cache = null;
+}
+
 // --- portability ------------------------------------------------------------
 
 export interface LedgerFile {

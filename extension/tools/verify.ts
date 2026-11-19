@@ -894,18 +894,18 @@ console.log('\none indexing button');
   const p = (over: Partial<typeof IDLE_PROGRESS>) => ({ ...IDLE_PROGRESS, ...over });
   check('nothing found yet: find', flowButton(p({}), false).action === 'find');
   check('finding: pause', flowButton(p({ pending: 4 }), true).action === 'pause');
-  check('sorting: pause', flowButton(p({ phase: 'running', pending: 4, runTotal: 4 }), false).action === 'pause');
+  check('indexing: pause', flowButton(p({ phase: 'running', pending: 4, runTotal: 4 }), false).action === 'pause');
   const waiting = flowButton(p({ phase: 'done', total: 40, pending: 34 }), false);
-  check('found posts waiting: sort, never find', waiting.action === 'sort' && waiting.label === 'Sort 34 posts', waiting);
-  check('one post reads naturally', flowButton(p({ pending: 1 }), false).label === 'Sort 1 post');
+  check('found posts waiting: index, never find', waiting.action === 'index' && waiting.label === 'Index 34 posts', waiting);
+  check('one post reads naturally', flowButton(p({ pending: 1 }), false).label === 'Index 1 post');
   const paused = flowButton(p({ phase: 'paused', pending: 10, runTotal: 20, runCompleted: 10 }), false);
-  check('a paused run resumes sorting, not finding', paused.action === 'sort' && paused.label === 'Resume sorting', paused);
-  check('all sorted: find new posts',
+  check('a paused run resumes indexing, not finding', paused.action === 'index' && paused.label === 'Resume indexing', paused);
+  check('all indexed: find new posts',
     flowButton(p({ phase: 'done', total: 40, categorized: 40 }), false).label === 'Find new posts');
   check('status while finding counts what waits',
-    flowStatus(p({ pending: 12 }), true) === 'Finding posts · 12 to sort');
-  check('status while sorting', flowStatus(p({ phase: 'running', runTotal: 30, runCompleted: 7 }), false) === 'Sorting 7 of 30');
-  check('status when done', flowStatus(p({ phase: 'done', total: 40, categorized: 40 }), false) === '40 posts, all sorted');
+    flowStatus(p({ pending: 12 }), true) === 'Finding posts · 12 to index');
+  check('status while indexing', flowStatus(p({ phase: 'running', runTotal: 30, runCompleted: 7 }), false) === 'Indexing 7 of 30');
+  check('status when done', flowStatus(p({ phase: 'done', total: 40, categorized: 40 }), false) === '40 posts, all indexed');
   check('a rate-limit message is shown as is',
     flowStatus(p({ phase: 'paused', message: 'Instagram rate-limited the page.' }), false) === 'Instagram rate-limited the page.');
 }

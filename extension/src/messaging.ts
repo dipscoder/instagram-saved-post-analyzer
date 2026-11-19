@@ -93,7 +93,9 @@ export type Request =
   | { type: 'account:sign-in'; email: string; password: string }
   | { type: 'account:sign-up'; email: string; password: string }
   | { type: 'account:sign-out' }
-  | { type: 'account:sync' };
+  | { type: 'account:sync' }
+  /** Clean slate: deletes posts, thumbnails and collections here and on the account. */
+  | { type: 'account:start-over' };
 
 export type Response =
   | { ok: true; value: unknown }

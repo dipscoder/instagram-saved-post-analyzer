@@ -867,7 +867,7 @@ function blockingState(): HTMLElement | null {
     );
   }
   if (state.progress.phase === 'error') {
-    return empty('Sorting stopped', state.progress.message ?? 'Something went wrong.', {
+    return empty('Indexing stopped', state.progress.message ?? 'Something went wrong.', {
       label: 'Try again',
       run: () => void onIndexAction(),
     });
@@ -876,7 +876,7 @@ function blockingState(): HTMLElement | null {
     return empty(
       'Nothing captured yet',
       'Instagram sends about a dozen posts per request, so the library fills as you scroll. ' +
-        'Find new posts does that scrolling for you, at a human pace, then sorts what it found.',
+        'Find new posts does that scrolling for you, at a human pace, then indexes what it found.',
       { label: 'Find new posts', run: () => void onIndexAction() },
     );
   }
@@ -966,7 +966,7 @@ function indexPanel(): HTMLElement | null {
 
   if (state.harvesting) {
     el.append(
-      h('div', 'panel-note', 'Scrolling this collection to find posts. Sorting starts when it reaches the end.'),
+      h('div', 'panel-note', 'Scrolling this collection to find posts. Indexing starts when it reaches the end.'),
     );
   }
   if (p.phase === 'error' && p.message) el.append(h('div', 'panel-note bad', p.message));
@@ -998,10 +998,10 @@ function indexPanel(): HTMLElement | null {
             'made to Instagram.',
         ),
         explainRow(
-          '2 · Sort — the part that costs',
+          '2 · Index — the part that costs',
           'Hashtag and keyword rules label what they can for nothing. The rest go to your ' +
             'model in batches of 25 captions. Only posts with no usable caption cost a look at ' +
-            'the thumbnail. Sorting starts by itself when finding reaches the end, and never ' +
+            'the thumbnail. Indexing starts by itself when finding reaches the end, and never ' +
             'scrolls.',
         ),
         explainRow(
@@ -1299,7 +1299,7 @@ async function onIndexAction(): Promise<void> {
     if (action === 'pause') {
       stopHarvesting();
       await send({ type: 'index:pause' });
-    } else if (action === 'sort') {
+    } else if (action === 'index') {
       await send({ type: 'index:start' });
     } else {
       // The worker answers with a harvest broadcast, which starts the scroll here.

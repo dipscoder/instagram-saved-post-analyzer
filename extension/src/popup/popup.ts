@@ -69,7 +69,7 @@ let replacing = false;
  * when `pending` is zero. Now the button says the price and asks twice.
  */
 let quote: ReindexQuote | null = null;
-let confirming: 'reindex' | 'remove' | 'reset' | null = null;
+let confirming: 'reindex' | 'remove' | 'reset' | 'startOver' | null = null;
 /** Someone who has signed in here before is far likelier to be signing in than signing up. */
 let accountMode: 'sign-up' | 'sign-in' = remembered('signedInBefore') ? 'sign-in' : 'sign-up';
 /** Signed in, posts are analysed by the account and no key of your own is needed. */
@@ -233,6 +233,18 @@ function wire(): void {
         render();
       })
       .catch(fail('homeStatus'));
+  });
+
+  $('startOver').addEventListener('click', () => {
+    if (confirming !== 'startOver') return arm('startOver');
+    confirming = null;
+    setStatus('startOverStatus', '', 'Clearing…');
+    void send({ type: 'account:start-over' })
+      .then(async () => {
+        await refresh();
+        setStatus('startOverStatus', 'ok', 'Library cleared. Open your saved posts on Instagram to find them again.');
+      })
+      .catch(fail('startOverStatus'));
   });
 
   $('autoIndex').addEventListener('click', () => void save({ autoIndex: !settings.autoIndex }));
@@ -487,8 +499,8 @@ async function onPrimary(): Promise<void> {
   }
   confirming = null;
 
-  // Same rules as the pill: sorting never scrolls, finding scrolls the open collection
-  // and sorts what it found. Re-index stays here, behind its quote and confirmation.
+  // Same rules as the pill: indexing never scrolls, finding scrolls the open collection
+  // and indexes what it found. Re-index stays here, behind its quote and confirmation.
   const type = active
     ? 'index:pause'
     : finished
@@ -602,12 +614,16 @@ function renderHome(): void {
   // starts a full re-index. Show what that button would cost instead.
   const finished = pending === 0 && total > 0 && !active;
   $('fLeft').textContent = fmtUsd(finished && quote ? quote.usd : estimateUsd);
-  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'To sort the rest, at most';
+  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'To index the rest, at most';
   const progressTotal = progress.runTotal || total;
   const progressDone = progress.runTotal ? progress.runCompleted : categorized;
   const percent = Math.round(progressTotal ? (progressDone / progressTotal) * 100 : 0);
   $('fill').style.width = `${percent}%`;
   $('track').setAttribute('aria-valuenow', String(percent));
+
+  // Find is done once something is found; Index is done when nothing waits.
+  $('stepFind').className = `step${harvesting || total === 0 ? ' on' : ' done'}`;
+  $('stepIndex').className = `step${running || (!harvesting && pending > 0) ? ' on' : total > 0 && pending === 0 && !harvesting ? ' done' : ''}`;
 
   $('homeTitle').textContent =
     harvesting && total === 0
@@ -615,39 +631,39 @@ function renderHome(): void {
       : total === 0
       ? 'Nothing found yet'
       : running
-        ? `Sorting ${progress.runCompleted} of ${progress.runTotal}`
+        ? `Indexing ${progress.runCompleted} of ${progress.runTotal}`
         : harvesting
           ? 'Finding posts'
           : pending > 0
-            ? `${pending} post${pending === 1 ? '' : 's'} found, not sorted yet`
-            : 'Everything found is sorted';
+            ? `${pending} post${pending === 1 ? '' : 's'} found, not indexed yet`
+            : 'Everything found is indexed';
 
   $('homeBody').textContent =
     harvesting && total === 0
-      ? 'Keep the Instagram tab open. Sorting starts by itself when it reaches the end.'
+      ? 'Keep the Instagram tab open. Indexing starts by itself when it reaches the end.'
       : total === 0
       ? 'Open a saved collection on Instagram and press Find new posts in the corner. ' +
-        'It scrolls for you, then sorts what it found.'
+        'It scrolls for you, then indexes what it found.'
       : running
-        ? 'Sorting never scrolls. Pause any time; it picks up where it stopped.'
+        ? 'Indexing never scrolls. Pause any time; it picks up where it stopped.'
         : harvesting
           ? 'Keep the Instagram tab open. Finding does not send extra Instagram requests.'
           : pending > 0
-            ? 'Press Sort to categorise them. It picks up where it stopped.'
-            : 'New saves are found as you scroll and sorted in the background.';
+            ? 'Press Index to file them by topic with a short summary, so you can search them.'
+            : 'New saves are found as you scroll and indexed in the background.';
 
   const primary = $<HTMLButtonElement>('primary');
   primary.classList.toggle('danger', confirming === 'reindex');
   primary.textContent = active
     ? 'Pause'
     : pending > 0
-      ? `Sort ${pending} post${pending === 1 ? '' : 's'}`
+      ? `Index ${pending} post${pending === 1 ? '' : 's'}`
       : total > 0
         ? confirming === 'reindex'
           ? `Confirm — re-index ${total} posts`
           : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
         : 'Find new posts';
-  // With nothing to sort with, the button is the way back to setup rather than a dead
+  // With nothing to index with, the button is the way back to setup rather than a dead
   // grey bar: someone who pressed Skip still needs a route to sign in or add a key.
   if (!canIndex()) primary.textContent = 'Sign in to start';
 
@@ -663,6 +679,10 @@ function renderHome(): void {
 
   $('ledgerState').textContent = String(stats.ledgerCount);
   $('remove').textContent = confirming === 'remove' ? 'Click again to remove the key' : 'Remove Key';
+  $('startOver').textContent =
+    confirming === 'startOver'
+      ? `Click again to erase everything, ${stats.ledgerCount} paid summaries included`
+      : 'Clear Library';
   $('resetSpend').textContent =
     confirming === 'reset' ? 'Click again to erase the spend record' : 'Reset Spend Counter';
   $('keyMask').textContent = settings.keyMask || 'none';

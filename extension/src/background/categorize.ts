@@ -186,6 +186,21 @@ export class Categorizer {
   }
 
   /**
+   * Stops any run and empties the library and the paid ledger, so the next Find and Index
+   * start from nothing. Clear Library is the only caller.
+   */
+  async startOver(): Promise<void> {
+    this.pause();
+    await this.running?.catch(() => {});
+    await db.clearLibrary();
+    await ledger.clearAll();
+    this.unanswered.clear();
+    this.message = null;
+    this.phase = 'idle';
+    await this.emit();
+  }
+
+  /**
    * Re-run categorisation over the whole library.
    *
    * Cheap now, and it did not use to be: `resetCategories` clears the posts' verdicts but

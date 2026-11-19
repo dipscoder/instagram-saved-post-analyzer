@@ -61,7 +61,9 @@ mid-sweep.
 saved — free to rebuild by scrolling. `analysis` is work that was *bought* with the user's
 own API key and is irreproducible. `prune` and `resetCategories` touch only the first. The account's
 `verdicts` table has no delete policy for the same reason.
-See ARCHITECTURE §3b.
+See ARCHITECTURE §3b. The one sanctioned exception is the popup's **Clear Library**
+(two presses, names the summary count): `ledger.clearAll()` locally and the
+`clear_library()` RPC on the account. Nothing else may call either.
 
 **5. Every spend is the user's money.** Before writing anything that calls a model, ask
 what happens when it runs twice. Anything that can re-bill a library needs a quote *and* a

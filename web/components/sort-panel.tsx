@@ -20,7 +20,7 @@ function posts(n: number): string {
 }
 
 /**
- * Sorts every never-sorted post on the server. Nothing is spent until the second press:
+ * Indexes every post never indexed, on the server. Nothing is spent until the second press:
  * the first shows the most it can cost. The run goes in small batches, newest saved
  * first, and Stop ends it after the batch in flight.
  */
@@ -83,7 +83,8 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
           <div>
             {facets.unsorted > 0 && (
               <p>
-                <span className="font-medium text-foreground">{posts(facets.unsorted)} not sorted yet.</span>
+                <span className="font-medium text-foreground">{posts(facets.unsorted)} not indexed yet.</span> Indexing reads
+                each post and files it under a topic with a short summary and tags, so you can find it by searching.
               </p>
             )}
             {unsure > 0 && (
@@ -95,7 +96,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
           </div>
           {facets.unsorted > 0 && (
             <Button size="sm" onClick={() => void quote()}>
-              Sort {posts(facets.unsorted)}
+              Index {posts(facets.unsorted)}
             </Button>
           )}
         </div>
@@ -104,7 +105,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
       {phase.kind === 'confirm' && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
-            Sorting {posts(phase.posts.length)} costs at most{' '}
+            Indexing {posts(phase.posts.length)} costs at most{' '}
             <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts.length))}</span>, usually much less. Posts the
             keyword rules can file cost nothing.
           </p>
@@ -113,7 +114,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
               Cancel
             </Button>
             <Button size="sm" onClick={() => void run(phase.posts)}>
-              Sort for up to {usd(quoteUsd(phase.posts.length))}
+              Index for up to {usd(quoteUsd(phase.posts.length))}
             </Button>
           </div>
         </div>
@@ -124,7 +125,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
           <div className="flex items-center justify-between gap-3">
             <p>
               <span className="font-medium text-foreground">
-                Sorting {phase.done.toLocaleString()} of {posts(phase.total)}
+                Indexing {phase.done.toLocaleString()} of {posts(phase.total)}
               </span>{' '}
               · newest saved first
             </p>
@@ -142,7 +143,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
             <span className="font-medium text-foreground">
-              {phase.sorted > 0 ? `Sorted ${posts(phase.sorted)} for ${usd(phase.usd)}.` : 'Nothing was sorted.'}
+              {phase.sorted > 0 ? `Indexed ${posts(phase.sorted)} for ${usd(phase.usd)}.` : 'Nothing was indexed.'}
             </span>
             {phase.unreadable > 0 && ` ${posts(phase.unreadable)} had no caption or picture to go on.`}
             {phase.stopped && ` ${phase.stopped}`}

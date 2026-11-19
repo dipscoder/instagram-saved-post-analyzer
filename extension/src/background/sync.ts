@@ -107,6 +107,32 @@ export async function resetSync(): Promise<void> {
   await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY, VERDICT_CURSOR_KEY]);
 }
 
+/**
+ * Deletes the account's copy of the library: posts, stored thumbnails, collection names
+ * and the paid verdicts (Clear Library is the one sanctioned exception to invariant 4;
+ * see the clear_library migration). Waits out any sync in flight first, so it cannot re-upload behind the delete.
+ */
+export async function wipeAccount(): Promise<void> {
+  if (timer) clearTimeout(timer);
+  timer = null;
+  await running?.catch(() => {});
+  const userId = await currentUserId();
+  if (userId) {
+    // Removing shifts the listing, so each round lists from the start until it is empty.
+    for (;;) {
+      const { data, error } = await supabase.storage.from(BUCKET).list(userId, { limit: PAGE });
+      if (error) throw new Error(error.message);
+      if (!data?.length) break;
+      const removed = await supabase.storage.from(BUCKET).remove(data.map((f) => `${userId}/${f.name}`));
+      if (removed.error) throw new Error(removed.error.message);
+    }
+    // Posts, collections and the paid verdicts go together, server-side, in one call.
+    const { error } = await supabase.rpc('clear_library');
+    if (error) throw new Error(error.message);
+  }
+  await resetSync();
+}
+
 async function syncOnce(): Promise<void> {
   const userId = await currentUserId();
   if (!userId) return;

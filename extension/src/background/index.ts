@@ -14,7 +14,7 @@ import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './provider
 import { reserveRanks } from './order';
 import { resetSpend } from './spend';
 import { getAccount, signIn, signOut, signUp } from './account';
-import { getSyncStatus, resetSync, scheduleSync, syncNow } from './sync';
+import { getSyncStatus, resetSync, scheduleSync, syncNow, wipeAccount } from './sync';
 import {
   clearKey,
   getSafeSettings,
@@ -32,7 +32,7 @@ import {
   type Stats,
 } from '../messaging';
 import { savedFeedPath } from '../routes';
-import { collectionNames, listCollections, rememberCollection, validCollection } from './collections';
+import { collectionNames, forgetCollections, listCollections, rememberCollection, validCollection } from './collections';
 import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
 import type { CapturedPost } from '../types';
 
@@ -413,6 +413,15 @@ async function handle(req: Request): Promise<unknown> {
 
     case 'account:sync':
       await syncNow();
+      return accountState();
+
+    case 'account:start-over':
+      // The account copy goes first: if that fails, nothing local is lost and the user
+      // can simply try again. Paid summaries go too; the spend counter stays.
+      setHarvest('stop');
+      await wipeAccount();
+      await categorizer.startOver();
+      await forgetCollections();
       return accountState();
 
     default: {

@@ -79,16 +79,16 @@ costs money.
 
 | The button says | What happens |
 |---|---|
-| **Find new posts** | Scrolls the open collection to the end, then sorts what it found by itself |
-| **Sort 34 posts** | Sorts posts already found. Never scrolls |
-| **Resume sorting** | Carries on a paused sort where it stopped. Never scrolls |
+| **Find new posts** | Scrolls the open collection to the end, then indexes what it found by itself |
+| **Index 34 posts** | Files posts already found by topic, with a summary and tags. Never scrolls |
+| **Resume indexing** | Carries on a paused run where it stopped. Never scrolls |
 | **Pause** | Stops whichever job is running |
 
 **1 — Find (free).** Instagram sends about a dozen posts per network request. A post
 cannot be found before it has loaded, so *the library fills as you scroll*. If you have
 1,000 saved posts and 30 are on screen, 30 is what exists so far. Find new posts scrolls to
 the bottom with randomised 800–2000 ms pauses and stops immediately if Instagram returns a
-429; posts found before a pause or a 429 wait under **Sort**. It makes no requests
+429; posts found before a pause or a 429 wait under **Index**. It makes no requests
 of its own — it reads the responses the page was fetching anyway.
 
 Capture only runs on your saved page, only reads the part of a response that Instagram
@@ -101,7 +101,7 @@ posts** and let it run to the end. A completed sweep sees everything still saved
 up for removal — posts you have unsaved since, and anything an older build picked up
 elsewhere. Everything genuine keeps the summary you already paid for.
 
-**2 — Categorise (the part that costs).** Hashtag and keyword rules label whatever they can
+**2 — Index (the part that costs).** Hashtag and keyword rules label whatever they can
 for nothing. Everything else goes to your model in batches of 25 captions. Only posts with
 no usable caption *and* no alt text cost a look at the thumbnail. The fixed run queue and
 paid-work ledger both live in the database, so a paused or restarted worker resumes the
@@ -268,7 +268,7 @@ extension/src/
     video.ts               body-level control bar, geometric targeting, observers
     frames.ts              pure: frame length, step targets, timecodes, still filenames
 
-  popup/popup.ts           setup screen + home: account, spend, sorting                → popup.js
+  popup/popup.ts           setup screen + home: account, spend, indexing                → popup.js
 
 extension/public/
   manifest.json  popup.html  icons/
