@@ -24,6 +24,7 @@ import {
   usageOf,
   type Usage,
 } from './decide';
+import { callerOf, capReached, error, openai, recordUsage, spentToday } from '../_shared/server';
 
 export interface Env {
   supabaseUrl: string;
@@ -32,20 +33,13 @@ export interface Env {
   capUsd: number;
 }
 
-const OPENAI = 'https://api.openai.com/v1';
-
 export async function handle(req: Request, env: Env): Promise<Response> {
   if (req.method !== 'POST') return error(405, 'Use POST.');
   if (!env.openaiKey || !env.supabaseUrl) return error(500, 'Analysis is not set up on the server yet.');
 
-  // The caller's session, and the project's publishable key it was sent with.
-  const caller = {
-    apikey: req.headers.get('apikey') ?? '',
-    authorization: req.headers.get('authorization') ?? '',
-  };
-  if (!caller.apikey || !/^Bearer\s+\S+$/.test(caller.authorization)) return error(401, 'Sign in first.');
-  const user = await fetch(`${env.supabaseUrl}/auth/v1/user`, { headers: caller });
-  if (!user.ok) return error(401, 'Sign in first.');
+  const who = await callerOf(req, env.supabaseUrl);
+  if (!who) return error(401, 'Sign in first.');
+  const { caller } = who;
 
   let body;
   try {
@@ -57,7 +51,7 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   const spent = await spentToday(env.supabaseUrl, caller);
   if (spent === null) return error(502, 'Could not read today’s usage. Try again shortly.');
   if (spent >= env.capUsd) {
-    return error(402, `Today's analysis limit of $${env.capUsd.toFixed(2)} is used up. It resets at midnight UTC.`);
+    return error(402, capReached(env.capUsd));
   }
 
   // Both calls are billed whether or not the other succeeds, so a batch fails only when
@@ -83,52 +77,6 @@ export async function handle(req: Request, env: Env): Promise<Response> {
   });
 }
 
-/** One OpenAI call. `reply` is null on any failure; `status` says which. */
-async function openai(endpoint: string, body: object, key: string): Promise<{ reply: unknown; status: number }> {
-  try {
-    const res = await fetch(`${OPENAI}/${endpoint}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) {
-      // The status and OpenAI's own message, never the request: it carries the key.
-      console.error(`OpenAI ${endpoint} ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      return { reply: null, status: res.status };
-    }
-    return { reply: await res.json(), status: res.status };
-  } catch (err) {
-    console.error(`OpenAI ${endpoint} failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { reply: null, status: 0 };
-  }
-}
-
-type Caller = { apikey: string; authorization: string };
-
-/** What the caller has spent today (UTC), or null if it could not be read. */
-async function spentToday(url: string, caller: Caller): Promise<number | null> {
-  const day = new Date().toISOString().slice(0, 10);
-  const res = await fetch(`${url}/rest/v1/usage?select=usd&day=eq.${day}`, { headers: caller });
-  if (!res.ok) return null;
-  const rows = (await res.json()) as { usd?: unknown }[];
-  return Number(rows[0]?.usd ?? 0) || 0;
-}
-
-/** Adds to today's usage. A failure is logged, not fatal: the work is already done. */
-async function recordUsage(url: string, caller: Caller, usd: number, posts: number): Promise<void> {
-  const res = await fetch(`${url}/rest/v1/rpc/record_usage`, {
-    method: 'POST',
-    headers: { ...caller, 'content-type': 'application/json' },
-    body: JSON.stringify({ p_usd: usd, p_posts: posts }),
-  });
-  if (!res.ok) console.error(`record_usage ${res.status}: ${(await res.text()).slice(0, 300)}`);
-}
-
 function total(a: Usage, b: Usage): Usage {
   return { inputTokens: a.inputTokens + b.inputTokens, outputTokens: a.outputTokens + b.outputTokens };
-}
-
-function error(status: number, message: string): Response {
-  return Response.json({ error: message }, { status });
 }

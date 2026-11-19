@@ -38,8 +38,8 @@ import { RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 import type { PostRecord } from '../types';
 import { LEDGER_STORE, openDb } from './db';
 
-/** Bumped only for a change to this record's own shape. */
-export const LEDGER_VERSION = 2;
+import { LEDGER_VERSION } from '@saved-index/shared/filing';
+export { LEDGER_VERSION };
 
 export interface Verdict {
   /** Primary key, shared with the post it describes. */
@@ -191,6 +191,21 @@ export async function putMany(verdicts: Verdict[]): Promise<void> {
       reject(t.error ?? new Error('ledger write failed'));
     };
   });
+}
+
+/**
+ * Erases every paid summary. Only Clear Library calls this, after the user pressed it
+ * twice and was told the summaries go too. Nothing else may: see invariant 4.
+ */
+export async function clearAll(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const t = db.transaction(LEDGER_STORE, 'readwrite');
+    t.objectStore(LEDGER_STORE).clear();
+    t.oncomplete = () => resolve();
+    t.onerror = t.onabort = () => reject(t.error ?? new Error('ledger clear failed'));
+  });
+  cache = null;
 }
 
 // --- portability ------------------------------------------------------------

@@ -26,6 +26,7 @@ import {
   planThumbnails,
   toVerdictRow,
   afterCopy,
+  adoptVerdicts,
   type ThumbFormat,
   type ThumbState,
 } from './sync-plan';
@@ -47,6 +48,10 @@ const OWNER_KEY = 'syncOwner';
 const PULLED_KEY = 'syncPulled';
 /** Digest of the collection names last uploaded, so unchanged names are not re-sent. */
 const COLLECTIONS_SYNC_KEY = 'syncCollections';
+/** The newest `updated_at` among verdicts already pulled from the account. */
+const VERDICT_CURSOR_KEY = 'syncVerdictCursor';
+/** The account's `library_state.cleared_at` this browser last acted on. */
+const CLEARED_KEY = 'syncClearedAt';
 const UPSERT_BATCH = 500;
 /** Deletes go in the query string, so they are batched smaller. */
 const DELETE_BATCH = 100;
@@ -101,18 +106,53 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 /** Forget what was uploaded, so the next sync pulls and sends everything again. */
 export async function resetSync(): Promise<void> {
   await clearStores();
-  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY]);
+  await chrome.storage.local.remove([OWNER_KEY, PULLED_KEY, STATUS_KEY, COLLECTIONS_SYNC_KEY, VERDICT_CURSOR_KEY, CLEARED_KEY]);
+}
+
+type ClearHandler = () => Promise<void>;
+let onCleared: ClearHandler | null = null;
+
+/** What to do locally when the library was cleared from the web app. */
+export function onLibraryCleared(handler: ClearHandler): void {
+  onCleared = handler;
+}
+
+/**
+ * Follows a Clear Library pressed in the web app. The account stamps `cleared_at`; a
+ * browser that has not acted on that stamp yet empties its own copy, ledger included,
+ * so its next upload cannot bring the old library back.
+ *
+ * A browser with no stamp on record clears only if it last synced before the stamp: it
+ * held the library that was cleared. A browser new to the account just adopts it.
+ */
+async function followServerClear(): Promise<void> {
+  const { data, error } = await supabase.from('library_state').select('cleared_at').maybeSingle();
+  // Before the migration runs the table does not exist; sync carries on as before.
+  if (error) return;
+  const stamp = (data as { cleared_at: string } | null)?.cleared_at ?? '';
+  const stored = (await chrome.storage.local.get(CLEARED_KEY))[CLEARED_KEY] as string | undefined;
+  if (stamp === (stored ?? '')) return;
+  // No stamp on record: clear only if this browser synced before the stamp was set.
+  const { lastSyncAt } = await getSyncStatus();
+  const missed = stored !== undefined ? stamp !== '' : stamp !== '' && lastSyncAt !== null && lastSyncAt < Date.parse(stamp);
+  if (missed) {
+    await onCleared?.();
+    await resetSync();
+  }
+  await chrome.storage.local.set({ [CLEARED_KEY]: stamp });
 }
 
 async function syncOnce(): Promise<void> {
   const userId = await currentUserId();
   if (!userId) return;
   await claim(userId);
+  await followServerClear();
 
   const posts = await readMap<{ shortcode: string; hash: string }>(SYNC_STORE);
   const thumbs = await readMap<ThumbState>(THUMB_STORE);
   try {
     if (!(await isPulled(userId))) await pull(userId, thumbs);
+    await pullNewVerdicts();
 
     const records = await db.all();
     const plan = planSync(records, hashes(posts));
@@ -273,6 +313,44 @@ async function pull(userId: string, thumbs: Map<string, ThumbState>): Promise<vo
   await chrome.storage.local.set({ [PULLED_KEY]: userId });
 }
 
+/**
+ * Verdicts the account gained since the last look: posts sorted in the web app, or by
+ * this extension in another browser. They go into the ledger and onto the matching local
+ * posts, so the extension shows them sorted and never pays for them again. Cheap when
+ * nothing changed: one request that returns no rows.
+ */
+async function pullNewVerdicts(): Promise<void> {
+  const stored = (await chrome.storage.local.get(VERDICT_CURSOR_KEY))[VERDICT_CURSOR_KEY];
+  const since = typeof stored === 'string' ? stored : null;
+  let latest = since;
+  const verdicts: ledger.Verdict[] = [];
+  for (;;) {
+    let query = supabase.from('verdicts').select('*').order('updated_at').limit(PAGE);
+    if (latest) query = query.gt('updated_at', latest);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    for (const row of rows) {
+      latest = String(row['updated_at']);
+      const verdict = ledger.parseVerdict(fromVerdictRow(row));
+      if (verdict) verdicts.push(verdict);
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  if (verdicts.length) {
+    await ledger.merge(verdicts);
+    await writeStore(
+      LEDGER_SYNC_STORE,
+      verdicts.map((v) => ({ shortcode: v.shortcode, hash: digest(toVerdictRow(v)) })),
+      [],
+    );
+    const adopted = adoptVerdicts(await db.all(), verdicts);
+    if (adopted.length) await db.updateMany(adopted);
+  }
+  if (latest !== since) await chrome.storage.local.set({ [VERDICT_CURSOR_KEY]: latest });
+}
+
 /** Every row of `table` the caller can see, a page at a time. */
 async function* pages(
   table: 'verdicts' | 'posts',
@@ -295,7 +373,7 @@ async function claim(userId: string): Promise<void> {
   const stored = await chrome.storage.local.get(OWNER_KEY);
   if (stored[OWNER_KEY] === userId) return;
   await clearStores();
-  await chrome.storage.local.remove(PULLED_KEY);
+  await chrome.storage.local.remove([PULLED_KEY, VERDICT_CURSOR_KEY]);
   await chrome.storage.local.set({ [OWNER_KEY]: userId, [STATUS_KEY]: IDLE });
 }
 

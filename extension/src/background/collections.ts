@@ -30,6 +30,11 @@ export async function collectionNames(): Promise<Record<string, string>> {
   return (stored[KEY] as Record<string, string> | undefined) ?? {};
 }
 
+/** Forgets every collection name, for a clean slate. */
+export async function forgetCollections(): Promise<void> {
+  await chrome.storage.local.remove(KEY);
+}
+
 /** Records a collection's current name. Writes only when it changed. */
 export async function rememberCollection(c: SavedCollectionRef): Promise<boolean> {
   const names = await collectionNames();

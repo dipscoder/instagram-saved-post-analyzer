@@ -68,6 +68,7 @@ export type Request =
   | { type: 'index:start' }
   /** Scroll the open collection to find posts; sorting follows when it reaches the end. */
   | { type: 'find:start' }
+  | { type: 'find:stop' }
   | { type: 'index:pause' }
   | { type: 'index:reindex' }
   /** What a re-index would actually cost, given what the ledger already holds. */

@@ -18,7 +18,7 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
             <div className="space-y-5 p-5">
               <div>
                 <SheetTitle className="text-base font-semibold">
-                  {post.category && post.category !== 'Uncategorized' ? post.category : 'Unknown'}
+                  {post.categorized_at === null ? 'Not indexed yet' : post.category && post.category !== 'Uncategorized' ? post.category : 'Unknown'}
                   {post.subcategory && <span className="font-normal text-muted-foreground"> · {post.subcategory}</span>}
                 </SheetTitle>
                 <SheetDescription className="mt-0.5 text-[13px] text-muted-foreground">

@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 
 export function PostCard({ post, thumb, eager, onOpen }: { post: Post; thumb?: string; eager?: boolean; onOpen: () => void }) {
   const unsorted = !post.category || post.category === 'Uncategorized';
+  const label = post.categorized_at === null ? 'Not indexed' : unsorted ? 'Unknown' : post.category;
   const handle = handleOf(post);
   const [loaded, setLoaded] = useState(false);
   return (
@@ -42,7 +43,7 @@ export function PostCard({ post, thumb, eager, onOpen }: { post: Post; thumb?: s
         </div>
       </button>
       <div className="mt-2 flex min-w-0 items-center gap-2 text-[12px]">
-        <span className={cn('shrink-0', unsorted ? 'text-muted-foreground' : 'font-medium')}>{unsorted ? 'Unknown' : post.category}</span>
+        <span className={cn('shrink-0', unsorted ? 'text-muted-foreground' : 'font-medium')}>{label}</span>
         {handle && (
           <a
             href={profileUrl(handle)}

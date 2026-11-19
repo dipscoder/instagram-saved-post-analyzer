@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 /** The columns the library shows. Everything else on the row stays in the database. */
 const POST_COLUMNS =
   'shortcode, permalink, handle, caption, hashtags, thumbnail_url, thumbnail_stored, is_video, ' +
-  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank';
+  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank, categorized_at';
 
 export interface Post {
   shortcode: string;
@@ -25,6 +25,7 @@ export interface Post {
   summary: string | null;
   collections: string[];
   saved_rank: number | null;
+  categorized_at: string | null;
 }
 
 /** What the sidebar is showing. `needs-look` is every post without a confident category. */
@@ -105,15 +106,15 @@ async function facetRowsByScan(): Promise<{ kind: string; key: string; count: nu
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('posts')
-      .select('category, collections')
+      .select('category, collections, categorized_at')
       .order('shortcode')
       .range(from, from + 999)
-      .returns<Pick<Post, 'category' | 'collections'>[]>();
+      .returns<(Pick<Post, 'category' | 'collections'> & { categorized_at: string | null })[]>();
     if (error) throw new Error(error.message);
     for (const row of data ?? []) {
       bump('total\u0000');
-      if (!row.category) bump('unsorted\u0000');
-      else if (row.category === UNCATEGORIZED) bump('unsure\u0000');
+      if (!row.categorized_at) bump('unsorted\u0000');
+      else if (!row.category || row.category === UNCATEGORIZED) bump('unsure\u0000');
       else bump(`category\u0000${row.category}`);
       for (const id of row.collections ?? []) bump(`collection\u0000${id}`);
     }

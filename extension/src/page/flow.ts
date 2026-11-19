@@ -1,44 +1,48 @@
 /**
- * The one indexing button, as pure functions so `npm run verify` can pin its behaviour.
+ * The pill's one button, as pure functions so `npm run verify` can pin its behaviour.
  *
- * Two jobs, never mixed: **finding** posts scrolls the collection so Instagram loads them,
- * and **sorting** sends found posts to be categorised. The button only ever does what its
- * label says. Finding hands over to sorting by itself when it reaches the end, so the
- * usual path is one press. Sorting never scrolls.
+ * The extension only collects: it finds posts by scrolling the open collection and syncs
+ * them to the account. Indexing, and every other control, lives in the web app.
  */
 
-import type { IndexProgress } from '../types';
+export type PillAction = 'find' | 'stop' | 'remove' | 'confirm-remove';
 
-export type FlowAction = 'pause' | 'sort' | 'find';
+export interface PillState {
+  finding: boolean;
+  /** Posts this browser has found, in total. */
+  total: number;
+  /** Posts the last complete sweep of the full feed did not see again. */
+  strays: number;
+  /** The first Remove press arms it; the second removes. */
+  confirming: boolean;
+  /** Something only this page knows, such as Instagram rate-limiting the scroll. */
+  message: string | null;
+}
 
-export interface FlowButton {
-  action: FlowAction;
+export interface PillButton {
+  action: PillAction;
   label: string;
 }
 
-export function flowButton(p: IndexProgress, finding: boolean): FlowButton {
-  if (finding || p.phase === 'running') return { action: 'pause', label: 'Pause' };
-  if (p.pending > 0) {
-    const resuming = (p.phase === 'paused' || p.phase === 'error') && p.runCompleted < p.runTotal;
-    return { action: 'sort', label: resuming ? 'Resume sorting' : `Sort ${posts(p.pending)}` };
+export function pillButton(s: PillState): PillButton {
+  if (s.finding) return { action: 'stop', label: 'Stop' };
+  if (s.strays > 0) {
+    return s.confirming
+      ? { action: 'confirm-remove', label: `Confirm, remove ${s.strays}` }
+      : { action: 'remove', label: `Remove ${s.strays}` };
   }
   return { action: 'find', label: 'Find new posts' };
 }
 
 /** What is happening right now, in a few words. */
-export function flowStatus(p: IndexProgress, finding: boolean): string {
-  if (finding) return p.pending > 0 ? `Finding posts · ${p.pending} to sort` : 'Finding posts…';
-  if (p.phase === 'running') return `Sorting ${p.runCompleted} of ${p.runTotal}`;
-  if (p.phase === 'error') return p.message ?? 'Sorting stopped';
-  if (p.phase === 'paused') {
-    if (p.message) return p.message;
-    if (p.runCompleted < p.runTotal) return `Paused · ${p.runCompleted} of ${p.runTotal} sorted`;
-  }
-  if (p.pending > 0) return `${posts(p.pending)} found, not sorted yet`;
-  if (p.total === 0) return 'No posts found yet';
-  return `${posts(p.total)}, all sorted`;
+export function pillStatus(s: PillState): string {
+  if (s.finding) return `Finding posts · ${posts(s.total)} so far`;
+  if (s.message) return s.message;
+  if (s.strays > 0) return `${posts(s.strays)} no longer saved on Instagram`;
+  if (s.total === 0) return 'No posts found yet';
+  return `${posts(s.total)} found · synced to your library`;
 }
 
 function posts(n: number): string {
-  return `${n} post${n === 1 ? '' : 's'}`;
+  return `${n.toLocaleString('en-US')} post${n === 1 ? '' : 's'}`;
 }

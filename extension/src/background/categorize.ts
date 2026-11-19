@@ -26,9 +26,9 @@ import * as ledger from './ledger';
 import { fetchThumbnail, toModelImage } from './media';
 import { applyVerdict, inputHash, isFresh, verdictFrom } from './ledger';
 import { classifyByRules } from '@saved-index/shared/taxonomy';
+import { filedByRules } from '@saved-index/shared/filing';
 import {
   applyResult,
-  firstLine,
   hasTextSignal,
   signature,
   unclassifiable,
@@ -186,6 +186,21 @@ export class Categorizer {
   }
 
   /**
+   * Stops any run and empties the library and the paid ledger, so the next Find and Index
+   * start from nothing. Clear Library is the only caller.
+   */
+  async startOver(): Promise<void> {
+    this.pause();
+    await this.running?.catch(() => {});
+    await db.clearLibrary();
+    await ledger.clearAll();
+    this.unanswered.clear();
+    this.message = null;
+    this.phase = 'idle';
+    await this.emit();
+  }
+
+  /**
    * Re-run categorisation over the whole library.
    *
    * Cheap now, and it did not use to be: `resetCategories` clears the posts' verdicts but
@@ -285,15 +300,7 @@ export class Categorizer {
         for (const post of unpaid) {
           const hit = forced.has(post.shortcode) ? null : classifyByRules(post);
           if (hit) {
-            ruled.push({
-              ...post,
-              category: hit.category,
-              subcategory: hit.subcategory,
-              tags: post.hashtags.slice(0, 4),
-              summary: firstLine(post.caption) || firstLine(post.altText ?? '') || hit.category,
-              categorizedAt: Date.now(),
-              modelUsed: 'rules',
-            });
+            ruled.push({ ...post, ...filedByRules(post, hit), categorizedAt: Date.now(), modelUsed: 'rules' });
           } else {
             needsModel.push(post);
           }

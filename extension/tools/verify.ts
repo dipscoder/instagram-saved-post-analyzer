@@ -24,7 +24,7 @@ import { reserveRanks } from '../src/background/order';
 import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { IDLE_PROGRESS, toRecord } from '../src/types';
-import { flowButton, flowStatus } from '../src/page/flow';
+import { pillButton, pillStatus, type PillState } from '../src/page/flow';
 import { listCollections, validCollection } from '../src/background/collections';
 import { applyResult } from '../src/background/filing';
 import {
@@ -43,9 +43,18 @@ import {
   planSync,
   planThumbnails,
   afterCopy,
+  adoptVerdicts,
   toRow,
   toVerdictRow,
 } from '../src/background/sync-plan';
+import {
+  MAX_SORT_POSTS,
+  parseSortRequest,
+  planSort,
+  verdictRow,
+  type SortRow,
+} from '../../supabase/functions/sort/plan';
+import { signature as extensionSignature } from '../src/background/filing';
 import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
 import { usesResponsesApi } from '../src/background/providers/openai';
 import {
@@ -880,25 +889,21 @@ console.log('\ninstagram collections');
     listCollections({ '7': 1 }, {})[0]?.name === 'Collection');
 }
 
-console.log('\none indexing button');
+console.log('\nthe pill');
 {
-  const p = (over: Partial<typeof IDLE_PROGRESS>) => ({ ...IDLE_PROGRESS, ...over });
-  check('nothing found yet: find', flowButton(p({}), false).action === 'find');
-  check('finding: pause', flowButton(p({ pending: 4 }), true).action === 'pause');
-  check('sorting: pause', flowButton(p({ phase: 'running', pending: 4, runTotal: 4 }), false).action === 'pause');
-  const waiting = flowButton(p({ phase: 'done', total: 40, pending: 34 }), false);
-  check('found posts waiting: sort, never find', waiting.action === 'sort' && waiting.label === 'Sort 34 posts', waiting);
-  check('one post reads naturally', flowButton(p({ pending: 1 }), false).label === 'Sort 1 post');
-  const paused = flowButton(p({ phase: 'paused', pending: 10, runTotal: 20, runCompleted: 10 }), false);
-  check('a paused run resumes sorting, not finding', paused.action === 'sort' && paused.label === 'Resume sorting', paused);
-  check('all sorted: find new posts',
-    flowButton(p({ phase: 'done', total: 40, categorized: 40 }), false).label === 'Find new posts');
-  check('status while finding counts what waits',
-    flowStatus(p({ pending: 12 }), true) === 'Finding posts · 12 to sort');
-  check('status while sorting', flowStatus(p({ phase: 'running', runTotal: 30, runCompleted: 7 }), false) === 'Sorting 7 of 30');
-  check('status when done', flowStatus(p({ phase: 'done', total: 40, categorized: 40 }), false) === '40 posts, all sorted');
+  const s = (over: Partial<PillState>): PillState => ({
+    finding: false, total: 0, strays: 0, confirming: false, message: null, ...over,
+  });
+  check('nothing found yet: find', pillButton(s({})).action === 'find');
+  check('finding: stop', pillButton(s({ finding: true, strays: 3 })).action === 'stop');
+  check('the extension never offers to index', !['Index', 'Sort'].some((w) => pillButton(s({ total: 40 })).label.includes(w)));
+  check('strays need two presses',
+    pillButton(s({ strays: 3 })).action === 'remove' && pillButton(s({ strays: 3, confirming: true })).action === 'confirm-remove');
+  check('status while finding', pillStatus(s({ finding: true, total: 1200 })) === 'Finding posts · 1,200 posts so far');
+  check('status when idle', pillStatus(s({ total: 1 })) === '1 post found · synced to your library');
+  check('status for strays', pillStatus(s({ total: 9, strays: 2 })) === '2 posts no longer saved on Instagram');
   check('a rate-limit message is shown as is',
-    flowStatus(p({ phase: 'paused', message: 'Instagram rate-limited the page.' }), false) === 'Instagram rate-limited the page.');
+    pillStatus(s({ total: 9, message: 'Instagram rate-limited the page.' })) === 'Instagram rate-limited the page.');
 }
 
 console.log('\nweb app search');
@@ -915,6 +920,51 @@ console.log('\nweb app search');
   check('one term matches text by substring and arrays by element',
     one.includes('caption.ilike.*tokyo*') && one.includes('tags.cs.{tokyo}'), one);
   check('an empty query adds no filter', searchFilters('  !! ').length === 0);
+}
+
+console.log('\nserver sorting');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
+    duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
+    ...over,
+  });
+  const textual = row({ shortcode: 'T', caption: 'A slow Sunday walk along the canal, thinking about nothing much' });
+  const ruled = row({ shortcode: 'R', caption: 'Easy pasta recipe for dinner', hashtags: ['recipe', 'food', 'cooking'] });
+  const picture = row({ shortcode: 'P', thumbnail_stored: true, thumbnail_format: 'webp' });
+  const blank = row({ shortcode: 'B' });
+  const done = row({ shortcode: 'D', caption: textual.caption, categorized_at: '2026-11-19T10:00:00Z' });
+  const plan = planSort([textual, ruled, picture, blank, done]);
+  check('an already sorted post is never sent again', ![...plan.text, ...plan.vision, ...plan.unreadable].some((r) => r.shortcode === 'D') && !plan.ruled.some((r) => r.row.shortcode === 'D'));
+  check('keyword rules file a post for free', plan.ruled.length === 1 && plan.ruled[0]!.row.shortcode === 'R', plan.ruled);
+  check('a post with text goes to the text batch', plan.text.map((r) => r.shortcode).join() === 'T');
+  check('a post with only a stored thumbnail goes to vision', plan.vision.map((r) => r.shortcode).join() === 'P');
+  check('a post with neither is reported, not billed', plan.unreadable.map((r) => r.shortcode).join() === 'B');
+  const many = planSort(Array.from({ length: 6 }, (_, i) => row({ shortcode: `V${i}`, thumbnail_stored: true })));
+  check('at most four vision posts per request', many.vision.length === 4 && many.unreadable.length === 2);
+
+  const post = toRecord({
+    shortcode: 'T', permalink: '', handle: '@cafe.oshi', caption: textual.caption, hashtags: [],
+    thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null,
+  });
+  const v = verdictRow(textual, { category: 'Travel', subcategory: null, tags: [], summary: 'x' }, 'm', new Date());
+  check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(extensionSignature(post)));
+
+  check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).join() === 'A,B');
+  let refused = 0;
+  for (const bad of [{}, { shortcodes: [] }, { shortcodes: ['a/b'] }, { shortcodes: Array(MAX_SORT_POSTS + 1).fill('A') }]) {
+    try { parseSortRequest(bad); } catch { refused++; }
+  }
+  check('a malformed sort request is refused', refused === 4);
+
+  const verdict = (shortcode: string, at: number, modelUsed = 'm') => ({
+    shortcode, category: 'Travel', subcategory: null, tags: [], summary: 's', modelUsed, categorizedAt: at,
+    inputHash: 'h', taxonomyHash: 't', rulesHash: 'r', ledgerVersion: 2,
+  });
+  const unsorted = { ...post, shortcode: 'U' };
+  const newer = { ...post, shortcode: 'N', category: 'Food', categorizedAt: 5_000 };
+  const adopted = adoptVerdicts([unsorted, newer, { ...post, shortcode: 'K' }], [verdict('U', 1_000), verdict('N', 2_000), verdict('K', 1_000, 'skipped')]);
+  check('a server verdict sorts a post the extension never sorted', adopted.length === 1 && adopted[0]!.shortcode === 'U' && adopted[0]!.category === 'Travel', adopted);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);

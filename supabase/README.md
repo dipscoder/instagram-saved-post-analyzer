@@ -10,7 +10,10 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261119120000_collections.sql` | `posts.collections` (ids of the Instagram collections a post was seen in) and `public.collections` (their names) |
 | `migrations/20261119150000_sharper_thumbnails.sql` | `posts.thumbnail_format` and WebP in the `thumbnails` bucket (800px copies, replacing the first 480px JPEGs) |
 | `migrations/20261119160000_library_facets.sql` | `library_facets()`: the web app's sidebar counts in one grouped query, under the caller's own RLS |
+| `migrations/20261119170000_server_sorting.sql` | Categorisations never go backwards (triggers on `posts` and `verdicts`), `apply_verdicts()` for the `sort` function, and `library_facets()` counting "not sorted yet" by `categorized_at` |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
+| `functions/sort/` | The `sort` Edge Function: sorts the caller's own unsorted posts by shortcode and saves the verdicts (web app) |
+| `functions/_shared/` | Caller check, daily cap, usage and the OpenAI call, used by both functions |
 
 ## Applying a migration
 
@@ -48,15 +51,29 @@ Security applies and it needs no service-role key.
 **Deploying**, from the repository root:
 
 ```bash
-npm run build:functions        # bundles shared/ into functions/analyze/dist/
+npm run build:functions        # bundles shared/ into functions/*/dist/
 npx supabase login
 npx supabase functions deploy analyze --project-ref siwmxcsrzdvvtouolvph --use-api
+npx supabase functions deploy sort --project-ref siwmxcsrzdvvtouolvph --use-api
 ```
 
 The bundle is needed because `shared/` uses extensionless imports, which Deno does not
 resolve; `config.toml` points the function at it. `verify_jwt` is off because the function
 checks the caller itself, against `/auth/v1/user`, and the newer publishable keys are not
 JWTs.
+
+## The sort function
+
+The web app's **Sort** button in Needs a look. It takes up to 25 shortcodes, reads those
+posts itself (so the caller cannot choose what the model sees), skips any already sorted,
+and files the rest exactly as the extension would: keyword rules first for free, then text
+in one batch, then up to four caption-less posts from their stored thumbnail. The verdicts
+go to `verdicts` and `posts` in one `apply_verdicts` call. The input hash is built by the
+same `signature()` the extension uses, so the extension treats the answer as already paid
+for and picks it up on its next sync. Same secrets and daily cap as `analyze`.
+
+Before any run the web app shows the most it can cost (`SERVER_QUOTE_USD_PER_POST` in
+`shared/src/filing.ts`) and spends nothing until a second press.
 
 ## Keys
 

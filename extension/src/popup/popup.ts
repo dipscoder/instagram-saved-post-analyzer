@@ -1,43 +1,17 @@
 /**
- * Popup: two screens, not a wizard.
+ * Popup: the extension is a collector, so this is small on purpose.
  *
- *   setup — shown until a key is saved. Says what the extension does, takes the provider,
- *           model and key in one place, and points at the page you have to open.
- *   home  — the control room. Counts, spend, one primary action, and the settings that
- *           used to be buried behind a third step.
+ *   signed out — create an account or sign in. Nothing else works without one.
+ *   signed in  — who you are and when you last synced, what finding has found, one button
+ *                to find new posts, and the way into the web app, where the library and
+ *                every other control live.
  *
- * The key is write-only from here. The service worker only ever hands back a mask, and
- * that mask is rendered as **text** — putting it into the password field is what made it
- * look like a row of dots and hid the last four characters you need to match a key
- * against your provider's console.
+ * Credentials go straight to the worker and are never kept here.
  */
 
-import {
-  send,
-  subscribe,
-  type AccountState,
-  type LedgerFile,
-  type ReindexQuote,
-  type SafeSettings,
-  type Stats,
-} from '../messaging';
+import { send, subscribe, type AccountState, type SafeSettings, type Stats } from '../messaging';
 import { WEB_APP_URL } from '../config';
-import { IDLE_PROGRESS, type IndexProgress, type ProviderId, type Settings, type Theme } from '../types';
-
-interface ModelMeta {
-  id: string;
-  label: string;
-  per1kPosts: number;
-  supportsVision: boolean;
-}
-
-interface ProviderMeta {
-  id: ProviderId;
-  label: string;
-  keyPlaceholder: string;
-  keysUrl: string;
-  models: ModelMeta[];
-}
+import type { Theme } from '../types';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -45,240 +19,66 @@ const $ = <T extends HTMLElement>(id: string): T => {
   return el as T;
 };
 
-let providers: ProviderMeta[] = [];
-let settings: SafeSettings;
-let stats: Stats = {
-  total: 0,
-  categorized: 0,
-  byCategory: {},
-  collections: [],
-  lastRunAt: null,
-  ledgerCount: 0,
-};
-let progress: IndexProgress = IDLE_PROGRESS;
-let harvesting = false;
-
-let screen: 'setup' | 'home' = 'setup';
-let replacing = false;
-/**
- * What a re-index would really cost, fetched whenever the library goes quiet.
- *
- * The finished-state primary button used to send `index:reindex` on the first click,
- * beside a "$0.00 left, at most" readout that was literally true and completely
- * misleading — the estimate is computed from `pending`, and re-index is only ever offered
- * when `pending` is zero. Now the button says the price and asks twice.
- */
-let quote: ReindexQuote | null = null;
-let confirming: 'reindex' | 'remove' | 'reset' | null = null;
+let account: AccountState | null = null;
+let found = 0;
+let finding = false;
 /** Someone who has signed in here before is far likelier to be signing in than signing up. */
 let accountMode: 'sign-up' | 'sign-in' = remembered('signedInBefore') ? 'sign-in' : 'sign-up';
-/** Signed in, posts are analysed by the account and no key of your own is needed. */
-let signedIn = false;
 
 // Before anything awaits, so a dark popup never opens white first.
 applyTheme(cachedTheme());
 void init();
 
 async function init(): Promise<void> {
-  let res: { settings: SafeSettings; providers: ProviderMeta[] };
-  try {
-    res = await send<{ settings: SafeSettings; providers: ProviderMeta[] }>({
-      type: 'settings:get',
-    });
-  } catch {
-    // Nothing below can run without settings, and both sections are `display: none`
-    // until one of them is switched on — so an unguarded throw here left a blank
-    // 380x560 box with no message and no way out.
-    $('setup').classList.add('on');
-    setStatus('setupStatus', 'bad', 'The extension is not responding. Reopen this popup.');
-    return;
-  }
-  settings = res.settings;
-  providers = res.providers;
-  applyTheme(settings.theme);
-
   $<HTMLAnchorElement>('openWeb').href = WEB_APP_URL;
   wire();
-  await loadAccount();
-  screen = canIndex() ? 'home' : 'setup';
+  setAccountMode(accountMode);
+  try {
+    const { settings } = await send<{ settings: SafeSettings }>({ type: 'settings:get' });
+    applyTheme(settings.theme);
+    account = await send<AccountState>({ type: 'account:get' });
+  } catch {
+    // Both screens are hidden until one is switched on, so say so rather than show nothing.
+    $('setup').classList.add('on');
+    setStatus('accountStatus', 'bad', 'The extension is not responding. Reopen this popup.');
+    return;
+  }
   await refresh();
-  void loadLibraryUrl();
   subscribe((msg) => {
-    if (msg.type === 'settings') {
-      settings = msg.settings;
-      applyTheme(settings.theme);
-      return;
-    }
-    if (msg.type === 'harvest') harvesting = msg.action === 'start';
-    else if (msg.type === 'progress') {
-      progress = msg.progress;
-      if (progress.phase === 'running' || progress.pending > 0) confirming = null;
-    }
+    if (msg.type === 'settings') applyTheme(msg.settings.theme);
+    else if (msg.type === 'harvest') finding = msg.action === 'start';
+    else if (msg.type === 'progress') found = msg.progress.total;
     else return;
-    // Through refresh, not render: `stats.lastRunAt` and the ledger count come from a
-    // separate request, so rendering alone left the footer quoting a stale run.
-    void refresh();
+    render();
   });
 }
-
-async function refresh(): Promise<void> {
-  try {
-    [stats, progress] = await Promise.all([
-      send<Stats>({ type: 'posts:stats' }),
-      send<IndexProgress>({ type: 'index:progress' }),
-    ]);
-    // Only meaningful once there is nothing left to do — which is exactly when the
-    // primary button turns into "Re-index" and needs a price to show.
-    quote =
-      progress.pending === 0 && progress.total > 0 && progress.phase !== 'running' && !harvesting
-        ? await send<ReindexQuote>({ type: 'index:quote' })
-        : null;
-    setStatus('homeStatus', '', statusLine());
-  } catch {
-    // Silence here made a broken worker and an empty library render identically: both
-    // showed "Nothing captured yet · 0 · 0 · $0.00" with no way to tell them apart.
-    setStatus('homeStatus', 'bad', 'Could not reach the extension worker — reopen this popup.');
-  }
-  render();
-}
-
-function statusLine(): string {
-  if (progress.phase === 'error' && progress.message) return progress.message;
-  if (progress.phase === 'offline' && progress.message) return progress.message;
-  if (progress.phase === 'running' && progress.runTotal > 0) {
-    return `Indexing ${progress.runTotal} posts detected at the start of this run.`;
-  }
-  if (harvesting) return 'Scanning the saved feed. New finds wait for the next run.';
-  if (progress.phase === 'paused') return 'Paused. Progress is saved.';
-  if (!canIndex()) return 'Sign in or connect an OpenAI key to index — press Setup above.';
-  return stats.lastRunAt ? `Last run ${timeAgo(stats.lastRunAt)}.` : '';
-}
-
-// --- wiring -----------------------------------------------------------------
 
 function wire(): void {
-  // Provider and model appear on both screens; either copy drives the same setting.
-  for (const id of ['provider', 'provider2']) {
-    $<HTMLSelectElement>(id).addEventListener('change', (e) => {
-      const next = (e.target as HTMLSelectElement).value as ProviderId;
-      if (settings.hasKey && next !== settings.provider) {
-        (e.target as HTMLSelectElement).value = settings.provider;
-        setStatus(
-          screen === 'setup' ? 'setupStatus' : 'keyStatus',
-          '',
-          'Remove the current key before switching providers; keys are provider-specific.',
-        );
-        return;
-      }
-      const first = providers.find((p) => p.id === next)?.models[0]?.id;
-      void save({ provider: next, ...(first ? { model: first } : {}) });
-      setStatus(
-        screen === 'setup' ? 'setupStatus' : 'keyStatus',
-        '',
-        'Not tested — this provider needs its own key.',
-      );
-    });
-  }
-  for (const id of ['model', 'model2']) {
-    $<HTMLSelectElement>(id).addEventListener('change', (e) => {
-      void save({ model: (e.target as HTMLSelectElement).value });
-      // Onto whichever status the user can actually see. Writing to keyStatus from the
-      // setup screen put the warning inside a `display: none` section while the visible
-      // one still read "Connected".
-      setStatus(screen === 'setup' ? 'setupStatus' : 'keyStatus', '', 'Not tested since the model changed.');
-    });
-  }
-
-  $('save').addEventListener('click', () => void onSetupSave());
-  $('skip').addEventListener('click', () => {
-    screen = 'home';
-    render();
-  });
   $('themeBtn').addEventListener('click', () => {
-    const next: Theme = settings.theme === 'dark' ? 'light' : 'dark';
-    settings = { ...settings, theme: next };
+    const next: Theme = document.documentElement.dataset['theme'] === 'dark' ? 'light' : 'dark';
     applyTheme(next);
-    // The library on instagram.com follows through the settings broadcast.
     void send({ type: 'theme:set', theme: next }).catch(() => {});
   });
-
-  $('navBtn').addEventListener('click', () => {
-    screen = screen === 'home' ? 'setup' : 'home';
-    render();
-  });
-
-  $('primary').addEventListener('click', () => void onPrimary());
-  $('test').addEventListener('click', () => void onTest());
-  $('replace').addEventListener('click', () => {
-    replacing = !replacing;
-    render();
-    if (replacing) $<HTMLInputElement>('key2').focus();
-  });
-  $('saveKey2').addEventListener('click', () => void onReplaceSave());
-  $('remove').addEventListener('click', () => {
-    if (confirming !== 'remove') return arm('remove');
-    confirming = null;
-    void onRemove();
-  });
-
-  $('resetSpend').addEventListener('click', () => {
-    // The spend counter is the only record of what this extension has charged. Erasing
-    // it on one unconfirmed click, from a link styled exactly like every other link,
-    // was the wrong weight for the action.
-    if (confirming !== 'reset') return arm('reset');
-    confirming = null;
-    void send<IndexProgress>({ type: 'spend:reset' })
-      .then((p) => {
-        progress = p;
-        render();
-      })
-      .catch(fail('homeStatus'));
-  });
-
-  $('autoIndex').addEventListener('click', () => void save({ autoIndex: !settings.autoIndex }));
-  $('overlay').addEventListener('click', () => {
-    void save({ scrubberSkin: settings.scrubberSkin === 'overlay' ? 'native' : 'overlay' });
-  });
-
-  $('exportLedger').addEventListener('click', () => void onExport());
-  $('importLedger').addEventListener('click', () => $<HTMLInputElement>('importFile').click());
-  $<HTMLInputElement>('importFile').addEventListener('change', (e) => {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (file) void onImport(file);
-  });
-
   $('modeUp').addEventListener('click', () => setAccountMode('sign-up'));
   $('modeIn').addEventListener('click', () => setAccountMode('sign-in'));
   $<HTMLFormElement>('signedOut').addEventListener('submit', (e) => {
     e.preventDefault();
-    void (accountMode === 'sign-up'
-      ? onAccount('account:sign-up', 'Creating your account…')
-      : onAccount('account:sign-in', 'Signing in…'));
+    void onAccount(accountMode === 'sign-up' ? 'account:sign-up' : 'account:sign-in');
   });
-  $('syncNow').addEventListener('click', () => void onAccount('account:sync', 'Syncing…'));
-  $('signOut').addEventListener('click', () => void onAccount('account:sign-out', 'Signing out…'));
+  $('signOut').addEventListener('click', () => void onAccount('account:sign-out'));
+  $('primary').addEventListener('click', () => void onPrimary());
+}
+
+async function refresh(): Promise<void> {
+  try {
+    found = (await send<Stats>({ type: 'posts:stats' })).total;
+  } catch {
+    setStatus('homeStatus', 'bad', 'Could not reach the extension. Reopen this popup.');
+  }
+  render();
 }
 
 // --- account ----------------------------------------------------------------
-
-async function loadAccount(): Promise<void> {
-  setAccountMode(accountMode);
-  try {
-    renderAccount(await send<AccountState>({ type: 'account:get' }));
-  } catch (err) {
-    fail('accountStatus')(err);
-  }
-}
-
-/** Every "Open Library" link goes to the saved feed the worker last saw being captured. */
-async function loadLibraryUrl(): Promise<void> {
-  try {
-    const url = await send<string>({ type: 'library:url' });
-    for (const a of document.querySelectorAll<HTMLAnchorElement>('.library-link')) a.href = url;
-  } catch {
-    // The links already point at instagram.com, which is the right fallback.
-  }
-}
 
 function setAccountMode(mode: typeof accountMode): void {
   accountMode = mode;
@@ -292,223 +92,51 @@ function setAccountMode(mode: typeof accountMode): void {
   setStatus('accountStatus', '', '');
 }
 
-type AccountRequest = 'account:sign-in' | 'account:sign-up' | 'account:sync' | 'account:sign-out';
+type AccountRequest = 'account:sign-in' | 'account:sign-up' | 'account:sign-out';
 
-async function onAccount(type: AccountRequest, pending: string): Promise<void> {
-  setStatus('accountStatus', '', pending);
+async function onAccount(type: AccountRequest): Promise<void> {
+  const signingOut = type === 'account:sign-out';
+  setStatus(signingOut ? 'homeStatus' : 'accountStatus', '', signingOut ? 'Signing out…' : 'One moment…');
   try {
     const credentials = {
       email: $<HTMLInputElement>('email').value,
       password: $<HTMLInputElement>('password').value,
     };
-    const state = await send<AccountState>(
-      type === 'account:sign-in' || type === 'account:sign-up' ? { type, ...credentials } : { type },
-    );
+    account = await send<AccountState>(signingOut ? { type } : { type, ...credentials });
     $<HTMLInputElement>('password').value = '';
-    renderAccount(state);
-    if (state.email) remember('signedInBefore');
-  } catch (err) {
-    fail('accountStatus')(err);
-  }
-}
-
-function renderAccount(state: AccountState): void {
-  const wasSignedIn = signedIn;
-  signedIn = state.email !== null;
-  // Signing in from setup is the end of setup: there is nothing left to connect.
-  if (signedIn && !wasSignedIn && screen === 'setup' && settings.hasKey === false) {
-    screen = 'home';
-    render();
-  }
-  $('signedOut').hidden = signedIn;
-  $('signedIn').hidden = !signedIn;
-  $('accountTools').hidden = !signedIn;
-  $('accountEmail').textContent = state.email ?? '';
-  $('avatar').textContent = state.email?.[0]?.toUpperCase() ?? '';
-  $('accountSync').textContent = state.error
-    ? 'Sync failed'
-    : state.lastSyncAt
-      ? `Synced ${timeAgo(state.lastSyncAt)} · ${state.synced} posts`
-      : 'Not synced yet';
-
-  if (state.confirmEmail) {
-    // Only when the Supabase project still asks for confirmation; see supabase/README.md.
-    setAccountMode('sign-in');
-    setStatus('accountStatus', 'ok', 'Almost there. Open the link we just emailed you, then sign in here.');
-  } else if (state.error) {
-    setStatus('accountStatus', 'bad', `Sync failed: ${state.error}`);
-  } else {
-    setStatus('accountStatus', '', '');
-  }
-}
-
-async function save(patch: Partial<Settings>): Promise<void> {
-  try {
-    settings = await send<SafeSettings>({ type: 'settings:set', patch });
-  } catch (err) {
-    // A `void`-ed rejection here left a toggle that simply never moved.
-    return fail(screen === 'setup' ? 'setupStatus' : 'keyStatus')(err);
-  }
-  await refresh();
-}
-
-/** First click arms a destructive action, second performs it. */
-function arm(what: NonNullable<typeof confirming>): void {
-  confirming = what;
-  render();
-}
-
-function fail(statusId: string): (err: unknown) => void {
-  return (err) => setStatus(statusId, 'bad', err instanceof Error ? err.message : String(err));
-}
-
-// --- the ledger -------------------------------------------------------------
-
-/**
- * Hand the file straight to the browser. An extension page can make an object URL and
- * click its own link, so portability costs no permission at all — `chrome.downloads`
- * would have added a "Manage your downloads" line to the install prompt for nothing.
- */
-async function onExport(): Promise<void> {
-  try {
-    const file = await send<LedgerFile>({ type: 'ledger:export' });
-    const url = URL.createObjectURL(
-      new Blob([JSON.stringify(file)], { type: 'application/json' }),
-    );
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `saved-index-ledger-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setStatus('ledgerStatus', 'ok', `Saved ${file.verdicts.length} summaries.`);
-  } catch (err) {
-    fail('ledgerStatus')(err);
-  }
-}
-
-async function onImport(file: File): Promise<void> {
-  setStatus('ledgerStatus', '', 'Reading…');
-  try {
-    const parsed: unknown = JSON.parse(await file.text());
-    const { imported, skipped } = await send<{ imported: number; skipped: number }>({
-      type: 'ledger:import',
-      file: parsed,
-    });
-    setStatus(
-      'ledgerStatus',
-      'ok',
-      imported === 0
-        ? 'Nothing new — everything in that file was already here.'
-        : `Restored ${imported} summaries${skipped ? `, skipped ${skipped} already on file` : ''}.`,
-    );
+    if (account.email) remember('signedInBefore');
+    setStatus('homeStatus', '', '');
+    if (account.confirmEmail) {
+      // Only when the Supabase project still asks for confirmation; see supabase/README.md.
+      setAccountMode('sign-in');
+      setStatus('accountStatus', 'ok', 'Almost there. Open the link we just emailed you, then sign in here.');
+    }
     await refresh();
   } catch (err) {
-    fail('ledgerStatus')(err);
-  } finally {
-    // Let the same file be chosen twice in a row.
-    $<HTMLInputElement>('importFile').value = '';
+    setStatus(signingOut ? 'homeStatus' : 'accountStatus', 'bad', message(err));
   }
 }
 
-// --- actions ----------------------------------------------------------------
-
-async function onSetupSave(): Promise<void> {
-  const field = $<HTMLInputElement>('key');
-  const key = field.value.trim();
-  if (!key) return setStatus('setupStatus', 'bad', 'Paste a key first.');
-
-  await saveAndTest(key, 'setupStatus', () => {
-    field.value = '';
-    screen = 'home';
-  });
-}
-
-async function onReplaceSave(): Promise<void> {
-  const field = $<HTMLInputElement>('key2');
-  const key = field.value.trim();
-  if (!key) return setStatus('keyStatus', 'bad', 'Paste a key first.');
-
-  await saveAndTest(key, 'keyStatus', () => {
-    field.value = '';
-    replacing = false;
-  });
-}
+// --- finding ----------------------------------------------------------------
 
 /**
- * Save then immediately test. A key that saves but doesn't work is the worst outcome —
- * indexing would fail much later with no obvious cause — so the two are one action.
+ * Finding scrolls a saved collection on Instagram, so it needs one open. If none is, the
+ * saved feed the extension last saw opens in a new tab and starts scrolling when it loads.
  */
-async function saveAndTest(apiKey: string, statusId: string, onOk: () => void): Promise<void> {
-  setStatus(statusId, '', 'Testing…');
-  try {
-    const r = await send<{ ms: number; model: string }>({
-      type: 'settings:test-candidate',
-      provider: settings.provider,
-      model: settings.model,
-      apiKey,
-    });
-    settings = await send<SafeSettings>({ type: 'settings:set', patch: { apiKey } });
-    setStatus(statusId, 'ok', `Connected · ${r.model} answered in ${r.ms}ms`);
-    onOk();
-  } catch (err) {
-    setStatus(statusId, 'bad', err instanceof Error ? err.message : String(err));
-  }
-  await refresh();
-}
-
-async function onTest(): Promise<void> {
-  setStatus('keyStatus', '', 'Sending one token…');
-  try {
-    const r = await send<{ ms: number; model: string }>({ type: 'settings:test-key' });
-    setStatus('keyStatus', 'ok', `Connected · ${r.model} answered in ${r.ms}ms`);
-  } catch (err) {
-    setStatus('keyStatus', 'bad', err instanceof Error ? err.message : String(err));
-  }
-}
-
-async function onRemove(): Promise<void> {
-  settings = await send<SafeSettings>({ type: 'settings:clear-key' });
-  replacing = false;
-  screen = 'setup';
-  await refresh();
-  setStatus('setupStatus', '', 'Key removed. Everything already indexed is still here.');
-}
-
 async function onPrimary(): Promise<void> {
-  if (!canIndex()) {
-    screen = 'setup';
-    return render();
-  }
-
-  const active = progress.phase === 'running' || harvesting;
-  const finished = progress.pending === 0 && progress.total > 0 && !active;
-  if (!active && finished && confirming !== 'reindex') {
-    return arm('reindex');
-  }
-  confirming = null;
-
-  // Same rules as the pill: sorting never scrolls, finding scrolls the open collection
-  // and sorts what it found. Re-index stays here, behind its quote and confirmation.
-  const type = active
-    ? 'index:pause'
-    : finished
-      ? 'index:reindex'
-      : progress.pending > 0
-        ? 'index:start'
-        : 'find:start';
-
   try {
-    progress = await send<IndexProgress>({ type });
+    if (finding) {
+      await send({ type: 'find:stop' });
+      finding = false;
+      return render();
+    }
+    await send({ type: 'find:start' });
+    finding = true;
+    const open = await chrome.tabs.query({ url: 'https://www.instagram.com/*/saved/*' });
+    if (open.length === 0) await chrome.tabs.create({ url: await send<string>({ type: 'library:url' }) });
+    setStatus('homeStatus', '', 'Scrolling your saved posts on Instagram. Keep that tab open.');
   } catch (err) {
-    return fail('homeStatus')(err);
-  }
-
-  if (type === 'find:start') {
-    setStatus(
-      'homeStatus',
-      '',
-      'Finding happens in an open saved collection on Instagram. Open one and it starts scrolling there.',
-    );
+    setStatus('homeStatus', 'bad', message(err));
   }
   render();
 }
@@ -516,204 +144,44 @@ async function onPrimary(): Promise<void> {
 // --- render -----------------------------------------------------------------
 
 function render(): void {
-  $('setup').classList.toggle('on', screen === 'setup');
-  $('home').classList.toggle('on', screen === 'home');
-  // One account card, shown on whichever screen is visible. Moved only when the screen
-  // changes: re-appending on every progress push would blur a half-typed email.
-  const slot = $(screen === 'setup' ? 'accountSlotSetup' : 'accountSlotHome');
-  if ($('account').parentElement !== slot) slot.append($('account'));
-  // Setup's key and model live under Settings on the home screen, so the header only
-  // offers a way back out of setup.
-  $<HTMLButtonElement>('navBtn').hidden = screen === 'home' || !canIndex();
-  $('navBtn').textContent = 'Done';
+  const signedIn = account?.email != null;
+  $('setup').classList.toggle('on', !signedIn);
+  $('home').classList.toggle('on', signedIn);
+  if (!account || !signedIn) return;
 
-  renderSelects();
-  renderSetup();
-  renderHome();
+  $('accountEmail').textContent = account.email ?? '';
+  $('avatar').textContent = account.email?.[0]?.toUpperCase() ?? '';
+  $('accountSync').textContent = account.error
+    ? 'Sync failed, retrying'
+    : account.lastSyncAt
+      ? `Synced ${timeAgo(account.lastSyncAt)}`
+      : 'Not synced yet';
+  if (account.error) $('accountSync').title = account.error;
 
-  $('ownKeyNote').hidden = !signedIn;
-}
-
-/**
- * Rebuilt only when the options actually changed.
- *
- * `render()` runs on every progress push — several a second during a run — and an
- * unconditional `replaceChildren` closed the Model dropdown the moment the user opened it
- * to check what they were paying for.
- */
-function renderSelects(): void {
-  sync(['provider', 'provider2'], providers.map((p) => [p.id, p.label]), settings.provider);
-  const models = currentProvider()?.models ?? [];
-  sync(['model', 'model2'], models.map((m) => [m.id, m.label]), settings.model);
-}
-
-function sync(ids: string[], items: [string, string][], selected: string): void {
-  for (const id of ids) {
-    const el = $<HTMLSelectElement>(id);
-    const same =
-      el.options.length === items.length &&
-      items.every(([value], i) => el.options[i]?.value === value);
-    if (!same) el.replaceChildren(...items.map(([v, label]) => option(v, label, v === selected)));
-    el.value = selected;
-  }
-}
-
-function option(value: string, label: string, selected: boolean): HTMLOptionElement {
-  const opt = document.createElement('option');
-  opt.value = value;
-  opt.textContent = label;
-  opt.selected = selected;
-  return opt;
-}
-
-function renderSetup(): void {
-  const provider = currentProvider();
-  if (!provider) return;
-
-  $<HTMLInputElement>('key').placeholder = provider.keyPlaceholder;
-  $<HTMLAnchorElement>('keysUrl').href = provider.keysUrl;
-
-  const model = currentModel();
-  $('priceHint').textContent = model
-    ? `About ${fmtUsd(model.per1kPosts)} per 1,000 posts${model.supportsVision ? '' : ' · text only'}`
-    : '';
-
-  $('privacy').textContent =
-    `Your key stays in this browser's extension storage, out of reach of instagram.com, ` +
-    `and is sent only to ${provider.label}.`;
-}
-
-function renderHome(): void {
-  const { total, categorized, pending, spentUsd, estimateUsd } = progress;
-  const running = progress.phase === 'running';
-  const active = running || harvesting;
-
-  $('fCaptured').textContent = String(total);
-  $('fIndexed').textContent = String(categorized);
-  $('fQueued').textContent = String(
-    progress.phase === 'running'
-      ? Math.max(0, progress.runTotal - progress.runCompleted)
-      : pending,
-  );
-  $('fQueuedCap').textContent = progress.phase === 'running' ? 'This run' : 'Waiting';
-  $('fSpent').textContent = fmtUsd(spentUsd);
-
-  // When there is nothing pending, "left, at most" is $0.00 and the button beside it
-  // starts a full re-index. Show what that button would cost instead.
-  const finished = pending === 0 && total > 0 && !active;
-  $('fLeft').textContent = fmtUsd(finished && quote ? quote.usd : estimateUsd);
-  $('fLeftCap').textContent = finished ? 'To re-index everything' : 'To sort the rest, at most';
-  const progressTotal = progress.runTotal || total;
-  const progressDone = progress.runTotal ? progress.runCompleted : categorized;
-  const percent = Math.round(progressTotal ? (progressDone / progressTotal) * 100 : 0);
-  $('fill').style.width = `${percent}%`;
-  $('track').setAttribute('aria-valuenow', String(percent));
-
-  $('homeTitle').textContent =
-    harvesting && total === 0
-      ? 'Finding posts'
-      : total === 0
+  $('homeTitle').textContent = finding
+    ? 'Finding posts…'
+    : found === 0
       ? 'Nothing found yet'
-      : running
-        ? `Sorting ${progress.runCompleted} of ${progress.runTotal}`
-        : harvesting
-          ? 'Finding posts'
-          : pending > 0
-            ? `${pending} post${pending === 1 ? '' : 's'} found, not sorted yet`
-            : 'Everything found is sorted';
-
-  $('homeBody').textContent =
-    harvesting && total === 0
-      ? 'Keep the Instagram tab open. Sorting starts by itself when it reaches the end.'
-      : total === 0
-      ? 'Open a saved collection on Instagram and press Find new posts in the corner. ' +
-        'It scrolls for you, then sorts what it found.'
-      : running
-        ? 'Sorting never scrolls. Pause any time; it picks up where it stopped.'
-        : harvesting
-          ? 'Keep the Instagram tab open. Finding does not send extra Instagram requests.'
-          : pending > 0
-            ? 'Press Sort to categorise them. It picks up where it stopped.'
-            : 'New saves are found as you scroll and sorted in the background.';
-
-  const primary = $<HTMLButtonElement>('primary');
-  primary.classList.toggle('danger', confirming === 'reindex');
-  primary.textContent = active
-    ? 'Pause'
-    : pending > 0
-      ? `Sort ${pending} post${pending === 1 ? '' : 's'}`
-      : total > 0
-        ? confirming === 'reindex'
-          ? `Confirm — re-index ${total} posts`
-          : `Re-index everything${quote ? ` · ${reindexPrice(quote)}` : ''}`
-        : 'Find new posts';
-  // With nothing to sort with, the button is the way back to setup rather than a dead
-  // grey bar: someone who pressed Skip still needs a route to sign in or add a key.
-  if (!canIndex()) primary.textContent = 'Sign in to start';
-
-  if (confirming === 'reindex' && quote) {
-    setStatus(
-      'homeStatus',
-      'bad',
-      quote.billable === 0
-        ? 'Every summary is already on file, so this costs nothing. Press again to run it.'
-        : `${quote.billable} of ${quote.total} posts would be sent to the model again — about ${fmtUsd(quote.usd)}. Press again to confirm.`,
-    );
-  }
-
-  $('ledgerState').textContent = String(stats.ledgerCount);
-  $('remove').textContent = confirming === 'remove' ? 'Click again to remove the key' : 'Remove Key';
-  $('resetSpend').textContent =
-    confirming === 'reset' ? 'Click again to erase the spend record' : 'Reset Spend Counter';
-  $('keyMask').textContent = settings.keyMask || 'none';
-  $('keyState').textContent = settings.hasKey ? 'saved in this browser' : 'not set';
-  $('replace').textContent = replacing ? 'Cancel' : 'Replace Key';
-  $<HTMLElement>('replaceBox').hidden = !replacing;
-
-  // aria-checked drives the visual state as well as the announced one, so the two can
-  // never disagree — see the [aria-checked="true"] rules in popup.html.
-  $('autoIndex').setAttribute('aria-checked', String(settings.autoIndex));
-  $('overlay').setAttribute('aria-checked', String(settings.scrubberSkin === 'overlay'));
+      : `${found.toLocaleString()} post${found === 1 ? '' : 's'} found`;
+  $('homeBody').textContent = finding
+    ? `${found.toLocaleString()} so far. They appear in your library as they sync.`
+    : found === 0
+      ? 'Press Find new posts and the extension scrolls your saved posts on Instagram for you.'
+      : 'Find again after saving more. Index and search them in your library.';
+  $('primary').textContent = finding ? 'Stop' : 'Find new posts';
 }
 
-// --- helpers ----------------------------------------------------------------
-
-function currentProvider(): ProviderMeta | undefined {
-  return providers.find((p) => p.id === settings.provider);
-}
-
-function currentModel(): ModelMeta | undefined {
-  const provider = currentProvider();
-  return provider?.models.find((m) => m.id === settings.model) ?? provider?.models[0];
-}
-
-function reindexPrice(q: ReindexQuote): string {
-  return q.billable === 0 ? 'free — all on file' : `~${fmtUsd(q.usd)}`;
-}
-
-/**
- * Provider errors carry a friendly sentence followed by up to 400 characters of raw
- * body. Showing the whole thing at 11.5px in a 380px column buried the actionable half
- * and jumped the layout, so the tail moves to the tooltip.
- */
-function setStatus(id: string, kind: '' | 'ok' | 'bad', message: string): void {
+function setStatus(id: string, kind: '' | 'ok' | 'bad', text: string): void {
   const el = $(id);
   el.className = `status${kind ? ` ${kind}` : ''}`;
-  const cut = message.search(/[{\n]/);
-  const head = cut > 0 ? message.slice(0, cut).trim() : message;
   const msg = el.querySelector('.msg');
-  if (msg) {
-    msg.textContent = head;
-    if (head !== message) el.title = message;
-    else el.removeAttribute('title');
-  }
+  if (msg) msg.textContent = text;
 }
 
-function canIndex(): boolean {
-  return signedIn || settings.hasKey;
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
-/** Popup-only preferences. Storage can be unavailable, and these are only conveniences. */
 /**
  * Light or dark, on <html>. The setting lives in the worker; this copy in localStorage
  * only exists so the popup can paint in the right colours before the worker answers.
@@ -755,16 +223,6 @@ function remember(key: string): void {
   } catch {
     // Nothing to do: the default is still usable.
   }
-}
-
-function providerLabel(id: ProviderId): string {
-  return providers.find((p) => p.id === id)?.label ?? id;
-}
-
-function fmtUsd(usd: number): string {
-  if (usd <= 0) return '$0.00';
-  if (usd < 0.01) return '<$0.01';
-  return `$${usd.toFixed(2)}`;
 }
 
 function timeAgo(ms: number): string {

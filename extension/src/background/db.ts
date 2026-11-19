@@ -783,3 +783,17 @@ export async function completeIndexQueue(shortcodes: string[]): Promise<void> {
     };
   });
 }
+
+/** Empties the library: every post and the indexing run. The ledger is ledger.ts's. */
+export async function clearLibrary(): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const t = db.transaction([STORE, INDEX_QUEUE_STORE], 'readwrite');
+    t.objectStore(STORE).clear();
+    t.objectStore(INDEX_QUEUE_STORE).clear();
+    t.oncomplete = () => resolve();
+    t.onerror = t.onabort = () => reject(t.error ?? new Error('Could not clear the library.'));
+  });
+  invalidate();
+  invalidateQueue();
+}

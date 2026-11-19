@@ -1,15 +1,15 @@
 # Saved Index
 
-A Chrome extension (Manifest V3, TypeScript) that does two things to Instagram:
+Your Instagram saved posts, organised and searchable. Three parts:
 
-1. **Turns the saved-posts grid into a searchable library.** Every saved post gets a
-   one-line summary and a category, so you can find the pasta recipe without scrolling
-   through 400 identical thumbnails.
-2. **Gives Instagram videos real seek controls.** A smooth scrubber, arrow-key seeking,
-   and no more forced looping.
+1. **The web app** is the product. It shows your library, searches it, indexes posts
+   (each one gets a topic, a one-line summary and tags), and holds your account, spend
+   and settings.
+2. **The Chrome extension** is a collector. It finds the posts you saved on Instagram
+   and syncs them to your account. It also gives Instagram videos real seek controls.
+3. **The Supabase backend** holds the library and runs indexing on the server.
 
-Loaded unpacked. Not published. Your API key is stored only in your browser and is sent
-only to the model provider you choose when making an authenticated request.
+The extension is loaded unpacked and not published.
 
 New contributor or maintainer? Start with [`PROJECT_INDEX.md`](PROJECT_INDEX.md) for the
 documentation map, current state, code ownership, known risks, and release checklist.
@@ -34,82 +34,49 @@ The build prints the exact folder to load. Then in Chrome:
    you paste the path the build printed.
 
 Needs **Chrome 111 or newer** (that's when manifest-declared `world: "MAIN"` content
-scripts landed).
+scripts landed). Run the web app with `npm run dev:web`.
 
 `npm run watch` rebuilds on save; hit the reload icon on the extension card to pick
 changes up.
 
 ## First run
 
-1. Click the extension icon. Under **Account**, **Create Account** or **Sign In**. You are
-   signed in straight away, your library syncs to your account in the background, and
-   your account analyses your posts, so no OpenAI key is needed.
-2. Or, without an account: pick a model, paste an OpenAI key, press **Test and save**. It
-   tests first and stores the key only after OpenAI accepts it.
-3. Open your saved posts on Instagram: your profile → **Saved**.
-4. The library takes over the page. Scroll and posts are captured automatically. **Index
-   now** freezes the number currently waiting, indexes exactly that set, and scans farther
-   down the feed; anything found during that scan waits for the next run.
-
-Roughly **$0.10 per 1,000 posts** on GPT-5.6 Luna, for the text tier, before any
-reasoning tokens. Posts caught by
-the free local rules never reach the model at all; the small minority with no usable
-caption fall through to a thumbnail, which costs several times more per post, so treat the
-figure as a typical price rather than a hard ceiling. The popup and the in-page panel both
-show what you have actually spent, metered from the token counts the provider returns.
-
-OpenAI is the only provider. **GPT-5.6 Luna** is the economical default and **GPT-5.6
-Terra** is for when quality matters more than cost. Both run at low reasoning effort:
-enough deliberation for a closed classification task without paying for long hidden
-reasoning.
-
-**You never pay for the same post twice.** Every summary is written to a separate ledger,
-keyed by a hash of the exact text the model was shown. Unsaving or re-indexing a post does
-not throw that away — the work is replayed from the ledger for nothing, and only posts
-whose input or category list genuinely changed are sent to the model again. Use **Save a
-copy** before uninstalling or moving browsers. **Re-index everything** tells you, before
-you press it, how many posts actually need the model and what they will cost.
+1. Click the extension icon and **Create Account** or **Sign In**.
+2. Press **Find new posts**. It opens your saved posts on Instagram if they are not open
+   already, and scrolls them for you. Posts sync to your account as they are found.
+3. Press **Open your library** to go to the web app.
+4. In the web app, press **Index N posts**. It shows the most it can cost first and asks
+   you to confirm. Posts the free keyword rules can file cost nothing.
 
 ---
 
-## How indexing actually works
+## How it works
 
-Two jobs, and one button that only ever does what its label says. Only the second job
-costs money.
+Two jobs, in two places. Only the second one costs money.
 
-| The button says | What happens |
-|---|---|
-| **Find new posts** | Scrolls the open collection to the end, then sorts what it found by itself |
-| **Sort 34 posts** | Sorts posts already found. Never scrolls |
-| **Resume sorting** | Carries on a paused sort where it stopped. Never scrolls |
-| **Pause** | Stops whichever job is running |
-
-**1 — Find (free).** Instagram sends about a dozen posts per network request. A post
-cannot be found before it has loaded, so *the library fills as you scroll*. If you have
-1,000 saved posts and 30 are on screen, 30 is what exists so far. Find new posts scrolls to
-the bottom with randomised 800–2000 ms pauses and stops immediately if Instagram returns a
-429; posts found before a pause or a 429 wait under **Sort**. It makes no requests
-of its own — it reads the responses the page was fetching anyway.
+**1 — Find (the extension, free).** Instagram sends about a dozen posts per network
+request. A post cannot be found before it has loaded, so *the library fills as you
+scroll*. Find new posts scrolls to the bottom with randomised 800–2000 ms pauses and stops
+immediately if Instagram returns a 429. It makes no requests of its own; it reads the
+responses the page was fetching anyway.
 
 Capture only runs on your saved page, only reads the part of a response that Instagram
 names as the saved feed, and only scrapes inside the saved grid. All three matter, because
-`/graphql/query` is one endpoint for the whole site: without them, opening a saved reel
-meant the "more from this creator" strip got indexed too.
+`/graphql/query` is one endpoint for the whole site.
 
 **Something in your library you never saved?** Open **All posts**, press **Find new
-posts** and let it run to the end. A completed sweep sees everything still saved, so anything it doesn't find is offered
-up for removal — posts you have unsaved since, and anything an older build picked up
-elsewhere. Everything genuine keeps the summary you already paid for.
+posts** and let it run to the end. A completed sweep of the full feed sees everything still
+saved, so the pill offers to remove anything it didn't find, after a second press.
 
-**2 — Categorise (the part that costs).** Hashtag and keyword rules label whatever they can
-for nothing. Everything else goes to your model in batches of 25 captions. Only posts with
-no usable caption *and* no alt text cost a look at the thumbnail. The fixed run queue and
-paid-work ledger both live in the database, so a paused or restarted worker resumes the
-same set. Open any card for its details and use **Re-index this post** when a result is
-wrong; that explicit retry bypasses both the old verdict and the local rule pass.
+**2 — Index (the web app, the part that costs).** Hashtag and keyword rules label
+whatever they can for nothing. Everything else goes to the model on the server in small
+batches, newest saved first, and **Stop** ends a run after the batch in flight. Every
+summary is kept in a ledger keyed by the exact text the model was shown, so the same post
+is never paid for twice.
 
-Both halves can be paused and resumed from either the popup or the in-page panel, and a
-pause in one stops the other.
+**Clear library** (web app → Settings) erases every post, picture, collection and summary
+in your account. Each browser running the extension empties its own copy on its next
+sync, so nothing comes back. Your spend record is kept.
 
 ---
 
@@ -134,44 +101,36 @@ claims one. What you get instead:
 Save order is the default sort, because ordering saved posts by publish date buries a 2019
 clip you saved yesterday. **Newest post** and **Oldest post** use the publish date.
 
-**Where it appears.** Nothing shows on the feed, on profiles or on the Saved overview. Open
-a collection (All posts, Audio, or one of your own) and a small pill in the bottom-right
-names it, offers **Index this collection**, and opens the library on request. The library
-never opens by itself, and the extension never listens to keys you type on Instagram.
-**Library ↔ Instagram** in the library header, or Esc, takes you back to Instagram's grid.
+**Where it appears on Instagram.** Nothing shows on the feed, on profiles or on the Saved
+overview. Open a collection (All posts, Audio, or one of your own) and a small pill in the
+bottom-right names it, offers **Find new posts**, and links to your library. The extension
+never listens to keys you type on Instagram.
 
 **Your collections carry over.** Each time you browse one of your own collections, its
-posts are tagged with it, and it appears under **Collections** in the library's sidebar.
+posts are tagged with it, and it appears under **Collections** in the web app's sidebar.
 Categories still work inside a collection. Taking a post out of a collection on Instagram
 is not noticed yet, so a post stays listed under every collection it was seen in.
 
-**Light and dark.** Everything starts light. The sun/moon button in the library header or
-the popup header switches both at once, and the choice is remembered.
+**Light and dark.** Everything starts light. The web app and the extension popup each have
+a sun/moon button, and the choice is remembered.
 
 ---
 
 ## Is it safe?
 
-**Your API key.** It lives in `chrome.storage.local` under the extension's own origin — not
-in `localStorage`, which would put it on instagram.com's doorstep. It is not encrypted at
-rest, and encrypting it would be theatre: the decryption key would have to ship in the same
-bundle. The protection is the access boundary instead, and it holds in three places at
-once: page scripts can't call `chrome.storage` at all; `setAccessLevel({
-TRUSTED_CONTEXTS })` means even *our own* content script can't read it; and every model
-call is made by the background worker. The key crosses one extension-internal message when
-you save or test it in the popup, but it never enters instagram.com or a content script.
-Errors run through a `redact()` that strips key-shaped strings before anything is logged
-or shown.
+**The OpenAI key** lives only in the Supabase Edge Function secrets. It is never in the
+extension, the web app, or the repository. Indexing calls the server, which checks your
+session and a daily spend cap before it calls OpenAI.
 
-It does not protect against someone at your unlocked computer opening the service-worker
-console — that is true of every extension holding a credential. Scope the key, set a spend
-cap at your provider, and use **Remove** in the popup when you're done; it clears the key
-without touching anything you've indexed.
+**Your session.** The extension keeps its Supabase session in `chrome.storage.local`,
+locked to `TRUSTED_CONTEXTS` on every worker start, so not even our own content script on
+instagram.com can read it. Account requests from a content script are refused, and every
+error runs through `redact()` before it is logged or shown.
 
-**Your posts.** Everything captured sits in this extension's own IndexedDB, in your
-browser. The only outbound analysis traffic goes to OpenAI: post text for normal
-classification, plus a small thumbnail for a post with too little text. There is no
-telemetry, and **Save a copy** exports the paid-analysis ledger to your disk.
+**Your posts.** The extension keeps a working copy in its own IndexedDB and mirrors it to
+your account, which Row Level Security limits to you. The only analysis traffic goes from
+the server to OpenAI: post text, plus a small thumbnail for a post with too little text.
+There is no telemetry.
 
 **Your account (optional).** Signed in, the extension mirrors three things to your
 Supabase account, readable only by you under Row Level Security: the post metadata, the
@@ -263,12 +222,13 @@ extension/src/
       openai.ts            Responses API for GPT-5.6, Chat Completions for 4o
 
   page/
-    library.ts             in-page library (Shadow DOM), filters, sort, indexing panel
-    library.css.ts         its styles
+    pill.ts                the in-page pill (Shadow DOM): Find new posts, strays, link to the web app
+    pill.css.ts            its styles
+    flow.ts                pure: the pill's button and status rules
     video.ts               body-level control bar, geometric targeting, observers
     frames.ts              pure: frame length, step targets, timecodes, still filenames
 
-  popup/popup.ts           setup screen + home: account, spend, sorting                → popup.js
+  popup/popup.ts           sign in, then Find new posts and Open your library            → popup.js
 
 extension/public/
   manifest.json  popup.html  icons/
@@ -338,8 +298,8 @@ indexing actually works* above. Press **Find new posts** and leave the tab open.
 **The video scrubber won't seek.** You are looking at the browser's own control strip, not
 ours. Tell them apart by the buttons: Chrome's has a fullscreen icon and a `⋮` menu, ours
 has neither. Instagram's click-catcher swallows clicks on Chrome's strip, which is why our
-bar renders outside their DOM. Turn **Extension video controls** on in the popup; profiles
-created before v2 are switched over automatically on the next worker start.
+bar renders outside their DOM. Extension video controls are on by default; profiles created
+before v2 are switched over automatically on the next worker start.
 
 **Stepping and stills** are switched off for now (`FRAME_TOOLS` in `page/video.ts`) while
 they are redesigned. When on: hover a video: the bar's ⏮ ⏭ buttons, or `,` and `.`, pause and
