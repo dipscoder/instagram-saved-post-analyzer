@@ -7,7 +7,9 @@
   "exports": {
     "./taxonomy": "./src/taxonomy.ts",
     "./hash": "./src/hash.ts",
-    "./filing": "./src/filing.ts"
+    "./filing": "./src/filing.ts",
+    "./config": "./src/config.ts",
+    "./search": "./src/search.ts"
   },
   "scripts": {
     "typecheck": "tsc -p ."

@@ -17,6 +17,7 @@ import {
   TAXONOMY_HASH,
 } from '@saved-index/shared/taxonomy';
 import { hashText } from '@saved-index/shared/hash';
+import { searchFilters, searchTerms } from '@saved-index/shared/search';
 import { applyVerdict, isFresh, parseVerdict, verdictFrom, type Verdict } from '../src/background/ledger';
 import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
@@ -879,6 +880,22 @@ console.log('\none indexing button');
   check('status when done', flowStatus(p({ phase: 'done', total: 40, categorized: 40 }), false) === '40 posts, all sorted');
   check('a rate-limit message is shown as is',
     flowStatus(p({ phase: 'paused', message: 'Instagram rate-limited the page.' }), false) === 'Instagram rate-limited the page.');
+}
+
+console.log('\nweb app search');
+{
+  check('terms are lower-cased words', searchTerms('Pasta  RECIPE').join() === 'pasta,recipe');
+  check('single letters and repeats are dropped', searchTerms('a pasta Pasta').join() === 'pasta');
+  check('accented letters survive', searchTerms('Café crème').join() === 'café,crème');
+  check('at most six terms', searchTerms('aa bb cc dd ee ff gg hh').length === 6);
+  const hostile = searchFilters('x),user_id.neq.0,(caption.ilike.*%_*');
+  const safe = /^[a-z_]+\.(ilike\.\*[\p{L}\p{N}]+\*|cs\.\{[\p{L}\p{N}]+\})$/u;
+  check('filter syntax in a query cannot escape its term',
+    hostile.every((f) => f.split(',').length === 9 && f.split(',').every((c) => safe.test(c))), hostile);
+  const one = searchFilters('tokyo')[0] ?? '';
+  check('one term matches text by substring and arrays by element',
+    one.includes('caption.ilike.*tokyo*') && one.includes('tags.cs.{tokyo}'), one);
+  check('an empty query adds no filter', searchFilters('  !! ').length === 0);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);
