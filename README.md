@@ -82,12 +82,11 @@ sync, so nothing comes back. Your spend record is kept.
 
 ## Finding things again
 
-**Search** matches every word you type, in any order, across the summary, caption,
-category, subcategory, tags, hashtags, handle, alt text and audio track. So "pasta recipe"
-finds a post summarised *recipe for creamy pasta*, and a caption-less reel is still
-findable by Instagram's own alt text or the track playing over it. Results past the first
-200 are behind **Show more**; the header always shows the true total, so `200 / 412` means
-there are 412.
+**Search** understands meaning as well as words. Each indexed post is embedded from its
+summary, category, tags and its own text, and a search ranks posts by keyword match and by
+meaning together. So "quick dinner" finds a post summarised *sheet-pan harissa chicken*,
+while an exact handle or hashtag still comes first. Until the `search` function is
+deployed, the web app falls back to matching every word you type.
 
 **Dates.** Instagram sends no save timestamp anywhere in the saved feed, so nothing here
 claims one. What you get instead:

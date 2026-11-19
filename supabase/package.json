@@ -5,8 +5,9 @@
   "description": "Database migrations and Edge Functions for the Saved Index account.",
   "type": "module",
   "scripts": {
-    "build": "esbuild functions/analyze/index.ts functions/sort/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outdir=functions --entry-names=[dir]/dist/[name] --log-level=warning",
-    "typecheck": "tsc -p ."
+    "build": "esbuild functions/analyze/index.ts functions/sort/index.ts functions/search/index.ts --bundle --format=esm --platform=neutral --target=es2022 --outdir=functions --entry-names=[dir]/dist/[name] --log-level=warning",
+    "typecheck": "tsc -p .",
+    "eval": "esbuild eval/run.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/eval.mjs --log-level=error && node node_modules/.cache/eval.mjs"
   },
   "dependencies": {
     "@saved-index/shared": "0.1.0"

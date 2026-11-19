@@ -13,3 +13,9 @@ enabled = true
 # Checks the caller's session itself, like analyze.
 verify_jwt = false
 entrypoint = "./functions/sort/dist/index.js"
+
+[functions.search]
+enabled = true
+# Checks the caller's session itself, like analyze and sort.
+verify_jwt = false
+entrypoint = "./functions/search/dist/index.js"

@@ -1,13 +1,16 @@
-import { hasTextSignal, SERVER_QUOTE_USD_PER_POST } from '@saved-index/shared/filing';
+import { needsPicture, SERVER_QUOTE_USD_PER_POST } from '@saved-index/shared/filing';
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '@saved-index/shared/config';
+import { EMBED_QUOTE_USD_PER_POST } from '@saved-index/shared/embedding';
 import { supabase } from './supabase';
 
-/** Posts never sorted, newest saved first, with just what decides how they are sent. */
+/** Posts to index, newest saved first, with just what decides how they are sent. */
 export interface Unsorted {
   shortcode: string;
   caption: string;
   hashtags: string[];
   alt_text: string | null;
+  /** Set when the post is already filed and only needs its embedding. */
+  categorized_at: string | null;
 }
 
 export async function fetchUnsorted(): Promise<Unsorted[]> {
@@ -15,8 +18,9 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from('posts')
-      .select('shortcode, caption, hashtags, alt_text')
-      .is('categorized_at', null)
+      .select('shortcode, caption, hashtags, alt_text, categorized_at')
+      // Never filed, or filed but not yet searchable by meaning.
+      .or('categorized_at.is.null,embedded_at.is.null')
       .order('saved_rank', { ascending: false, nullsFirst: false })
       .order('shortcode')
       .range(from, from + 999)
@@ -27,18 +31,19 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
   }
 }
 
-/** The most a run over `count` posts can cost. */
-export function quoteUsd(count: number): number {
-  return count * SERVER_QUOTE_USD_PER_POST;
+/** The most a run over these posts can cost. A post only being embedded costs almost nothing. */
+export function quoteUsd(posts: Pick<Unsorted, 'categorized_at'>[]): number {
+  return posts.reduce((sum, p) => sum + (p.categorized_at ? EMBED_QUOTE_USD_PER_POST : SERVER_QUOTE_USD_PER_POST), 0);
 }
 
 /**
- * Requests for the server: posts with text go 25 at a time, posts that need their
- * picture 4 at a time, matching the limits the `sort` function enforces.
+ * Requests for the server: posts that need their picture go 4 at a time, everything else
+ * 25 at a time, matching the limits the `sort` function enforces. Both sides decide with
+ * the same `needsPicture`, so no picture is dropped for want of room in a request.
  */
 export function sortBatches(posts: Unsorted[]): string[][] {
-  const text = posts.filter((p) => hasTextSignal({ caption: p.caption, hashtags: p.hashtags ?? [], altText: p.alt_text }));
-  const vision = posts.filter((p) => !text.includes(p));
+  const vision = posts.filter((p) => needsPicture({ caption: p.caption ?? '', hashtags: p.hashtags ?? [], altText: p.alt_text }));
+  const text = posts.filter((p) => !vision.includes(p));
   const chunk = (list: Unsorted[], size: number) =>
     Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size).map((p) => p.shortcode));
   return [...chunk(text, 25), ...chunk(vision, 4)];
@@ -46,6 +51,7 @@ export function sortBatches(posts: Unsorted[]): string[][] {
 
 export interface SortReply {
   sorted: number;
+  embedded: number;
   unreadable: string[];
   failed: string[];
   usd: number;
@@ -77,5 +83,5 @@ export async function sortBatch(shortcodes: string[], signal: AbortSignal): Prom
       res.status === 404 ? 'Indexing is not set up on the server yet. Deploy the sort function.' : (body.error ?? `Indexing failed (${res.status}).`);
     throw new SortError(message, res.status);
   }
-  return { sorted: body.sorted ?? 0, unreadable: body.unreadable ?? [], failed: body.failed ?? [], usd: body.usd ?? 0 };
+  return { sorted: body.sorted ?? 0, embedded: body.embedded ?? 0, unreadable: body.unreadable ?? [], failed: body.failed ?? [], usd: body.usd ?? 0 };
 }

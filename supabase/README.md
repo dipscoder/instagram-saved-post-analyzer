@@ -55,7 +55,16 @@ npm run build:functions        # bundles shared/ into functions/*/dist/
 npx supabase login
 npx supabase functions deploy analyze --project-ref siwmxcsrzdvvtouolvph --use-api
 npx supabase functions deploy sort --project-ref siwmxcsrzdvvtouolvph --use-api
+npx supabase functions deploy search --project-ref siwmxcsrzdvvtouolvph --use-api
 ```
+
+`search` needs the `20261120090000_hybrid_search.sql` migration (pgvector, the full-text
+document, `search_posts`). Until it is deployed the web app falls back to keyword search.
+
+**Measuring accuracy.** `npm run eval` files `eval/labeled.json` with the keyword rules
+for free. `OPENAI_API_KEY=… npm run eval -- --model` runs the full pipeline (about a tenth
+of a cent) and lists every post filed in the wrong category. Export the key in your own
+shell only; never write it to a file here.
 
 The bundle is needed because `shared/` uses extensionless imports, which Deno does not
 resolve; `config.toml` points the function at it. `verify_jwt` is off because the function

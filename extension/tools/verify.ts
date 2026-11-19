@@ -10,6 +10,7 @@
 
 import { extractPosts } from '../src/capture/extract';
 import {
+  CATEGORY_NAMES,
   classifyByRules,
   normalizeCategory,
   normalizeSubcategory,
@@ -48,6 +49,19 @@ import {
   toVerdictRow,
 } from '../src/background/sync-plan';
 import {
+  cleanQuery,
+  EMBEDDING_DIMENSIONS,
+  embeddingCostUsd,
+  embeddingText,
+  readEmbeddings,
+  vectorLiteral,
+} from '@saved-index/shared/embedding';
+import { needsPicture } from '@saved-index/shared/filing';
+import { BadSearch, parseSearch } from '../../supabase/functions/search/parse';
+import labeled from '../../supabase/eval/labeled.json';
+import { score, verdictOf, type Labeled } from '../../supabase/eval/score';
+import {
+  embeddingFields,
   MAX_SORT_POSTS,
   parseSortRequest,
   planSort,
@@ -927,13 +941,14 @@ console.log('\nserver sorting');
   const row = (over: Partial<SortRow>): SortRow => ({
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
     duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
     ...over,
   });
   const textual = row({ shortcode: 'T', caption: 'A slow Sunday walk along the canal, thinking about nothing much' });
   const ruled = row({ shortcode: 'R', caption: 'Easy pasta recipe for dinner', hashtags: ['recipe', 'food', 'cooking'] });
   const picture = row({ shortcode: 'P', thumbnail_stored: true, thumbnail_format: 'webp' });
   const blank = row({ shortcode: 'B' });
-  const done = row({ shortcode: 'D', caption: textual.caption, categorized_at: '2026-11-19T10:00:00Z' });
+  const done = row({ shortcode: 'D', caption: textual.caption, categorized_at: '2026-11-19T10:00:00Z', embedded_at: '2026-11-19T10:00:01Z' });
   const plan = planSort([textual, ruled, picture, blank, done]);
   check('an already sorted post is never sent again', ![...plan.text, ...plan.vision, ...plan.unreadable].some((r) => r.shortcode === 'D') && !plan.ruled.some((r) => r.row.shortcode === 'D'));
   check('keyword rules file a post for free', plan.ruled.length === 1 && plan.ruled[0]!.row.shortcode === 'R', plan.ruled);
@@ -965,6 +980,83 @@ console.log('\nserver sorting');
   const newer = { ...post, shortcode: 'N', category: 'Food', categorizedAt: 5_000 };
   const adopted = adoptVerdicts([unsorted, newer, { ...post, shortcode: 'K' }], [verdict('U', 1_000), verdict('N', 2_000), verdict('K', 1_000, 'skipped')]);
   check('a server verdict sorts a post the extension never sorted', adopted.length === 1 && adopted[0]!.shortcode === 'U' && adopted[0]!.category === 'Travel', adopted);
+}
+
+console.log('\nanalysis v2');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
+    duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: true, thumbnail_format: 'webp',
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null, ...over,
+  });
+  const thin = { caption: 'obsessed 😍 #interiors #home', hashtags: ['interiors', 'home'], altText: null };
+  check('a caption of a few words needs the picture', needsPicture(thin));
+  check('alt text makes a thin caption enough', !needsPicture({ ...thin, altText: 'Photo of a living room with a green velvet sofa' }));
+  check('a real caption does not need the picture',
+    !needsPicture({ caption: 'A slow Sunday walk along the canal, thinking about nothing much', hashtags: [], altText: null }));
+  check('no text at all needs the picture', needsPicture({ caption: '', hashtags: [], altText: null }));
+
+  const plan = planSort([
+    row({ shortcode: 'THIN', caption: thin.caption, hashtags: thin.hashtags }),
+    row({ shortcode: 'OLD', categorized_at: '2026-11-19T10:00:00Z', summary: 'kyoto in three days' }),
+    row({ shortcode: 'NOW', categorized_at: '2026-11-19T10:00:00Z', embedded_at: '2026-11-19T10:00:01Z' }),
+  ]);
+  check('a thin caption with a stored picture goes to vision', plan.vision.map((r) => r.shortcode).join() === 'THIN', plan);
+  check('a filed post without an embedding is only embedded', plan.embedOnly.map((r) => r.shortcode).join() === 'OLD');
+  check('a filed and embedded post is left alone',
+    ![...plan.text, ...plan.vision, ...plan.embedOnly, ...plan.unreadable].some((r) => r.shortcode === 'NOW'));
+  const noPicture = planSort([row({ shortcode: 'T', caption: thin.caption, hashtags: thin.hashtags, thumbnail_stored: false })]);
+  check('a thin caption without a stored picture still goes by text', noPicture.text.length === 1);
+
+  const fields = embeddingFields(row({ caption: 'Fushimi Inari at dawn', hashtags: ['japan'] }), {
+    category: 'Travel', subcategory: 'City guides', tags: ['kyoto', 'temples'], summary: 'Three days in Kyoto',
+  });
+  const text = embeddingText(fields);
+  check('an embedding leads with what the post is about', text.startsWith('Three days in Kyoto\nTravel\nCity guides\nkyoto, temples'), text);
+  check('an embedding keeps the post\'s own words', text.includes('Fushimi Inari at dawn') && text.includes('#japan') && text.includes('@cafe.oshi'));
+  check('an embedding never says Uncategorized', !embeddingText({ ...fields, category: 'Uncategorized' }).includes('Uncategorized'));
+  check('an embedding text is bounded', embeddingText({ ...fields, caption: 'x'.repeat(10_000) }).length <= 2_400);
+
+  const vec = (n: number) => Array.from({ length: EMBEDDING_DIMENSIONS }, () => n);
+  const reply = { data: [{ index: 1, embedding: vec(0.2) }, { index: 0, embedding: vec(0.1) }], usage: { total_tokens: 1_000_000 } };
+  const read = readEmbeddings(reply, 2);
+  check('embeddings come back in input order', read?.[0]?.[0] === 0.1 && read?.[1]?.[0] === 0.2);
+  check('a missing embedding discards the reply', readEmbeddings({ data: [reply.data[0]] }, 2) === null);
+  check('a wrong-sized embedding discards the reply', readEmbeddings({ data: [{ index: 0, embedding: [1, 2] }] }, 1) === null);
+  check('a duplicate index discards the reply',
+    readEmbeddings({ data: [{ index: 0, embedding: vec(1) }, { index: 0, embedding: vec(1) }] }, 2) === null);
+  check('a non-number discards the reply', readEmbeddings({ data: [{ index: 0, embedding: [...vec(1).slice(1), 'x'] }] }, 1) === null);
+  check('a million embedding tokens cost two cents', Math.abs(embeddingCostUsd(reply) - 0.02) < 1e-9);
+  check('a vector is written as pgvector text', vectorLiteral([0.1234567, -2, 0]) === '[0.123457,-2,0]');
+
+  check('a query is cleaned and bounded', cleanQuery('  quick\u0000  dinner ') === 'quick dinner' && cleanQuery('a'.repeat(500)).length === 200);
+  check('a search is parsed', parseSearch({ query: 'quick dinner', collection: '1792' }).collection === '1792');
+  let refused = 0;
+  for (const bad of [{ query: 'a' }, { query: 'ok ok', category: 'Nope' }, { query: 'ok ok', collection: '1,2' }, { query: 5 }]) {
+    try { parseSearch(bad); } catch (e) { if (e instanceof BadSearch) refused++; }
+  }
+  check('a malformed search is refused', refused === 4);
+}
+
+console.log('\nfiling eval');
+{
+  const o = (expected: string | null, got: string | null, byRules = false) => ({ id: 'x', expected, got, byRules });
+  const s = score([o('Travel', 'Travel', true), o('Design', null), o('Food & Recipes', 'Travel'), o(null, null)]);
+  check('right, unknown and wrong are counted apart', s.right === 2 && s.unknown === 1 && s.wrong === 1, s);
+  check('precision counts only posts given a category', s.precision === 0.5, s.precision);
+  check('a thin post left Unknown is right', verdictOf(o(null, null)) === 'right');
+
+  // The free keyword rules must never put a labeled post in the wrong category: a wrong
+  // category is the mistake nobody notices. Missing one is fine; the model picks it up.
+  const posts = labeled.posts as Labeled[];
+  const ruled = posts.flatMap((p) => {
+    const hit = classifyByRules({ handle: p.handle, caption: p.caption, hashtags: p.hashtags, altText: null, isVideo: false, durationSec: null, audioTrackName: null });
+    return hit ? [o(p.expected, hit.category, true)] : [];
+  });
+  const misfiled = ruled.filter((r) => verdictOf(r) === 'wrong');
+  check(`the keyword rules misfile none of the ${posts.length} labeled posts`, misfiled.length === 0, misfiled);
+  check('every label is a real category or null',
+    posts.every((p) => p.expected === null || CATEGORY_NAMES.includes(p.expected)), posts.filter((p) => p.expected && !CATEGORY_NAMES.includes(p.expected)));
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);
