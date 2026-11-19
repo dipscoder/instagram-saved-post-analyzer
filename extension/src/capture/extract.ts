@@ -130,7 +130,7 @@ function toCapturedPost(o: Json): CapturedPost | null {
     handle: handle ? `@${handle}` : '',
     caption,
     hashtags: parseHashtags(caption),
-    thumbnailUrl: smallestThumbnail(o) ?? '',
+    thumbnailUrl: gridThumbnail(o) ?? '',
     isVideo: readIsVideo(o),
     durationSec: num(o['video_duration']) ?? num(o['video_duration_seconds']) ?? null,
     audioTrackName: readAudioTrack(o),
@@ -191,12 +191,16 @@ function readAudioTrack(o: Json): string | null {
 }
 
 /**
- * Smallest candidate wins. This URL feeds both the grid and the vision fallback, and
- * image tokens dominate model cost — a 150px thumbnail is enough to tell a recipe from
- * a gym reel, and enough for a 4-up card.
+ * The smallest candidate at least GRID_EDGE_PX wide, or the largest if none is. This one
+ * URL feeds the grid, the account's stored copy and the vision fallback. It used to be
+ * the smallest (about 150px), which looked soft on every screen and could never be made
+ * sharp later. The model's cost is unaffected: vision runs at `detail: low`, a flat
+ * price whatever the size, and the image is shrunk before it is sent (see media.ts).
  */
-function smallestThumbnail(o: Json): string | null {
-  const candidates: { url: string; area: number }[] = [];
+const GRID_EDGE_PX = 640;
+
+function gridThumbnail(o: Json): string | null {
+  const candidates: { url: string; width: number }[] = [];
 
   const iv2 = asObj(o['image_versions2']);
   const list = iv2 ? iv2['candidates'] : undefined;
@@ -206,15 +210,13 @@ function smallestThumbnail(o: Json): string | null {
       if (!cand) continue;
       const url = str(cand['url']);
       if (!url) continue;
-      const w = num(cand['width']) ?? 0;
-      const h = num(cand['height']) ?? 0;
-      candidates.push({ url, area: w * h || Number.MAX_SAFE_INTEGER });
+      candidates.push({ url, width: num(cand['width']) ?? 0 });
     }
   }
 
   if (candidates.length) {
-    candidates.sort((a, b) => a.area - b.area);
-    return candidates[0]!.url;
+    candidates.sort((a, b) => a.width - b.width);
+    return (candidates.find((c) => c.width >= GRID_EDGE_PX) ?? candidates[candidates.length - 1]!).url;
   }
 
   return (

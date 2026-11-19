@@ -100,13 +100,6 @@
       section { display: none; flex-direction: column; }
       section.on { display: flex; }
 
-      footer {
-        flex: none; height: 36px; padding: 0 16px;
-        display: flex; align-items: center; justify-content: space-between;
-        border-top: 0.5px solid var(--separator); background: var(--bar);
-        font-size: 11px; color: var(--label-2);
-      }
-      footer a { font-weight: 500; }
 
       /* --- onboarding hero ------------------------------------------------------ */
 
@@ -183,7 +176,7 @@
         display: grid; place-items: center;
         background: var(--brand); color: #fff; font-size: 14px; font-weight: 650;
       }
-      .who .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+      .who .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 
       /* --- buttons -------------------------------------------------------------- */
 
@@ -236,6 +229,38 @@
       .switch[aria-checked="true"] { background: var(--accent); }
       .switch[aria-checked="true"] i { transform: translateX(16px); }
       .row label { cursor: pointer; }
+      .chip-btn {
+        flex: none; height: 28px; padding: 0 11px; border-radius: 8px;
+        font-size: 12px; font-weight: 500; color: var(--label-2);
+        box-shadow: inset 0 0 0 0.5px var(--separator), 0 0 0 0.5px var(--separator);
+      }
+      .chip-btn:hover { background: var(--fill); color: var(--label); }
+
+      /* Spend first, in two plain numbers: what was spent, what the rest would cost. */
+      .spend { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; }
+      .spend-cell { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; }
+      .spend-cell + .spend-cell { border-left: 0.5px solid var(--separator); }
+      .spend-cell span { font-size: 11px; color: var(--label-2); }
+      .spend-cell b { font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+      .money { font-variant-numeric: tabular-nums; }
+
+      .btn.secondary {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        margin-top: 8px; background: var(--card); color: var(--label); box-shadow: var(--shadow);
+      }
+
+      /* Everything a person rarely needs lives behind one fold. */
+      .more { margin-top: 20px; }
+      .more > summary {
+        list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+        padding: 10px 4px; font-size: 13px; font-weight: 600; color: var(--label-2);
+        border-top: 0.5px solid var(--separator);
+      }
+      .more > summary::-webkit-details-marker { display: none; }
+      .more > summary::after { content: "›"; font-size: 16px; transition: transform 150ms ease; }
+      .more[open] > summary::after { transform: rotate(90deg); }
+      .more > .heading:first-of-type { margin-top: 12px; }
+      .note.top { margin: 0 4px 8px; }
     </style>
   </head>
   <body>
@@ -253,8 +278,8 @@
     <main>
       <!-- Moved into the visible screen's slot by popup.ts: both screens need it. -->
       <div id="account">
-        <div class="heading">Account</div>
         <form id="signedOut">
+          <div class="heading">Account</div>
           <div class="segmented" role="group" aria-label="Account">
             <button type="button" id="modeUp" aria-pressed="true">Create Account</button>
             <button type="button" id="modeIn" aria-pressed="false">Sign In</button>
@@ -271,9 +296,8 @@
             <div class="row who">
               <span class="avatar" id="avatar" aria-hidden="true"></span>
               <span class="label"><span id="accountEmail"></span><span class="sub" id="accountSync"></span></span>
+              <button class="chip-btn" id="signOut" type="button">Sign out</button>
             </div>
-            <button class="row action" id="syncNow">Sync Now</button>
-            <button class="row action destructive" id="signOut">Sign Out</button>
           </div>
         </div>
         <div class="status" id="accountStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
@@ -312,82 +336,87 @@
 
       <!-- Control room: shown once a key is saved -->
       <section id="home">
+        <div id="accountSlotHome"></div>
+
+        <div class="group spend">
+          <div class="spend-cell"><span>Spent so far</span><b class="money" id="fSpent">$0.00</b></div>
+          <div class="spend-cell"><span id="fLeftCap">To sort the rest</span><b class="money" id="fLeft">$0.00</b></div>
+        </div>
+
         <div class="group summary">
           <div class="card-head">
-            <span>Library</span>
-            <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Open ↗</a>
+            <span>Indexing</span>
+            <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram ↗</a>
           </div>
-          <h1 id="homeTitle">Nothing captured yet</h1>
+          <h1 id="homeTitle">Nothing found yet</h1>
           <p id="homeBody"></p>
-          <div class="track" id="track" role="progressbar" aria-label="Indexing progress"
+          <div class="track" id="track" role="progressbar" aria-label="Sorting progress"
                aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <i id="fill" style="width: 0%"></i>
           </div>
           <div class="stats">
-            <div class="stat"><b id="fCaptured">0</b><span>Captured</span></div>
-            <div class="stat"><b id="fIndexed">0</b><span>Indexed</span></div>
-            <div class="stat"><b id="fQueued">0</b><span id="fQueuedCap">waiting</span></div>
+            <div class="stat"><b id="fCaptured">0</b><span>Found</span></div>
+            <div class="stat"><b id="fIndexed">0</b><span>Sorted</span></div>
+            <div class="stat"><b id="fQueued">0</b><span id="fQueuedCap">Waiting</span></div>
           </div>
         </div>
-        <button class="btn" id="primary">Start indexing</button>
+        <button class="btn" id="primary">Find new posts</button>
         <div class="status" id="homeStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
 
-        <div id="accountSlotHome"></div>
+        <a class="btn secondary" id="openWeb" href="#" target="_blank" rel="noopener">Open your library <span aria-hidden="true">↗</span></a>
 
-        <div class="heading">Cost</div>
-        <div class="group">
-          <div class="row"><span class="label">Spent</span><span class="value money" id="fSpent">$0.00</span></div>
-          <div class="row"><span class="label" id="fLeftCap">left, at most</span><span class="value money" id="fLeft">$0.00</span></div>
-          <button class="row action destructive" id="resetSpend">Reset Spend Counter</button>
-        </div>
+        <details class="more" id="more">
+          <summary>Settings</summary>
 
-        <div class="heading">OpenAI</div>
-        <div class="group">
-          <div class="row"><span class="label">Model</span><select id="model2" aria-label="Model"></select></div>
-          <div class="row">
-            <span class="label">API Key<span class="sub" id="keyState">saved in this browser</span></span>
-            <span class="value mono" id="keyMask"></span>
+          <div class="group" id="accountTools" hidden>
+            <button class="row action" id="syncNow">Sync Now</button>
           </div>
-          <div id="replaceBox" hidden>
-            <label class="row"><span class="label">New key</span><input id="key2" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /></label>
-            <button class="row action" id="saveKey2">Test and Save New Key</button>
-          </div>
-          <button class="row action" id="test">Test Connection</button>
-          <button class="row action" id="replace">Replace</button>
-          <button class="row action destructive" id="remove">Remove</button>
-          <div class="row" hidden><span class="label">Provider</span><select id="provider2" aria-label="Provider"></select></div>
-        </div>
-        <p class="note" id="ownKeyNote" hidden>Not used while you are signed in: your account analyses your posts.</p>
-        <div class="status" id="keyStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
 
-        <div class="heading">Preferences</div>
-        <div class="group">
-          <div class="row">
-            <label for="autoIndex">Index new saves automatically<span class="sub">Categorise a post as soon as it is captured.</span></label>
-            <button type="button" class="switch" id="autoIndex" role="switch" aria-checked="false"><i></i></button>
+          <div class="heading">OpenAI key</div>
+          <p class="note top" id="ownKeyNote" hidden>Not needed while you are signed in: your account sorts your posts.</p>
+          <div class="group">
+            <div class="row"><span class="label">Model</span><select id="model2" aria-label="Model"></select></div>
+            <div class="row">
+              <span class="label">API Key<span class="sub" id="keyState">saved in this browser</span></span>
+              <span class="value mono" id="keyMask"></span>
+            </div>
+            <div id="replaceBox" hidden>
+              <label class="row"><span class="label">New key</span><input id="key2" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" /></label>
+              <button class="row action" id="saveKey2">Test and Save New Key</button>
+            </div>
+            <button class="row action" id="test">Test Connection</button>
+            <button class="row action" id="replace">Replace</button>
+            <button class="row action destructive" id="remove">Remove</button>
+            <div class="row" hidden><span class="label">Provider</span><select id="provider2" aria-label="Provider"></select></div>
           </div>
-          <div class="row">
-            <label for="overlay">Video controls<span class="sub">A reliable scrubber and arrow-key seeking on Instagram.</span></label>
-            <button type="button" class="switch" id="overlay" role="switch" aria-checked="false"><i></i></button>
-          </div>
-        </div>
+          <div class="status" id="keyStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
 
-        <div class="heading">Analysis ledger</div>
-        <div class="group">
-          <div class="row"><span class="label">Summaries on file</span><span class="value" id="ledgerState">0 on file</span></div>
-          <button class="row action" id="exportLedger">Save a Copy</button>
-          <button class="row action" id="importLedger">Restore from a Copy</button>
-          <input id="importFile" type="file" accept="application/json,.json" hidden />
-        </div>
-        <p class="note">A backup of paid analysis, so the same post is never paid for twice.</p>
-        <div class="status" id="ledgerStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
+          <div class="heading">Preferences</div>
+          <div class="group">
+            <div class="row">
+              <label for="autoIndex">Sort new saves automatically<span class="sub">Sort a post as soon as it is found.</span></label>
+              <button type="button" class="switch" id="autoIndex" role="switch" aria-checked="false"><i></i></button>
+            </div>
+            <div class="row">
+              <label for="overlay">Video controls<span class="sub">A reliable scrubber and arrow-key seeking on Instagram.</span></label>
+              <button type="button" class="switch" id="overlay" role="switch" aria-checked="false"><i></i></button>
+            </div>
+          </div>
+
+          <div class="heading">Backup</div>
+          <div class="group">
+            <div class="row"><span class="label">Summaries on file</span><span class="value" id="ledgerState">0</span></div>
+            <button class="row action" id="exportLedger">Save a Copy</button>
+            <button class="row action" id="importLedger">Restore from a Copy</button>
+            <input id="importFile" type="file" accept="application/json,.json" hidden />
+            <button class="row action destructive" id="resetSpend">Reset Spend Counter</button>
+          </div>
+          <p class="note">Paid summaries are kept, so the same post is never paid for twice.</p>
+          <div class="status" id="ledgerStatus" role="status" aria-live="polite"><span class="led"></span><span class="msg"></span></div>
+        </details>
       </section>
     </main>
 
-    <footer>
-      <span id="footLabel"></span>
-      <a class="library-link" href="https://www.instagram.com/" target="_blank" rel="noopener">Open Library ↗</a>
-    </footer>
 
     <script src="popup.js"></script>
   </body>

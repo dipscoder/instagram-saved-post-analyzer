@@ -159,13 +159,21 @@ export interface ThumbState {
   shortcode: string;
   stored: boolean;
   url: string;
+  /**
+   * What the stored copy is: 'webp' is the current 800px copy, 'jpg' the first 480px one
+   * made from a 150px source. Absent on a failed copy.
+   */
+  format?: ThumbFormat;
 }
+
+export type ThumbFormat = 'jpg' | 'webp';
 
 /**
  * Thumbnails still to copy, newest saved first. Only posts already in the account
  * qualify, so the row a thumbnail is attached to always exists. A failed copy is retried
  * only once the post arrives with a different URL: Instagram's are signed and expire, and
- * the same expired URL fails the same way every time.
+ * the same expired URL fails the same way every time. An old soft JPEG is replaced the
+ * same way, once a fresh URL turns up, so upgrading costs no extra requests to Instagram.
  */
 export function planThumbnails(
   records: Iterable<PostRecord>,
@@ -176,11 +184,31 @@ export function planThumbnails(
   for (const r of records) {
     if (!r.thumbnailUrl || !synced.has(r.shortcode)) continue;
     const state = thumbs.get(r.shortcode);
-    if (state && (state.stored || state.url === r.thumbnailUrl)) continue;
+    if (state && (state.format === 'webp' || state.url === r.thumbnailUrl)) continue;
     todo.push({ shortcode: r.shortcode, url: r.thumbnailUrl, rank: r.savedRank ?? -Infinity });
   }
   return todo.sort((a, b) => b.rank - a.rank).map(({ shortcode, url }) => ({ shortcode, url }));
 }
+
+/**
+ * What one copy attempt leaves behind. A source too small to beat the old 480px copy
+ * (a URL captured by an older build) keeps the old copy rather than storing a worse one.
+ */
+export function afterCopy(
+  previous: ThumbState | undefined,
+  shortcode: string,
+  url: string,
+  outcome: { sourceEdge: number } | 'failed',
+): { state: ThumbState; upload: boolean } {
+  const hadCopy = previous?.stored === true;
+  if (outcome === 'failed' || (hadCopy && outcome.sourceEdge <= LEGACY_EDGE_PX)) {
+    return { state: hadCopy ? { ...previous!, url } : { shortcode, stored: false, url }, upload: false };
+  }
+  return { state: { shortcode, stored: true, url, format: 'webp' }, upload: true };
+}
+
+/** Long edge of the first stored thumbnails. */
+const LEGACY_EDGE_PX = 480;
 
 function iso(ms: number | null): string | null {
   return ms === null ? null : new Date(ms).toISOString();

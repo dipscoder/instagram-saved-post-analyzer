@@ -9,8 +9,31 @@ import { PostSheet } from '@/components/post-sheet';
 import { FilterChips, Sidebar } from '@/components/sidebar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
-import { fetchFacets, fetchPosts, PAGE_SIZE, signThumbnails, type Facets, type Post, type View } from '@/lib/library';
+import {
+  fetchFacets,
+  fetchPosts,
+  knownThumbnail,
+  PAGE_SIZE,
+  signThumbnails,
+  type Facets,
+  type Post,
+  type View,
+} from '@/lib/library';
 import { supabase } from '@/lib/supabase';
+
+/** One loaded view: what it shows and whether more pages exist. */
+interface Entry {
+  posts: Post[];
+  pages: number;
+  more: boolean;
+  loading: boolean;
+  error: string | null;
+}
+
+function viewKey(view: View, query: string): string {
+  const id = view.kind === 'category' ? view.name : view.kind === 'collection' ? view.id : '';
+  return `${view.kind}:${id}|${query.trim().toLowerCase()}`;
+}
 
 function title(view: View, facets: Facets | null): string {
   switch (view.kind) {
@@ -25,25 +48,41 @@ function title(view: View, facets: Facets | null): string {
   }
 }
 
+/** How many posts the sidebar says a view holds, when it is a plain view with no search. */
+function expected(view: View, facets: Facets | null): number | null {
+  if (!facets) return null;
+  switch (view.kind) {
+    case 'all':
+      return facets.total;
+    case 'needs-look':
+      return facets.needsLook;
+    case 'category':
+      return facets.categories.find((c) => c.key === view.name)?.count ?? null;
+    case 'collection':
+      return facets.collections.find((c) => c.key === view.id)?.count ?? null;
+  }
+}
+
 export function Library({ session }: { session: Session }) {
   const [view, setView] = useState<View>({ kind: 'all' });
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [facets, setFacets] = useState<Facets | null>(null);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const [page, setPage] = useState(0);
-  const [more, setMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [facetError, setFacetError] = useState<string | null>(null);
+  // Every view visited this session stays loaded, so going back to one is instant. The
+  // map lives in a ref and `version` re-renders when it changes.
+  const entries = useRef(new Map<string, Entry>());
+  const inflight = useRef(new Map<string, AbortController>());
+  const [, setVersion] = useState(0);
   const [open, setOpen] = useState<Post | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  // Only the newest request may write results, so a slow page can't land on a newer view.
-  const latest = useRef(0);
   const userId = session.user.id;
+  const key = viewKey(view, debounced);
+  const current = useRef(key);
+  current.current = key;
 
   useEffect(() => {
-    fetchFacets().then(setFacets, (e: Error) => setError(e.message));
+    fetchFacets().then(setFacets, (e: Error) => setFacetError(e.message));
   }, []);
 
   useEffect(() => {
@@ -64,31 +103,67 @@ export function Library({ session }: { session: Session }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /**
+   * Loads one page of a view into the cache. A request the user has moved away from is
+   * cancelled rather than left to finish and paint over the view they are now looking at.
+   */
   const load = useCallback(
-    async (nextPage: number) => {
-      const ticket = ++latest.current;
-      setLoading(true);
-      setError(null);
+    async (v: View, q: string, page: number) => {
+      const k = viewKey(v, q);
+      const prev = entries.current.get(k);
+      if (prev?.loading) return;
+      if (page === 0 && prev && !prev.error) return;
+
+      const controller = new AbortController();
+      inflight.current.get(k)?.abort();
+      inflight.current.set(k, controller);
+      entries.current.set(k, {
+        posts: prev?.posts ?? [],
+        pages: prev?.pages ?? 0,
+        more: prev?.more ?? false,
+        loading: true,
+        error: null,
+      });
+      setVersion((n) => n + 1);
+
       try {
-        const rows = await fetchPosts(view, debounced, nextPage);
-        const signed = await signThumbnails(userId, rows);
-        if (ticket !== latest.current) return;
-        setPosts((prev) => (nextPage === 0 ? rows : [...prev, ...rows]));
-        setThumbs((prev) => ({ ...(nextPage === 0 ? {} : prev), ...signed }));
-        setPage(nextPage);
-        setMore(rows.length === PAGE_SIZE);
+        const rows = await fetchPosts(v, q, page, controller.signal);
+        const posts = page === 0 ? rows : [...(prev?.posts ?? []), ...rows];
+        entries.current.set(k, { posts, pages: page + 1, more: rows.length === PAGE_SIZE, loading: false, error: null });
+        setVersion((n) => n + 1);
+        // The grid paints from the rows straight away; thumbnails fill in as they sign.
+        await signThumbnails(userId, rows);
+        setVersion((n) => n + 1);
       } catch (e) {
-        if (ticket === latest.current) setError((e as Error).message);
+        if (controller.signal.aborted) {
+          // Cancelled: forget the half-load so a return visit starts it again.
+          if (!prev) entries.current.delete(k);
+          else entries.current.set(k, { ...prev, loading: false });
+        } else {
+          entries.current.set(k, { posts: prev?.posts ?? [], pages: prev?.pages ?? 0, more: false, loading: false, error: (e as Error).message });
+        }
+        setVersion((n) => n + 1);
       } finally {
-        if (ticket === latest.current) setLoading(false);
+        if (inflight.current.get(k) === controller) inflight.current.delete(k);
       }
     },
-    [view, debounced, userId],
+    [userId],
   );
 
+  // Switching views cancels whatever else is still loading, then loads this one.
   useEffect(() => {
-    void load(0);
-  }, [load]);
+    for (const [k, controller] of inflight.current) if (k !== key) controller.abort();
+    void load(view, debounced, 0);
+  }, [key, view, debounced, load]);
+
+  // Hovering a sidebar row starts loading it, so the click usually lands on a full grid.
+  const prefetch = useCallback((v: View) => void load(v, '', 0), [load]);
+
+  const entry = entries.current.get(key);
+  const posts = entry?.posts ?? [];
+  const settled = entry !== undefined && !entry.loading;
+  const known = debounced ? null : expected(view, facets);
+  const count = settled ? posts.length : (known ?? posts.length);
 
   return (
     <div className="flex h-dvh flex-col">
@@ -105,9 +180,10 @@ export function Library({ session }: { session: Session }) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && (setQuery(''), e.currentTarget.blur())}
             placeholder="Search your saves"
+            aria-label="Search your saves"
             className="h-9 w-full rounded-md border bg-muted/50 pl-9 pr-12 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-[3px] focus:ring-ring/15"
           />
-          <kbd className="pointer-events-none absolute right-2 rounded max-sm:hidden border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">⌘K</kbd>
+          <kbd className="pointer-events-none absolute right-2 rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground max-sm:hidden">⌘K</kbd>
         </label>
         <div className="ml-auto flex items-center gap-1">
           <ThemeToggle />
@@ -119,7 +195,7 @@ export function Library({ session }: { session: Session }) {
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-60 shrink-0 overflow-y-auto border-r bg-sidebar max-md:hidden">
-          <Sidebar facets={facets} view={view} onView={setView} />
+          <Sidebar facets={facets} error={facetError} view={view} onView={setView} onPrefetch={prefetch} />
         </aside>
 
         <main className="flex-1 overflow-y-auto">
@@ -127,12 +203,17 @@ export function Library({ session }: { session: Session }) {
             <FilterChips facets={facets} view={view} onView={setView} />
             <div className="mb-5 flex items-baseline gap-3">
               <h1 className="text-xl font-semibold tracking-tight">{debounced ? `Results for “${debounced}”` : title(view, facets)}</h1>
-              {!loading && <span className="text-[13px] text-muted-foreground">{posts.length.toLocaleString()}{more ? '+' : ''} posts</span>}
+              <span className="text-[13px] tabular-nums text-muted-foreground">
+                {count.toLocaleString()}
+                {settled && entry.more ? '+' : ''} {count === 1 ? 'post' : 'posts'}
+              </span>
             </div>
 
-            {error && <p className="rounded-md border border-destructive/30 p-3 text-sm text-destructive">{error}</p>}
+            {view.kind === 'needs-look' && !debounced && facets && <NeedsLookNote facets={facets} />}
 
-            {!error && !loading && posts.length === 0 && (
+            {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
+
+            {settled && !entry.error && posts.length === 0 && (
               <div className="rounded-lg border border-dashed px-6 py-16 text-center">
                 <p className="font-medium">{debounced ? 'Nothing matches that search' : 'Nothing here yet'}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -144,11 +225,11 @@ export function Library({ session }: { session: Session }) {
             )}
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {posts.map((p) => (
-                <PostCard key={p.shortcode} post={p} thumb={thumbs[p.shortcode]} onOpen={() => setOpen(p)} />
+              {posts.map((p, i) => (
+                <PostCard key={p.shortcode} post={p} thumb={knownThumbnail(p)} eager={i < 10} onOpen={() => setOpen(p)} />
               ))}
-              {loading &&
-                Array.from({ length: posts.length === 0 ? 10 : 5 }, (_, i) => (
+              {entry?.loading !== false &&
+                Array.from({ length: Math.max(0, Math.min(posts.length === 0 ? (known ?? 10) : 5, 10)) }, (_, i) => (
                   <div key={`s${i}`}>
                     <div className="aspect-[4/5] animate-pulse rounded-lg bg-muted" />
                     <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted" />
@@ -156,9 +237,9 @@ export function Library({ session }: { session: Session }) {
                 ))}
             </div>
 
-            {more && !loading && (
+            {settled && entry.more && (
               <div className="mt-8 flex justify-center">
-                <Button variant="outline" onClick={() => void load(page + 1)}>
+                <Button variant="outline" onClick={() => void load(view, debounced, entry.pages)}>
                   Show more
                 </Button>
               </div>
@@ -167,7 +248,28 @@ export function Library({ session }: { session: Session }) {
         </main>
       </div>
 
-      <PostSheet post={open} thumb={open ? thumbs[open.shortcode] : undefined} onClose={() => setOpen(null)} />
+      <PostSheet post={open} thumb={open ? knownThumbnail(open) : undefined} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
+function NeedsLookNote({ facets }: { facets: Facets }) {
+  const unsure = facets.needsLook - facets.unsorted;
+  return (
+    <div className="mb-6 rounded-lg border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
+      {facets.unsorted > 0 && (
+        <p>
+          <span className="font-medium text-foreground">{facets.unsorted.toLocaleString()} not sorted yet.</span> Open a saved
+          collection on Instagram and press <span className="font-medium text-foreground">Sort</span> in the Saved Index pill.
+        </p>
+      )}
+      {unsure > 0 && (
+        <p className={facets.unsorted > 0 ? 'mt-1' : ''}>
+          <span className="font-medium text-foreground">{unsure.toLocaleString()} the model wasn’t sure about.</span> Rather than
+          guess, it left them here for you.
+        </p>
+      )}
+      <p className="mt-1">Sorting and fixing categories right here is coming with the next analysis update.</p>
     </div>
   );
 }

@@ -268,7 +268,7 @@ extension/src/
     video.ts               body-level control bar, geometric targeting, observers
     frames.ts              pure: frame length, step targets, timecodes, still filenames
 
-  popup/popup.ts           setup screen + control room                 → popup.js
+  popup/popup.ts           setup screen + home: account, spend, sorting                → popup.js
 
 extension/public/
   manifest.json  popup.html  icons/

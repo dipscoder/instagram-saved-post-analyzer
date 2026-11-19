@@ -15,7 +15,7 @@ import * as db from './db';
 import * as ledger from './ledger';
 import { LEDGER_SYNC_STORE, openDb, SYNC_STORE, THUMB_STORE } from './db';
 import { currentUserId, supabase } from './account';
-import { fetchThumbnail, shrinkToJpeg } from './media';
+import { fetchThumbnail, toStoredThumbnail } from './media';
 import { collectionNames } from './collections';
 import { redact } from './providers/index';
 import {
@@ -25,6 +25,8 @@ import {
   planSync,
   planThumbnails,
   toVerdictRow,
+  afterCopy,
+  type ThumbFormat,
   type ThumbState,
 } from './sync-plan';
 
@@ -127,9 +129,12 @@ async function syncOnce(): Promise<void> {
     }
 
     for (const batch of chunks(plan.deletes, DELETE_BATCH)) {
-      const stored = batch.filter((shortcode) => thumbs.get(shortcode)?.stored);
+      const stored = batch.flatMap((shortcode) => {
+        const t = thumbs.get(shortcode);
+        return t?.stored ? [thumbPath(userId, shortcode, t.format ?? 'jpg')] : [];
+      });
       if (stored.length) {
-        const { error } = await supabase.storage.from(BUCKET).remove(stored.map((s) => thumbPath(userId, s)));
+        const { error } = await supabase.storage.from(BUCKET).remove(stored);
         if (error) throw new Error(error.message);
       }
       const { error } = await supabase.from('posts').delete().in('shortcode', batch);
@@ -198,29 +203,41 @@ async function copyThumbnails(
   const todo = planThumbnails(records, hashes(posts), thumbs);
   const pass = todo.slice(0, THUMBS_PER_PASS);
   const tried: ThumbState[] = [];
+  const uploaded: string[] = [];
+  const replaced: string[] = [];
 
   for (const [i, { shortcode, url }] of pass.entries()) {
     if (i > 0) await sleep(jitter(THUMB_GAP_MS));
-    let image: Blob;
+    const previous = thumbs.get(shortcode);
+    let copy: { blob: Blob; sourceEdge: number } | null = null;
     try {
-      image = await shrinkToJpeg(await fetchThumbnail(url));
+      copy = await toStoredThumbnail(await fetchThumbnail(url));
     } catch (err) {
       if (err instanceof TypeError) break;
-      tried.push({ shortcode, stored: false, url });
-      continue;
     }
-    const { error } = await supabase.storage
-      .from(BUCKET)
-      .upload(thumbPath(userId, shortcode), image, { contentType: 'image/jpeg', upsert: true });
-    if (error) throw new Error(error.message);
-    tried.push({ shortcode, stored: true, url });
+    const { state, upload } = afterCopy(previous, shortcode, url, copy ?? 'failed');
+    if (upload && copy) {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(thumbPath(userId, shortcode, 'webp'), copy.blob, { contentType: 'image/webp', upsert: true });
+      if (error) throw new Error(error.message);
+      uploaded.push(shortcode);
+      if (previous?.stored && previous.format !== 'webp') replaced.push(thumbPath(userId, shortcode, 'jpg'));
+    }
+    tried.push(state);
   }
 
-  const stored = tried.filter((t) => t.stored).map((t) => t.shortcode);
-  if (stored.length) {
-    const { error } = await supabase.from('posts').update({ thumbnail_stored: true }).in('shortcode', stored);
+  if (uploaded.length) {
+    const { error } = await supabase
+      .from('posts')
+      .update({ thumbnail_stored: true, thumbnail_format: 'webp' })
+      .in('shortcode', uploaded);
     if (error) throw new Error(error.message);
   }
+  // The soft first copies go once their rows point at the new ones. Failing to remove
+  // them costs only storage, so it never stops the sync.
+  if (replaced.length) await supabase.storage.from(BUCKET).remove(replaced);
+
   await writeStore(THUMB_STORE, tried, []);
   for (const t of tried) thumbs.set(t.shortcode, t);
   return todo.length - tried.length;
@@ -246,8 +263,9 @@ async function pull(userId: string, thumbs: Map<string, ThumbState>): Promise<vo
   );
 
   const stored: ThumbState[] = [];
-  for await (const row of pages('posts', 'shortcode', true)) {
-    stored.push({ shortcode: String(row['shortcode']), stored: true, url: '' });
+  for await (const row of pages('posts', 'shortcode, thumbnail_format', true)) {
+    const format: ThumbFormat = row['thumbnail_format'] === 'webp' ? 'webp' : 'jpg';
+    stored.push({ shortcode: String(row['shortcode']), stored: true, url: '', format });
   }
   await writeStore(THUMB_STORE, stored, []);
   for (const t of stored) thumbs.set(t.shortcode, t);
@@ -290,8 +308,8 @@ async function setStatus(status: SyncStatus): Promise<void> {
   await chrome.storage.local.set({ [STATUS_KEY]: status });
 }
 
-function thumbPath(userId: string, shortcode: string): string {
-  return `${userId}/${shortcode}.jpg`;
+function thumbPath(userId: string, shortcode: string, format: ThumbFormat): string {
+  return `${userId}/${shortcode}.${format}`;
 }
 
 // --- the sync stores ----------------------------------------------------------

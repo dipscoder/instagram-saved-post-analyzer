@@ -25,5 +25,12 @@ The search filter is built in `@saved-index/shared/search` and tested by `npm ru
 Terms are reduced to letters and digits before they reach PostgREST, so a query can never
 change the filter's structure.
 
+**Speed.** Every view visited stays loaded for the session, so going back is instant;
+hovering a sidebar row starts loading it; switching views cancels whatever else is still
+in flight; the grid paints before thumbnails are signed, and signed URLs are reused across
+views. Sidebar counts come from `library_facets()`, one grouped query, with a scan as
+fallback until that migration runs. A view that is loading shows skeletons sized to its
+known count, never "nothing here".
+
 **Not yet.** Vector search (Phase 3 adds embeddings and hybrid search behind the same box),
 editing a category from the panel, and deployment to Vercel.

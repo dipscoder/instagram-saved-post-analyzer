@@ -23,7 +23,7 @@ import { estimateUsd, getProvider, ProviderError, redact } from './providers/ind
 import { accountAnalyst, ownKeyAnalyst, type Analysis, type Analyst } from './analysts';
 import { currentUserId } from './account';
 import * as ledger from './ledger';
-import { fetchThumbnail } from './media';
+import { fetchThumbnail, toModelImage } from './media';
 import { applyVerdict, inputHash, isFresh, verdictFrom } from './ledger';
 import { classifyByRules } from '@saved-index/shared/taxonomy';
 import {
@@ -512,7 +512,7 @@ export async function canIndex(): Promise<boolean> {
  * String.fromCharCode(...bytes) blows the argument limit on anything non-trivial.
  */
 async function fetchImageBase64(url: string): Promise<{ mediaType: string; base64: string }> {
-  const image = await fetchThumbnail(url);
+  const image = await toModelImage(await fetchThumbnail(url));
   const bytes = new Uint8Array(await image.arrayBuffer());
   let binary = '';
   const CHUNK = 0x8000;

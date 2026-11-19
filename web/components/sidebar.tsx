@@ -12,10 +12,12 @@ function same(a: View, b: View): boolean {
   return true;
 }
 
-function Row({ active, onClick, icon, label, count }: { active: boolean; onClick: () => void; icon?: ReactNode; label: string; count: number }) {
+function Row({ active, onClick, onHover, icon, label, count }: { active: boolean; onClick: () => void; onHover?: () => void; icon?: ReactNode; label: string; count: number }) {
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onHover}
+      onFocus={onHover}
       className={cn(
         'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors',
         active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
@@ -37,28 +39,44 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export function Sidebar({ facets, view, onView }: { facets: Facets | null; view: View; onView: (v: View) => void }) {
-  if (!facets) return <div className="p-3 text-[13px] text-muted-foreground">Loading…</div>;
+export function Sidebar({
+  facets,
+  error,
+  view,
+  onView,
+  onPrefetch,
+}: {
+  facets: Facets | null;
+  error: string | null;
+  view: View;
+  onView: (v: View) => void;
+  onPrefetch: (v: View) => void;
+}) {
+  if (error) return <div className="p-3 text-[13px] text-destructive">Couldn’t load the sidebar: {error}</div>;
+  if (!facets) {
+    return (
+      <div className="space-y-2 p-3">
+        {Array.from({ length: 7 }, (_, i) => (
+          <div key={i} className="h-6 animate-pulse rounded bg-muted" style={{ width: `${85 - i * 6}%` }} />
+        ))}
+      </div>
+    );
+  }
+  const row = (v: View, label: string, count: number, icon?: ReactNode, key?: string) => (
+    <Row key={key} active={same(view, v)} onClick={() => onView(v)} onHover={() => onPrefetch(v)} icon={icon} label={label} count={count} />
+  );
   return (
     <nav className="p-3">
-      <Row active={same(view, { kind: 'all' })} onClick={() => onView({ kind: 'all' })} icon={<Bookmark />} label="All saved" count={facets.total} />
-      {facets.needsLook > 0 && (
-        <Row active={same(view, { kind: 'needs-look' })} onClick={() => onView({ kind: 'needs-look' })} icon={<CircleHelp />} label="Needs a look" count={facets.needsLook} />
-      )}
+      {row({ kind: 'all' }, 'All saved', facets.total, <Bookmark />)}
+      {facets.needsLook > 0 && row({ kind: 'needs-look' }, 'Needs a look', facets.needsLook, <CircleHelp />)}
       {facets.collections.length > 0 && (
         <Section title="Collections">
-          {facets.collections.map((c) => {
-            const v: View = { kind: 'collection', id: c.key };
-            return <Row key={c.key} active={same(view, v)} onClick={() => onView(v)} icon={<Folder />} label={c.label} count={c.count} />;
-          })}
+          {facets.collections.map((c) => row({ kind: 'collection', id: c.key }, c.label, c.count, <Folder />, c.key))}
         </Section>
       )}
       {facets.categories.length > 0 && (
         <Section title="Categories">
-          {facets.categories.map((c) => {
-            const v: View = { kind: 'category', name: c.key };
-            return <Row key={c.key} active={same(view, v)} onClick={() => onView(v)} label={c.label} count={c.count} />;
-          })}
+          {facets.categories.map((c) => row({ kind: 'category', name: c.key }, c.label, c.count, undefined, c.key))}
         </Section>
       )}
     </nav>
