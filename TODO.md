@@ -368,6 +368,15 @@ before being acted on.
 - [ ] Delete the extension's now-dormant indexing code (categorizer, providers, own-key
       settings, ledger import/export, run queue) once server indexing has run live
 
+## Phase 40 — Analysis v2: search by meaning, better vision, an eval
+- [x] Embeddings (text-embedding-3-small, 512 dims) on every indexed post, written by `sort`
+- [x] `search_posts`: keyword and meaning rankings fused with RRF; `search` Edge Function
+- [x] Web search uses it, falling back to keyword search when the function is missing
+- [x] Thin captions (under six words, no alt text) are filed with their picture too
+- [x] `supabase/eval/labeled.json` + `npm run eval`; verify pins that rules misfile none
+- [ ] Reel transcripts (phase 4 of the plan)
+- [ ] Grow the eval set from real mistakes: a "wrong category" action in the web app
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

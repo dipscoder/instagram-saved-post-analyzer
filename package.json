@@ -16,6 +16,7 @@
     "verify": "npm run verify -w extension",
     "build:functions": "npm run build -w supabase",
     "dev:web": "npm run dev -w web",
-    "build:web": "npm run build -w web"
+    "build:web": "npm run build -w web",
+    "eval": "npm run eval -w supabase --"
   }
 }

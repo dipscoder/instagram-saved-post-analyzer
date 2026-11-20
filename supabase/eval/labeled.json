@@ -1,0 +1,69 @@
+{
+  "about": "Hand-labeled saved posts for measuring filing accuracy. Written to look like real captions, including the hard cases: a brand posting outside its field, promotions, other languages, and posts too thin to place, which should come back as null (Unknown). Add real posts from your own library as you find mistakes; keep each one's expected category to what a person would file it under.",
+  "posts": [
+    { "id": "food-1", "handle": "nytcooking", "caption": "Sheet-pan harissa chicken with crispy chickpeas and lemony yogurt. 40 minutes, one pan, very few dishes. Recipe at the link in bio.", "hashtags": ["dinner", "sheetpan"], "expected": "Food & Recipes" },
+    { "id": "food-2", "handle": "bonappetit", "caption": "The only sourdough focaccia you need. Dimple it like you mean it.", "hashtags": ["baking", "focaccia", "bread"], "expected": "Food & Recipes" },
+    { "id": "food-3", "handle": "eater", "caption": "This tiny counter in Shinjuku serves 12 people a night and the tonkatsu is worth the 2 hour wait. Saving for the Tokyo trip.", "hashtags": [], "expected": "Food & Recipes" },
+    { "id": "food-4", "handle": "athleanx", "caption": "High protein overnight oats: 45g protein, 5 minutes the night before. Ingredients below 👇 oats, greek yogurt, whey, chia, berries.", "hashtags": ["mealprep"], "expected": "Food & Recipes" },
+    { "id": "food-5", "handle": "cocktailchemistry", "caption": "Clarified milk punch, explained. Why curdling the milk makes the drink crystal clear.", "hashtags": ["cocktails"], "expected": "Food & Recipes" },
+
+    { "id": "design-1", "handle": "mobbin", "caption": "Onboarding teardown: how Linear uses progressive disclosure and an empty state that teaches. Swipe for the full flow →", "hashtags": ["uxdesign", "ui"], "expected": "Design" },
+    { "id": "design-2", "handle": "typewolf", "caption": "Font pairing of the week: GT Sectra for headlines with Söhne for body. Sharp serif, quiet sans.", "hashtags": ["typography"], "expected": "Design" },
+    { "id": "design-3", "handle": "pentagram", "caption": "Our new identity for the city's public library system: a modular mark built from the grid of the reading room windows.", "hashtags": ["branding", "identity"], "expected": "Design" },
+    { "id": "design-4", "handle": "uxplanet", "caption": "Stop using placeholder text as labels. 4 reasons it hurts accessibility and conversion, with better patterns.", "hashtags": [], "expected": "Design" },
+
+    { "id": "travel-1", "handle": "cntraveler", "caption": "Three days in Kyoto: Fushimi Inari at dawn, Arashiyama before the crowds, and a ryokan in Gion. Full itinerary saved in highlights.", "hashtags": ["japan"], "expected": "Travel" },
+    { "id": "travel-2", "handle": "beautifuldestinations", "caption": "Lago di Braies, Dolomites 🇮🇹 Rent a rowboat before 9am to have the lake to yourself.", "hashtags": ["italy", "dolomites", "travel"], "expected": "Travel" },
+    { "id": "travel-3", "handle": "thepointsguy", "caption": "Carry-on only for 2 weeks: the packing list and the cube system that makes it work.", "hashtags": ["packingtips"], "expected": "Travel" },
+    { "id": "travel-4", "handle": "designhotels", "caption": "A cliffside hotel in Santorini with 9 cave suites and an infinity pool facing the caldera.", "hashtags": [], "expected": "Travel" },
+
+    { "id": "fitness-1", "handle": "jeffnippard", "caption": "The science-based full body workout: 3 days a week, every set explained. Save this for your next gym session.", "hashtags": ["hypertrophy"], "expected": "Fitness & Health" },
+    { "id": "fitness-2", "handle": "mobilitywod", "caption": "10 minutes a day for tight hips if you sit at a desk. Do these before bed for two weeks.", "hashtags": ["mobility", "stretching"], "expected": "Fitness & Health" },
+    { "id": "fitness-3", "handle": "hubermanlab", "caption": "Morning sunlight within 30 minutes of waking sets your circadian clock. Here is the protocol and the evidence.", "hashtags": [], "expected": "Fitness & Health" },
+    { "id": "fitness-4", "handle": "runnersworld", "caption": "Couch to 5K in 8 weeks: the plan, printable.", "hashtags": ["running"], "expected": "Fitness & Health" },
+
+    { "id": "books-1", "handle": "booksandquills", "caption": "10 literary novels under 250 pages for when you want to finish something this weekend.", "hashtags": ["booklist", "bookstagram"], "expected": "Books & Reading" },
+    { "id": "books-2", "handle": "fs.blog", "caption": "\"The first principle is that you must not fool yourself, and you are the easiest person to fool.\" Feynman, on why smart people get things wrong.", "hashtags": [], "expected": "Books & Reading" },
+    { "id": "books-3", "handle": "readwithjenna", "caption": "My notes from Thinking, Fast and Slow: the 7 ideas worth remembering, one per slide.", "hashtags": ["nonfiction"], "expected": "Books & Reading" },
+
+    { "id": "tools-1", "handle": "levelsio", "caption": "My whole stack for running 6 products solo: one VPS, PHP, SQLite, and a cron job. Screenshot of the dashboard.", "hashtags": [], "expected": "Tools & Software" },
+    { "id": "tools-2", "handle": "notionhq", "caption": "Build a weekly review template in Notion in 5 minutes. Duplicate it from the link.", "hashtags": ["productivity"], "expected": "Tools & Software" },
+    { "id": "tools-3", "handle": "theaiadvantage", "caption": "5 prompts that turn ChatGPT into a research assistant. Number 4 saves me hours every week.", "hashtags": ["ai", "chatgpt"], "expected": "Tools & Software" },
+    { "id": "tools-4", "handle": "raycastapp", "caption": "Clipboard history, window management and snippets in one launcher. Keyboard shortcuts cheat sheet inside.", "hashtags": ["macos"], "expected": "Tools & Software" },
+
+    { "id": "finance-1", "handle": "thefinancialdiet", "caption": "The 50/30/20 budget, explained with a real salary. What changes when rent is 45% of your income.", "hashtags": ["budgeting"], "expected": "Finance & Investing" },
+    { "id": "finance-2", "handle": "zerodhaonline", "caption": "Index funds vs active funds over 10 years: the fee drag nobody talks about.", "hashtags": ["investing"], "expected": "Finance & Investing" },
+    { "id": "finance-3", "handle": "ca.rachanaranade", "caption": "Old vs new tax regime: which one saves you more this year? Calculator in the comments.", "hashtags": ["incometax"], "expected": "Finance & Investing" },
+
+    { "id": "career-1", "handle": "lennysan", "caption": "How the best PMs write a one-page strategy. The template I wish I had in my first job.", "hashtags": [], "expected": "Career & Business" },
+    { "id": "career-2", "handle": "linkedinnews", "caption": "Recruiters spend 7 seconds on a resume. The 3 lines that decide whether yours gets read.", "hashtags": ["jobsearch", "resume"], "expected": "Career & Business" },
+    { "id": "career-3", "handle": "ycombinator", "caption": "How to talk to users: the questions that get real answers, and the ones that just get compliments.", "hashtags": ["startup"], "expected": "Career & Business" },
+    { "id": "career-4", "handle": "garyvee", "caption": "Your first 1,000 customers come from doing things that don't scale. Stop waiting for the algorithm.", "hashtags": ["marketing"], "expected": "Career & Business" },
+
+    { "id": "home-1", "handle": "apartmenttherapy", "caption": "A 450 sq ft rental made to feel twice the size: mirrors, a daybed, and one bold rug.", "hashtags": ["smallspaces", "interiordesign"], "expected": "Home & DIY" },
+    { "id": "home-2", "handle": "thehomeedit", "caption": "Pantry reset in clear bins, labelled by meal instead of by food. Before and after.", "hashtags": ["organization"], "expected": "Home & DIY" },
+    { "id": "home-3", "handle": "monty_don", "caption": "Plant tulip bulbs now, three times their own depth, pointy end up. Here is what I am putting in the long border.", "hashtags": ["gardening"], "expected": "Home & DIY" },
+    { "id": "home-4", "handle": "thisoldhouse", "caption": "How to fix a running toilet in 10 minutes without calling a plumber.", "hashtags": [], "expected": "Home & DIY" },
+
+    { "id": "fashion-1", "handle": "thefashionguitar", "caption": "5 ways to wear one white shirt this week, from office to dinner.", "hashtags": ["ootd", "capsulewardrobe"], "expected": "Fashion & Beauty" },
+    { "id": "fashion-2", "handle": "drdrayzday", "caption": "Dermatologist's order for your evening skincare: cleanse, retinoid, moisturise. Wait 20 minutes before the retinoid if you are sensitive.", "hashtags": ["skincare"], "expected": "Fashion & Beauty" },
+    { "id": "fashion-3", "handle": "menswearstyle", "caption": "How a jacket should fit at the shoulders, sleeves and length. Tailor checklist on the last slide.", "hashtags": [], "expected": "Fashion & Beauty" },
+
+    { "id": "art-1", "handle": "petermckinnon", "caption": "Golden hour settings for portraits: f/1.8, 1/500, ISO 100, and where to put the sun.", "hashtags": ["photography"], "expected": "Art & Photography" },
+    { "id": "art-2", "handle": "procreate", "caption": "Watercolour brushes that actually bleed. Timelapse of a 2 hour landscape painting.", "hashtags": ["digitalart", "illustration"], "expected": "Art & Photography" },
+    { "id": "art-3", "handle": "letterboxd", "caption": "Every Wong Kar-wai film ranked, with the shot from each that stays with you.", "hashtags": ["film"], "expected": "Art & Photography" },
+    { "id": "art-4", "handle": "tinydesk", "caption": "Live from the Tiny Desk: a 4-song set with a string quartet. Full concert on YouTube.", "hashtags": [], "expected": "Art & Photography" },
+
+    { "id": "humor-1", "handle": "dudewithsign", "caption": "Protesting people who reply all", "hashtags": ["funny"], "expected": "Humor & Misc" },
+    { "id": "humor-2", "handle": "dogsofinstagram", "caption": "He knows exactly what he did and he has no regrets 🐶", "hashtags": ["dogs", "dogsofinstagram"], "expected": "Humor & Misc" },
+    { "id": "humor-3", "handle": "historycoolkids", "caption": "Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid.", "hashtags": ["history", "funfacts"], "expected": "Humor & Misc" },
+
+    { "id": "brand-1", "handle": "gymshark", "caption": "Post-leg-day lasagne that hits 60g protein a portion. Recipe below, serves 4.", "hashtags": [], "expected": "Food & Recipes", "note": "a gym brand posting a recipe is filed as food" },
+    { "id": "promo-1", "handle": "skillshare", "caption": "Learn product photography with just your phone and a window. Free for 30 days with our link.", "hashtags": ["ad"], "expected": "Art & Photography", "note": "a promotion takes the category of what it promotes" },
+    { "id": "lang-1", "handle": "cocinaconmama", "caption": "Tortilla de patatas como la de mi abuela: huevos, patatas, cebolla y paciencia. Receta completa abajo.", "hashtags": ["receta"], "expected": "Food & Recipes", "note": "Spanish caption" },
+
+    { "id": "thin-1", "handle": "mariana.k", "caption": "obsessed 😍", "hashtags": [], "expected": null, "note": "too thin to place from text; vision may still place it" },
+    { "id": "thin-2", "handle": "studio_ruu", "caption": "✨✨✨", "hashtags": [], "expected": null },
+    { "id": "thin-3", "handle": "a.j.k", "caption": "this", "hashtags": ["mood"], "expected": null }
+  ]
+}

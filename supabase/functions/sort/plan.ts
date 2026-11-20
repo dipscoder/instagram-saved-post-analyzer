@@ -13,11 +13,13 @@ import {
   filedFromResult,
   hasTextSignal,
   LEDGER_VERSION,
+  needsPicture,
   signature,
   type Filed,
   type FilingInput,
   type ModelResult,
 } from '@saved-index/shared/filing';
+import type { EmbeddingFields } from '@saved-index/shared/embedding';
 import { hashText } from '@saved-index/shared/hash';
 import { classifyByRules, RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 
@@ -27,7 +29,8 @@ export const MAX_VISION_POSTS = 4;
 
 /** The post columns the function reads. */
 export const SORT_COLUMNS =
-  'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format';
+  'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
+  'category,subcategory,tags,summary,embedded_at';
 
 export interface SortRow {
   shortcode: string;
@@ -41,6 +44,11 @@ export interface SortRow {
   categorized_at: string | null;
   thumbnail_stored: boolean;
   thumbnail_format: 'jpg' | 'webp' | null;
+  category: string | null;
+  subcategory: string | null;
+  tags: string[] | null;
+  summary: string | null;
+  embedded_at: string | null;
 }
 
 export class BadSortRequest extends Error {}
@@ -72,28 +80,49 @@ export interface SortPlan {
   ruled: { row: SortRow; filed: Filed }[];
   /** Filed from their text in one batch. */
   text: SortRow[];
-  /** No usable text: filed from the stored thumbnail, one call each. */
+  /** Little or no usable text: filed from text and the stored thumbnail, one call each. */
   vision: SortRow[];
+  /** Already filed, but not yet searchable by meaning: embedded only. */
+  embedOnly: SortRow[];
   /** Neither text nor a stored thumbnail: nothing to file from. */
   unreadable: SortRow[];
 }
 
 /**
- * Splits a request's posts by how they will be filed. A post already sorted is dropped,
+ * Splits a request's posts by how they will be filed. A post already sorted is only
+ * embedded if it is not searchable by meaning yet, never filed again,
  * so a request sent twice bills nothing the second time.
  */
 export function planSort(rows: SortRow[]): SortPlan {
-  const plan: SortPlan = { ruled: [], text: [], vision: [], unreadable: [] };
+  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [] };
   for (const row of rows) {
-    if (row.categorized_at) continue;
+    if (row.categorized_at) {
+      if (!row.embedded_at) plan.embedOnly.push(row);
+      continue;
+    }
     const input = toInput(row);
     const hit = classifyByRules(input);
     if (hit) plan.ruled.push({ row, filed: filedByRules(input, hit) });
+    else if (needsPicture(input) && row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
     else if (hasTextSignal(input)) plan.text.push(row);
-    else if (row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
     else plan.unreadable.push(row);
   }
   return plan;
+}
+
+/** What a post is embedded from: its new filing when it has one, else what it holds. */
+export function embeddingFields(row: SortRow, filed?: Filed): EmbeddingFields {
+  return {
+    handle: row.handle,
+    caption: row.caption,
+    hashtags: row.hashtags,
+    alt_text: row.alt_text,
+    audio_track_name: row.audio_track_name,
+    category: filed ? filed.category : row.category,
+    subcategory: filed ? filed.subcategory : row.subcategory,
+    tags: filed ? filed.tags : row.tags,
+    summary: filed ? filed.summary : row.summary,
+  };
 }
 
 /** What the model is shown for a post: the same bytes the extension sends and hashes. */

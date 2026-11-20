@@ -7,12 +7,16 @@
  * write to their own rows. The server reads the posts itself and skips any already
  * sorted, so a repeated request costs nothing.
  *
- *   200 { sorted, unreadable, failed, usd }
+ * Each post filed here, and any filed earlier but not yet searchable by meaning, is then
+ * embedded for hybrid search.
+ *
+ *   200 { sorted, embedded, unreadable, failed, usd }
  *   400 bad request · 401 not signed in · 402 daily limit reached
  *   429 OpenAI is rate limiting (retry) · 502 OpenAI or the database failed · 500 not configured
  */
 
-import type { ModelResult } from '@saved-index/shared/filing';
+import { embeddingCostUsd, embeddingsBody, embeddingText, readEmbeddings, vectorLiteral } from '@saved-index/shared/embedding';
+import type { Filed, ModelResult } from '@saved-index/shared/filing';
 import {
   combine,
   costUsd,
@@ -27,6 +31,7 @@ import {
 import { callerOf, capReached, error, openai, recordUsage, spentToday, type Caller } from '../_shared/server';
 import {
   BadSortRequest,
+  embeddingFields,
   filedFrom,
   modelText,
   parseSortRequest,
@@ -78,6 +83,8 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   const at = new Date();
   const verdicts = plan.ruled.map(({ row, filed }) => verdictRow(row, filed, 'rules', at));
+  // Everything filed in this request, plus anything filed earlier but not yet embedded.
+  const toEmbed: { row: SortRow; filed?: Filed }[] = [...plan.ruled, ...plan.embedOnly.map((row) => ({ row }))];
   const failed: string[] = [];
   let usd = 0;
   let rateLimited = false;
@@ -96,8 +103,10 @@ async function route(req: Request, env: Env): Promise<Response> {
     );
     batch.forEach((row, id) => {
       const result = results.get(id);
-      if (result) verdicts.push(verdictRow(row, filedFrom(row, result), MODEL_LABEL, at));
-      else failed.push(row.shortcode);
+      if (!result) return void failed.push(row.shortcode);
+      const filed = filedFrom(row, result);
+      verdicts.push(verdictRow(row, filed, MODEL_LABEL, at));
+      toEmbed.push({ row, filed });
     });
   };
 
@@ -111,7 +120,6 @@ async function route(req: Request, env: Env): Promise<Response> {
     );
   }
   await Promise.all(jobs);
-  if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
 
   if (verdicts.length) {
     const saved = await fetch(`${env.supabaseUrl}/rest/v1/rpc/apply_verdicts`, {
@@ -121,18 +129,53 @@ async function route(req: Request, env: Env): Promise<Response> {
     });
     if (!saved.ok) {
       console.error(`apply_verdicts ${saved.status}: ${(await saved.text()).slice(0, 300)}`);
-      return error(502, 'Sorted, but could not save the results. Try again shortly.');
+      if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
+      return error(502, 'Indexed, but could not save the results. Try again shortly.');
     }
   } else if (failed.length && rateLimited) {
+    if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
     return error(429, 'OpenAI is busy. Retrying shortly.');
   }
 
+  // After the verdicts are saved, never before: saving a verdict clears the post's old
+  // embedding, so an embedding written first would be wiped straight away. A failure here
+  // is not fatal; the posts are filed, and the next run embeds them.
+  const embedded = await embed(env, caller, toEmbed);
+  usd += embedded.usd;
+  if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
+
   return Response.json({
     sorted: verdicts.length,
+    embedded: embedded.count,
     unreadable: plan.unreadable.map((r) => r.shortcode),
     failed,
     usd,
   });
+}
+
+/** Embeds posts and saves the vectors. Returns how many were saved and what it cost. */
+async function embed(env: Env, caller: Caller, items: { row: SortRow; filed?: Filed }[]): Promise<{ count: number; usd: number }> {
+  const texts = items.map(({ row, filed }) => embeddingText(embeddingFields(row, filed)));
+  const keep = items.filter((_, i) => texts[i] !== '');
+  const inputs = texts.filter((t) => t !== '');
+  if (!inputs.length) return { count: 0, usd: 0 };
+
+  const { reply } = await openai('embeddings', embeddingsBody(inputs), env.openaiKey);
+  const usd = embeddingCostUsd(reply);
+  const vectors = readEmbeddings(reply, inputs.length);
+  if (!vectors) return { count: 0, usd };
+
+  const rows = keep.map(({ row }, i) => ({ shortcode: row.shortcode, embedding: vectorLiteral(vectors[i]!) }));
+  const saved = await fetch(`${env.supabaseUrl}/rest/v1/rpc/set_embeddings`, {
+    method: 'POST',
+    headers: { ...caller, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_rows: rows }),
+  });
+  if (!saved.ok) {
+    console.error(`set_embeddings ${saved.status}: ${(await saved.text()).slice(0, 300)}`);
+    return { count: 0, usd };
+  }
+  return { count: rows.length, usd };
 }
 
 async function readPosts(url: string, caller: Caller, shortcodes: string[]): Promise<SortRow[] | null> {

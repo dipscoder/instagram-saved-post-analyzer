@@ -140,7 +140,8 @@ export function Library({ session }: { session: Session }) {
       try {
         const rows = await fetchPosts(v, q, page, controller.signal);
         const posts = page === 0 ? rows : [...(prev?.posts ?? []), ...rows];
-        entries.current.set(k, { posts, pages: page + 1, more: rows.length === PAGE_SIZE, loading: false, error: null });
+        // A search answers in one go, best match first; only a plain view pages.
+        entries.current.set(k, { posts, pages: page + 1, more: !q.trim() && rows.length === PAGE_SIZE, loading: false, error: null });
         setVersion((n) => n + 1);
         // The grid paints from the rows straight away; thumbnails fill in as they sign.
         await signThumbnails(userId, rows);
@@ -221,7 +222,7 @@ export function Library({ session }: { session: Session }) {
             </div>
 
             {/* Indexing is offered wherever there is something to index, not only in Needs a look. */}
-            {!debounced && facets && (facets.unsorted > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
+            {!debounced && facets && (facets.unsorted + facets.unembedded > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
               <SortPanel facets={facets} onSorted={refresh} />
             )}
 

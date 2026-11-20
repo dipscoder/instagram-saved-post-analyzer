@@ -46,6 +46,8 @@ export interface Facets {
   needsLook: number;
   /** Of those, never sorted at all (the rest the model filed as not sure). */
   unsorted: number;
+  /** Filed, but not yet searchable by meaning. Indexing embeds them for almost nothing. */
+  unembedded: number;
   categories: Facet[];
   collections: Facet[];
 }
@@ -54,6 +56,10 @@ export const PAGE_SIZE = 60;
 
 /** One page of posts for a view and a search, newest saved first. */
 export async function fetchPosts(view: View, query: string, page: number, signal?: AbortSignal): Promise<Post[]> {
+  if (query.trim().length >= 2 && page === 0) {
+    const hybrid = await searchPosts(view, query, signal);
+    if (hybrid) return hybrid;
+  }
   let q = supabase
     .from('posts')
     .select(POST_COLUMNS)
@@ -72,6 +78,29 @@ export async function fetchPosts(view: View, query: string, page: number, signal
   return data ?? [];
 }
 
+/** The most results a search returns. There is no second page of a search. */
+export const SEARCH_LIMIT = 100;
+
+/**
+ * Hybrid search on the server (the `search` function): keywords and meaning together,
+ * best match first. Null when that function is unavailable, so the caller falls back to
+ * keyword-only search and the box keeps working before the function is deployed.
+ */
+async function searchPosts(view: View, query: string, signal?: AbortSignal): Promise<Post[] | null> {
+  const { data, error } = await supabase.functions.invoke<{ posts: Post[] }>('search', {
+    body: {
+      query,
+      category: view.kind === 'category' ? view.name : null,
+      collection: view.kind === 'collection' ? view.id : null,
+      needsLook: view.kind === 'needs-look',
+    },
+    signal,
+  });
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (error || !Array.isArray(data?.posts)) return null;
+  return data.posts;
+}
+
 /**
  * Sidebar counts, from one grouped query on the server (`library_facets`). Until that
  * migration has run, falls back to reading two narrow columns a page at a time.
@@ -85,11 +114,12 @@ export async function fetchFacets(): Promise<Facets> {
   type FacetRow = { kind: string; key: string; count: number };
   const rows: FacetRow[] = rpc.error ? await facetRowsByScan() : ((rpc.data ?? []) as FacetRow[]);
 
-  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, categories: [], collections: [] };
+  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, unembedded: 0, categories: [], collections: [] };
   for (const row of rows) {
     const count = Number(row.count);
     if (row.kind === 'total') facets.total = count;
     else if (row.kind === 'unsorted') facets.unsorted = count;
+    else if (row.kind === 'unembedded') facets.unembedded = count;
     else if (row.kind === 'unsure') facets.needsLook += count;
     else if (row.kind === 'category') facets.categories.push({ key: row.key, label: row.key, count });
     else if (row.kind === 'collection') facets.collections.push({ key: row.key, label: nameOf.get(row.key) ?? 'Collection', count });

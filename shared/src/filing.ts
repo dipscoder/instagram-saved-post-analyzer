@@ -137,6 +137,25 @@ export function hasTextSignal(p: Pick<FilingInput, 'caption' | 'hashtags' | 'alt
 }
 
 /**
+ * Whether the model should see the picture as well as the text. Always when there is no
+ * usable text; also when the caption is only a few words and Instagram gave no alt text,
+ * because "obsessed 😍" plus two hashtags says almost nothing a picture would not settle.
+ * The web app and the server both batch by this, so they agree on which posts go one at
+ * a time with their thumbnail.
+ */
+export function needsPicture(p: Pick<FilingInput, 'caption' | 'hashtags' | 'altText'>): boolean {
+  if (!hasTextSignal(p)) return true;
+  const words = p.caption
+    .replace(/#[\p{L}\p{N}_]+/gu, ' ')
+    .split(/\s+/)
+    .filter((w) => /[\p{L}\p{N}]{2,}/u.test(w)).length;
+  return words < THIN_CAPTION_WORDS && (p.altText ?? '').trim().length < 25;
+}
+
+/** Fewer words than this, with no alt text, and the caption alone is too thin to trust. */
+const THIN_CAPTION_WORDS = 6;
+
+/**
  * A model's answer as a filing. A low-confidence answer is worse than no answer: it
  * buries the post under a category you will never think to look in. Keep the summary,
  * drop the guess, and the post shows up under Uncategorized, still searchable.
