@@ -7,16 +7,18 @@
  * write to their own rows. The server reads the posts itself and skips any already
  * sorted, so a repeated request costs nothing.
  *
- * Each post filed here, and any filed earlier but not yet searchable by meaning, is then
- * embedded for hybrid search.
+ * Reels are transcribed first (up to four a request), so they are filed and searched by
+ * what is said in them. Each post filed here, and any filed earlier but not yet
+ * searchable by meaning, is then embedded for hybrid search.
  *
- *   200 { sorted, embedded, unreadable, failed, usd }
+ *   200 { sorted, embedded, transcribed, unreadable, failed, usd }
  *   400 bad request · 401 not signed in · 402 daily limit reached
  *   429 OpenAI is rate limiting (retry) · 502 OpenAI or the database failed · 500 not configured
  */
 
 import { embeddingCostUsd, embeddingsBody, embeddingText, readEmbeddings, vectorLiteral } from '@saved-index/shared/embedding';
 import type { Filed, ModelResult } from '@saved-index/shared/filing';
+import { isInstagramVideoUrl, tooLong, transcribeCostUsd } from '@saved-index/shared/transcript';
 import {
   combine,
   costUsd,
@@ -28,13 +30,14 @@ import {
   usageOf,
   type AnalyzeRequest,
 } from '../analyze/decide';
-import { callerOf, capReached, error, openai, recordUsage, spentToday, type Caller } from '../_shared/server';
+import { callerOf, capReached, error, openai, recordUsage, spentToday, transcribe, type Caller, type Transcribed } from '../_shared/server';
 import {
   BadSortRequest,
   embeddingFields,
   filedFrom,
   modelText,
   parseSortRequest,
+  pickTranscribe,
   planSort,
   SORT_COLUMNS,
   thumbnailPath,
@@ -79,15 +82,19 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   const rows = await readPosts(env.supabaseUrl, caller, shortcodes);
   if (!rows) return error(502, 'Could not read your posts. Try again shortly.');
+
+  // Transcripts first: they change how a reel is filed, and what it is embedded from.
+  const reels = await transcribeReels(env, caller, pickTranscribe(rows));
   const plan = planSort(rows);
 
   const at = new Date();
   const verdicts = plan.ruled.map(({ row, filed }) => verdictRow(row, filed, 'rules', at));
   // Everything filed in this request, plus anything filed earlier but not yet embedded.
   const toEmbed: { row: SortRow; filed?: Filed }[] = [...plan.ruled, ...plan.embedOnly.map((row) => ({ row }))];
-  const failed: string[] = [];
-  let usd = 0;
-  let rateLimited = false;
+  const failed: string[] = plan.waiting.map((r) => r.shortcode);
+  let usd = reels.usd;
+  let rateLimited = reels.rateLimited;
+  const billed = reels.count + plan.text.length + plan.vision.length;
 
   const file = async (batch: SortRow[], image?: string): Promise<void> => {
     const body: AnalyzeRequest = { posts: batch.map((row, id) => ({ id, text: modelText(row) })), image };
@@ -129,11 +136,11 @@ async function route(req: Request, env: Env): Promise<Response> {
     });
     if (!saved.ok) {
       console.error(`apply_verdicts ${saved.status}: ${(await saved.text()).slice(0, 300)}`);
-      if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
+      if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, billed);
       return error(502, 'Indexed, but could not save the results. Try again shortly.');
     }
-  } else if (failed.length && rateLimited) {
-    if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
+  } else if (failed.length && rateLimited && !reels.count) {
+    if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, billed);
     return error(429, 'OpenAI is busy. Retrying shortly.');
   }
 
@@ -142,15 +149,64 @@ async function route(req: Request, env: Env): Promise<Response> {
   // is not fatal; the posts are filed, and the next run embeds them.
   const embedded = await embed(env, caller, toEmbed);
   usd += embedded.usd;
-  if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, plan.text.length + plan.vision.length);
+  if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, billed);
 
   return Response.json({
     sorted: verdicts.length,
     embedded: embedded.count,
+    transcribed: reels.count,
     unreadable: plan.unreadable.map((r) => r.shortcode),
     failed,
     usd,
   });
+}
+
+/**
+ * Transcribes reels and saves the transcripts, updating `rows` to match what the database
+ * now holds. A reel too long to pay for, or with an address the server will not fetch, is
+ * recorded as tried with nothing said, and never billed.
+ */
+async function transcribeReels(
+  env: Env,
+  caller: Caller,
+  reels: SortRow[],
+): Promise<{ count: number; usd: number; rateLimited: boolean }> {
+  if (!reels.length) return { count: 0, usd: 0, rateLimited: false };
+  const outcomes = await Promise.all(
+    reels.map((row): Promise<Transcribed> | Transcribed =>
+      tooLong(row) || !isInstagramVideoUrl(row.video_url)
+        ? { kind: 'done', text: '', seconds: 0 }
+        : transcribe(row.video_url, row.duration_sec, env.openaiKey),
+    ),
+  );
+
+  let usd = 0;
+  const writes: { row: SortRow; transcript: string | null }[] = [];
+  outcomes.forEach((outcome, i) => {
+    if (outcome.kind === 'retry') return;
+    if (outcome.kind === 'done' && outcome.seconds !== 0) usd += transcribeCostUsd(outcome.seconds);
+    writes.push({ row: reels[i]!, transcript: outcome.kind === 'done' ? outcome.text : null });
+  });
+  const rateLimited = outcomes.some((o) => o.kind === 'retry' && o.status === 429);
+  if (!writes.length) return { count: 0, usd, rateLimited };
+
+  const saved = await fetch(`${env.supabaseUrl}/rest/v1/rpc/set_transcripts`, {
+    method: 'POST',
+    headers: { ...caller, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_rows: writes.map(({ row, transcript }) => ({ shortcode: row.shortcode, transcript })) }),
+  });
+  if (!saved.ok) {
+    // Paid for but not kept: the reels wait, and the next run transcribes them again.
+    console.error(`set_transcripts ${saved.status}: ${(await saved.text()).slice(0, 300)}`);
+    return { count: 0, usd, rateLimited };
+  }
+  const now = new Date().toISOString();
+  for (const { row, transcript } of writes) {
+    row.transcribed_at = now;
+    if (transcript !== row.transcript) row.embedded_at = null; // as reset_stale_embedding does
+    row.transcript = transcript;
+  }
+  return { count: writes.length, usd, rateLimited };
 }
 
 /** Embeds posts and saves the vectors. Returns how many were saved and what it cost. */

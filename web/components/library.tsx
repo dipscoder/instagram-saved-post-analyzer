@@ -222,7 +222,7 @@ export function Library({ session }: { session: Session }) {
             </div>
 
             {/* Indexing is offered wherever there is something to index, not only in Needs a look. */}
-            {!debounced && facets && (facets.unsorted + facets.unembedded > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
+            {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
               <SortPanel facets={facets} onSorted={refresh} />
             )}
 

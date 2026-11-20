@@ -17,6 +17,8 @@ export const EMBEDDING_DIMENSIONS = 512;
 const PRICE_PER_MILLION = 0.02;
 /** About 600 tokens: plenty for a post, and a hard ceiling on what one can cost. */
 const MAX_CHARS = 2_400;
+/** A reel's opening says what it is about; the whole of it would crowd out the rest. */
+const TRANSCRIPT_CHARS = 1_000;
 /** The most embedding one post can cost, with room to spare: MAX_CHARS is ~600 tokens. */
 export const EMBED_QUOTE_USD_PER_POST = 0.00002;
 /** Queries are short; anything longer is not a search. */
@@ -32,6 +34,8 @@ export interface EmbeddingFields {
   subcategory: string | null;
   tags: string[] | null;
   summary: string | null;
+  /** A reel's transcript; optional so posts from before transcription embed as they did. */
+  transcript?: string | null;
 }
 
 /** The text a post is embedded from: what it is about first, then its own words. */
@@ -44,6 +48,7 @@ export function embeddingText(p: EmbeddingFields): string {
   ];
   const own = [
     p.caption,
+    p.transcript ? `said: ${p.transcript.slice(0, TRANSCRIPT_CHARS)}` : null,
     p.hashtags?.length ? p.hashtags.map((h) => `#${h}`).join(' ') : null,
     p.alt_text,
     p.audio_track_name ? `audio: ${p.audio_track_name}` : null,

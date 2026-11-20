@@ -23,7 +23,8 @@ export const FILING_PROMPT: string = [
   TAXONOMY_PROMPT_BLOCK,
   '',
   'For each post you get the handle, the caption, its hashtags, whether it is a video,',
-  "and sometimes Instagram's own alt text describing the image.",
+  "and sometimes Instagram's own alt text describing the image. A reel may come with a",
+  'transcript of what is said in it: often the best signal of what it is about.',
   '',
   'Return one object per post:',
   '  id          the id you were given, unchanged',
@@ -90,6 +91,12 @@ export interface FilingInput {
   isVideo: boolean;
   durationSec: number | null;
   audioTrackName: string | null;
+  /**
+   * What is said in a reel, from the account's transcription. Absent everywhere else,
+   * which keeps the signature, and so every ledger hash, exactly as it was for a post
+   * without one.
+   */
+  transcript?: string | null;
 }
 
 /** The categorisation a post ends up with. */
@@ -104,6 +111,8 @@ export interface Filed {
 export const LEDGER_VERSION = 2;
 
 const CAPTION_CHAR_BUDGET = 400;
+/** The opening of a reel is where it says what it is about; the rest costs tokens. */
+const TRANSCRIPT_CHAR_BUDGET = 1_200;
 
 /**
  * Everything about a post that reaches the model, minus the batch position.
@@ -124,12 +133,15 @@ export function signature(p: FilingInput): string {
   lines.push(`caption: ${caption || '(none)'}`);
   if (p.altText) lines.push(`alt text: ${p.altText.replace(/\s+/g, ' ').slice(0, 200)}`);
   if (p.hashtags.length) lines.push(`hashtags: ${p.hashtags.slice(0, 12).join(' ')}`);
+  const said = (p.transcript ?? '').replace(/\s+/g, ' ').trim().slice(0, TRANSCRIPT_CHAR_BUDGET);
+  if (said) lines.push(`transcript: ${said}`);
   return lines.join('\n');
 }
 
 /** Enough to file from text alone. Anything else falls through to the thumbnail. */
-export function hasTextSignal(p: Pick<FilingInput, 'caption' | 'hashtags' | 'altText'>): boolean {
+export function hasTextSignal(p: Pick<FilingInput, 'caption' | 'hashtags' | 'altText' | 'transcript'>): boolean {
   return (
+    (p.transcript ?? '').trim().length >= 40 ||
     p.caption.trim().length >= 15 ||
     p.hashtags.length >= 2 ||
     (p.altText ?? '').trim().length >= 25

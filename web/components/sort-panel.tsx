@@ -9,7 +9,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'confirm'; posts: Unsorted[] }
   | { kind: 'running'; done: number; total: number }
-  | { kind: 'finished'; sorted: number; embedded: number; unreadable: number; usd: number; stopped: string | null };
+  | { kind: 'finished'; sorted: number; embedded: number; transcribed: number; unreadable: number; usd: number; stopped: string | null };
 
 function usd(n: number): string {
   return n < 0.01 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
@@ -29,8 +29,8 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
   const [error, setError] = useState<string | null>(null);
   const stop = useRef<AbortController | null>(null);
   const unsure = facets.needsLook - facets.unsorted;
-  // Never indexed, plus indexed before search by meaning existed.
-  const todo = facets.unsorted + facets.unembedded;
+  // Never indexed, plus indexed before search by meaning or reel transcripts existed.
+  const todo = facets.unsorted + facets.unembedded + facets.untranscribed;
 
   useEffect(() => () => stop.current?.abort(), []);
 
@@ -38,7 +38,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
     setError(null);
     try {
       const list = await fetchUnsorted();
-      if (list.length === 0) return setPhase({ kind: 'finished', sorted: 0, embedded: 0, unreadable: 0, usd: 0, stopped: null });
+      if (list.length === 0) return setPhase({ kind: 'finished', sorted: 0, embedded: 0, transcribed: 0, unreadable: 0, usd: 0, stopped: null });
       setPhase({ kind: 'confirm', posts: list });
     } catch (e) {
       setError((e as Error).message);
@@ -52,6 +52,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
     let done = 0;
     let sorted = 0;
     let embedded = 0;
+    let transcribed = 0;
     let unreadable = 0;
     let spent = 0;
     let stopped: string | null = null;
@@ -66,6 +67,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         const reply = await sendWithRetry(batch, controller.signal);
         sorted += reply.sorted;
         embedded += reply.embedded;
+        transcribed += reply.transcribed;
         unreadable += reply.unreadable.length;
         spent += reply.usd;
       } catch (e) {
@@ -76,8 +78,8 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
       setPhase({ kind: 'running', done, total: list.length });
     }
     stop.current = null;
-    setPhase({ kind: 'finished', sorted, embedded, unreadable, usd: spent, stopped });
-    if (sorted > 0 || embedded > 0) onSorted();
+    setPhase({ kind: 'finished', sorted, embedded, transcribed, unreadable, usd: spent, stopped });
+    if (sorted > 0 || embedded > 0 || transcribed > 0) onSorted();
   }
 
   return (
@@ -95,6 +97,14 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
               <p>
                 <span className="font-medium text-foreground">{posts(facets.unembedded)} not searchable by meaning yet.</span>{' '}
                 Indexing them again only adds that, for a fraction of a cent.
+              </p>
+            )}
+            {facets.untranscribed > 0 && (
+              <p>
+                <span className="font-medium text-foreground">
+                  {facets.untranscribed.toLocaleString()} {facets.untranscribed === 1 ? 'reel' : 'reels'} not transcribed yet.
+                </span>{' '}
+                Indexing writes down what is said in them, so you can search by it.
               </p>
             )}
             {unsure > 0 && (
@@ -117,7 +127,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
           <p>
             Indexing {posts(phase.posts.length)} costs at most{' '}
             <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts))}</span>, usually much less. Posts the
-            keyword rules can file cost nothing.
+            keyword rules can file cost nothing. Reels cost a little more: what is said in them is transcribed.
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>
@@ -153,8 +163,8 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
             <span className="font-medium text-foreground">
-              {phase.sorted > 0 || phase.embedded > 0
-                ? `Indexed ${posts(Math.max(phase.sorted, phase.embedded))} for ${usd(phase.usd)}.`
+              {phase.sorted > 0 || phase.embedded > 0 || phase.transcribed > 0
+                ? `Indexed ${posts(Math.max(phase.sorted, phase.embedded, phase.transcribed))} for ${usd(phase.usd)}.`
                 : 'Nothing was indexed.'}
             </span>
             {phase.unreadable > 0 && ` ${posts(phase.unreadable)} had no caption or picture to go on.`}

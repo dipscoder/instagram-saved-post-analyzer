@@ -1,11 +1,13 @@
 'use client';
 
 import { ExternalLink } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
-import { handleOf, instagramUrl, profileUrl, type Post } from '@/lib/library';
+import { fetchTranscript, handleOf, instagramUrl, profileUrl, type Post } from '@/lib/library';
 
 export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?: string; onClose: () => void }) {
+  const transcript = useTranscript(post);
   return (
     <Sheet open={post !== null} onOpenChange={(open) => !open && onClose()}>
       {post && (
@@ -49,6 +51,12 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                   <p className="whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">{post.caption}</p>
                 </div>
               )}
+              {transcript && (
+                <div>
+                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">What’s said</p>
+                  <p className="text-[13px] leading-relaxed text-muted-foreground">{transcript}</p>
+                </div>
+              )}
             </div>
           </div>
           <div className="border-t p-4">
@@ -62,4 +70,22 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
       )}
     </Sheet>
   );
+}
+
+/** A reel's transcript, loaded when its panel opens. */
+function useTranscript(post: Post | null): string | null {
+  const [loaded, setLoaded] = useState<{ shortcode: string; text: string | null } | null>(null);
+  const shortcode = post?.is_video ? post.shortcode : null;
+  useEffect(() => {
+    if (!shortcode) return;
+    let live = true;
+    fetchTranscript(shortcode).then(
+      (text) => live && setLoaded({ shortcode, text }),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [shortcode]);
+  return shortcode && loaded?.shortcode === shortcode ? loaded.text : null;
 }

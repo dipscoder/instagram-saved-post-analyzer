@@ -20,6 +20,7 @@ import {
   type ModelResult,
 } from '@saved-index/shared/filing';
 import type { EmbeddingFields } from '@saved-index/shared/embedding';
+import { MAX_TRANSCRIBE_POSTS, needsTranscript } from '@saved-index/shared/transcript';
 import { hashText } from '@saved-index/shared/hash';
 import { classifyByRules, RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 
@@ -30,7 +31,7 @@ export const MAX_VISION_POSTS = 4;
 /** The post columns the function reads. */
 export const SORT_COLUMNS =
   'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
-  'category,subcategory,tags,summary,embedded_at';
+  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at';
 
 export interface SortRow {
   shortcode: string;
@@ -49,6 +50,9 @@ export interface SortRow {
   tags: string[] | null;
   summary: string | null;
   embedded_at: string | null;
+  video_url: string | null;
+  transcript: string | null;
+  transcribed_at: string | null;
 }
 
 export class BadSortRequest extends Error {}
@@ -72,7 +76,17 @@ export function toInput(row: SortRow): FilingInput {
     isVideo: row.is_video === true,
     durationSec: row.duration_sec,
     audioTrackName: row.audio_track_name,
+    transcript: row.transcript || null,
   };
+}
+
+/**
+ * The reels this request transcribes before anything is filed: the first few never
+ * transcribed. A reel is worth waiting for, since what is said in it is usually the best
+ * signal of what it is about.
+ */
+export function pickTranscribe(rows: SortRow[]): SortRow[] {
+  return rows.filter(needsTranscript).slice(0, MAX_TRANSCRIBE_POSTS);
 }
 
 export interface SortPlan {
@@ -86,6 +100,8 @@ export interface SortPlan {
   embedOnly: SortRow[];
   /** Neither text nor a stored thumbnail: nothing to file from. */
   unreadable: SortRow[];
+  /** Reels still waiting for a transcript: left for a later request rather than filed blind. */
+  waiting: SortRow[];
 }
 
 /**
@@ -94,8 +110,12 @@ export interface SortPlan {
  * so a request sent twice bills nothing the second time.
  */
 export function planSort(rows: SortRow[]): SortPlan {
-  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [] };
+  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [] };
   for (const row of rows) {
+    if (needsTranscript(row)) {
+      plan.waiting.push(row);
+      continue;
+    }
     if (row.categorized_at) {
       if (!row.embedded_at) plan.embedOnly.push(row);
       continue;
@@ -122,6 +142,7 @@ export function embeddingFields(row: SortRow, filed?: Filed): EmbeddingFields {
     subcategory: filed ? filed.subcategory : row.subcategory,
     tags: filed ? filed.tags : row.tags,
     summary: filed ? filed.summary : row.summary,
+    transcript: row.transcript,
   };
 }
 
