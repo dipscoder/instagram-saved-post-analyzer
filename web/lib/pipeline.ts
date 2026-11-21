@@ -88,6 +88,7 @@ interface ExampleRow {
   is_video: boolean;
   duration_sec: number | null;
   audio_track_name: string | null;
+  transcript: string | null;
   category: string | null;
   subcategory: string | null;
   tags: string[] | null;
@@ -100,7 +101,7 @@ interface ExampleRow {
 export async function fetchWalkthrough(): Promise<Walkthrough | null> {
   // Typed as a plain string: the client's column-string parser gives up on a list this long.
   const columns: string =
-    'shortcode, handle, caption, hashtags, alt_text, is_video, duration_sec, audio_track_name, category, subcategory, tags, summary, model_used, embedded_at';
+    'shortcode, handle, caption, hashtags, alt_text, is_video, duration_sec, audio_track_name, transcript, category, subcategory, tags, summary, model_used, embedded_at';
   const pick = (modelOnly: boolean) =>
     supabase
       .from('posts')
@@ -125,6 +126,7 @@ export function walkthrough(row: ExampleRow): Walkthrough {
     isVideo: row.is_video,
     durationSec: row.duration_sec,
     audioTrackName: row.audio_track_name,
+    transcript: row.transcript,
   };
   const rule = classifyByRules(input);
   const path = row.model_used === 'you' ? 'you' : row.model_used === 'rules' ? 'rules' : needsPicture(input) ? 'picture' : 'text';

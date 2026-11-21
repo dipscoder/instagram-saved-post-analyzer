@@ -1,5 +1,6 @@
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '@saved-index/shared/embedding';
 import { CATEGORY_NAMES } from '@saved-index/shared/taxonomy';
+import { TRANSCRIBE_MODEL } from '@saved-index/shared/transcript';
 
 /**
  * What the "How indexing works" page says about the server. Kept here rather than
@@ -11,7 +12,7 @@ export const PIPELINE = {
   summaryModel: 'gpt-5.6-luna',
   embeddingModel: EMBEDDING_MODEL,
   embeddingDimensions: EMBEDDING_DIMENSIONS,
-  transcribeModel: 'gpt-transcribe',
+  transcribeModel: TRANSCRIBE_MODEL,
   /** Below this probability a category is a guess, and the post is filed as Unknown. */
   minProbability: 0.6,
   categories: CATEGORY_NAMES.length,

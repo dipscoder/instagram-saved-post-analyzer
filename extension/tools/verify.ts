@@ -40,6 +40,8 @@ import {
   SUMMARY_MODEL,
   readDecisions,
   readSummaries,
+  salvageResults,
+  summaryBody,
 } from '../../supabase/functions/analyze/decide';
 import {
   changed,
@@ -60,15 +62,28 @@ import {
   readEmbeddings,
   vectorLiteral,
 } from '@saved-index/shared/embedding';
-import { needsPicture } from '@saved-index/shared/filing';
 import { PIPELINE } from '../../web/lib/pipeline-facts';
+import { needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
+import {
+  cleanTranscript,
+  isInstagramVideoUrl,
+  MAX_TRANSCRIBE_POSTS,
+  needsTranscript,
+  readTranscript,
+  tooLong,
+  transcribeCostUsd,
+  transcribeQuoteUsd,
+} from '@saved-index/shared/transcript';
 import { BadSearch, parseSearch } from '../../supabase/functions/search/parse';
 import labeled from '../../supabase/eval/labeled.json';
 import { score, verdictOf, type Labeled } from '../../supabase/eval/score';
 import {
   embeddingFields,
+  hasAnyText,
+  MAX_ATTEMPTS,
   MAX_SORT_POSTS,
   parseSortRequest,
+  pickTranscribe,
   planSort,
   verdictRow,
   type SortRow,
@@ -130,6 +145,10 @@ check('the grid-size thumbnail is chosen, not the 150px one', a[0]?.thumbnailUrl
   const sized = extractPosts({ items: [{ media: { ...(rest as { items: { media: object }[] }).items[0]!.media,
     image_versions2: { candidates: [1080, 750, 640, 320, 150].map((w) => ({ url: `https://cdn/${w}.jpg`, width: w, height: w * 1.25 })) } } }] });
   check('the smallest candidate at least 640px wide wins', sized[0]?.thumbnailUrl === 'https://cdn/640.jpg', sized[0]?.thumbnailUrl);
+  const reel = extractPosts({ items: [{ media: { ...(rest as { items: { media: object }[] }).items[0]!.media,
+    video_versions: [720, 480, 360].map((w) => ({ url: `https://cdn/${w}.mp4`, width: w, height: w * 1.78 })) } }] });
+  check('a reel keeps its smallest video rendition', reel[0]?.videoUrl === 'https://cdn/360.mp4', reel[0]?.videoUrl);
+  check('a post without a video has no video address', a[0]?.videoUrl === null, a[0]?.videoUrl);
 }
 check('isVideo from media_type 2', a[0]?.isVideo === true);
 check('duration', a[0]?.durationSec === 47.3);
@@ -947,6 +966,7 @@ console.log('\nserver sorting');
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
     duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
     category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0,
     ...over,
   });
   const textual = row({ shortcode: 'T', caption: 'A slow Sunday walk along the canal, thinking about nothing much' });
@@ -992,7 +1012,8 @@ console.log('\nanalysis v2');
   const row = (over: Partial<SortRow>): SortRow => ({
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
     duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: true, thumbnail_format: 'webp',
-    category: null, subcategory: null, tags: [], summary: null, embedded_at: null, ...over,
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0, ...over,
   });
   const thin = { caption: 'obsessed 😍 #interiors #home', hashtags: ['interiors', 'home'], altText: null };
   check('a caption of a few words needs the picture', needsPicture(thin));
@@ -1054,7 +1075,85 @@ console.log('\nhow indexing works page');
     Math.abs(costUsd(million, none) - PIPELINE.price.decisionsInput) < 1e-9 &&
       Math.abs(costUsd(none, million) - PIPELINE.price.summaryInput) < 1e-9 &&
       Math.abs(costUsd(none, { inputTokens: 0, outputTokens: 1_000_000 }) - PIPELINE.price.summaryOutput) < 1e-9 &&
-      Math.abs(embeddingCostUsd({ usage: { total_tokens: 1_000_000 } }) - PIPELINE.price.embeddings) < 1e-9);
+      Math.abs(embeddingCostUsd({ usage: { total_tokens: 1_000_000 } }) - PIPELINE.price.embeddings) < 1e-9 &&
+      Math.abs(transcribeCostUsd(60) - PIPELINE.price.transcribePerMinute) < 1e-12);
+}
+
+console.log('\nreel transcripts');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: true,
+    duration_sec: 30, audio_track_name: null, categorized_at: null, thumbnail_stored: true, thumbnail_format: 'webp',
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
+    video_url: 'https://scontent.cdninstagram.com/v/reel.mp4?oe=1', transcript: null, transcribed_at: null, index_attempts: 0, ...over,
+  });
+  check('a reel with a video and no transcript needs one', needsTranscript(row({})));
+  check('a photo never needs a transcript', !needsTranscript(row({ is_video: false })));
+  check('a reel tried once is not tried again', !needsTranscript(row({ transcribed_at: '2026-11-20T10:00:00Z' })));
+  check('a reel without a video address cannot be transcribed', !needsTranscript(row({ video_url: null })));
+
+  const fresh = Array.from({ length: 6 }, (_, i) => row({ shortcode: `R${i}` }));
+  check('at most four reels are transcribed per request', pickTranscribe(fresh).length === MAX_TRANSCRIBE_POSTS && MAX_TRANSCRIBE_POSTS === 4);
+  const waiting = planSort(fresh);
+  check('a reel waiting for its transcript is not filed blind',
+    waiting.waiting.length === 6 && waiting.text.length + waiting.vision.length + waiting.ruled.length === 0, waiting);
+  const heard = planSort([row({ shortcode: 'H', transcript: 'Today I am showing you how to make a proper Neapolitan pizza dough at home', transcribed_at: 'x', thumbnail_stored: false })]);
+  check('a transcript alone is enough to file from text', heard.text.map((r) => r.shortcode).join() === 'H', heard);
+  const silent = planSort([row({ shortcode: 'Q', transcript: '', transcribed_at: 'x' })]);
+  check('a silent reel falls back to its picture', silent.vision.map((r) => r.shortcode).join() === 'Q', silent);
+
+  const base: FilingInput = { handle: '@a', caption: 'pizza', hashtags: [], altText: null, isVideo: true, durationSec: 30, audioTrackName: null };
+  check('a post without a transcript hashes as it always did', signature(base) === signature({ ...base, transcript: null }) && signature(base) === signature({ ...base, transcript: '  ' }));
+  const said = signature({ ...base, transcript: 'x'.repeat(5_000) });
+  check('a transcript reaches the model, bounded', said.includes('transcript: x') && said.length < 1_500, said.length);
+  const embedded = embeddingText(embeddingFields(row({ caption: 'pizza night', transcript: 'stretch the dough with your knuckles' })));
+  check('a transcript is part of what is embedded', embedded.includes('said: stretch the dough'), embedded);
+
+  check('a minute of audio costs $0.0045', Math.abs(transcribeCostUsd(60) - 0.0045) < 1e-12);
+  check('an unknown length is quoted as a long reel', transcribeCostUsd(null) > transcribeCostUsd(30));
+  check('a reel over ten minutes is never transcribed or quoted', tooLong({ duration_sec: 601 }) && transcribeQuoteUsd({ duration_sec: 601 }) === 0);
+  check('a transcript reply is read and billed by its own seconds',
+    JSON.stringify(readTranscript({ text: ' make  the dough ', usage: { type: 'duration', seconds: 12 } }, 30)) === '{"text":"make the dough","seconds":12}');
+  check('silence is recorded as nothing said', readTranscript({ text: ' ' }, 30).text === '');
+  check('a reply that is not one is no transcript', readTranscript({ error: 'x' }, 30).text === null);
+  check('a transcript is bounded', (cleanTranscript('y '.repeat(30_000)) ?? '').length === 20_000);
+
+  check('the server fetches video only from Instagram\'s CDN',
+    isInstagramVideoUrl('https://scontent-nrt1-1.cdninstagram.com/o1/v/t16/f2/m86/x.mp4?efg=1') &&
+      isInstagramVideoUrl('https://video.fbcdn.net/v.mp4') &&
+      !isInstagramVideoUrl('http://scontent.cdninstagram.com/x.mp4') &&
+      !isInstagramVideoUrl('https://scontent.cdninstagram.com.evil.example/x.mp4') &&
+      !isInstagramVideoUrl('https://evil.example@scontent.cdninstagram.com/x.mp4') &&
+      !isInstagramVideoUrl('https://scontent.cdninstagram.com:8443/x.mp4') &&
+      !isInstagramVideoUrl('https://169.254.169.254/latest') &&
+      !isInstagramVideoUrl(`https://a.cdninstagram.com/${'x'.repeat(4_000)}`));
+}
+
+console.log('\nindexing failures');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
+    duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0, ...over,
+  });
+  const caption = 'A slow Sunday walk along the canal, thinking about nothing much';
+  const plan = planSort([row({ shortcode: 'G', caption, index_attempts: MAX_ATTEMPTS }), row({ shortcode: 'T', caption, index_attempts: 2 })]);
+  check('a post that failed three times is never sent again', plan.skipped.map((r) => r.shortcode).join() === 'G' && plan.text.map((r) => r.shortcode).join() === 'T', plan);
+  const filed = planSort([row({ shortcode: 'F', caption, index_attempts: MAX_ATTEMPTS, categorized_at: 'x' })]);
+  check('a filed post is still embedded whatever its failures', filed.embedOnly.length === 1);
+  check('a given-up reel is not transcribed',
+    pickTranscribe([row({ is_video: true, video_url: 'https://a.cdninstagram.com/1.mp4', index_attempts: MAX_ATTEMPTS })]).length === 0);
+  check('a thin post whose picture cannot be read still has its words', hasAnyText(row({ caption: 'obsessed' })) && !hasAnyText(row({})));
+
+  check('the summary call has room for a full batch to answer',
+    (summaryBody({ posts: Array.from({ length: MAX_POSTS }, (_, id) => ({ id, text: 'x' })) }) as { max_output_tokens: number }).max_output_tokens >= 100 * MAX_POSTS);
+  const cut = '{"results":[{"id":0,"category":"Travel","tags":["a{b"],"summary":"one \\"quoted\\" }"},{"id":1,"category":"Design","summary":"two"},{"id":2,"categ';
+  const saved = salvageResults(cut);
+  check('an answer cut off mid-post keeps every complete post before the cut',
+    saved.map((r) => r.id).join() === '0,1' && saved[0]?.summary === 'one "quoted" }', saved);
+  check('a cut-off answer is read through readSummaries', readSummaries({ output_text: cut }).length === 2);
+  check('the quote covers a post filed alone with its picture', SERVER_QUOTE_USD_PER_POST >= 0.0011);
 }
 
 console.log('\nfiling eval');

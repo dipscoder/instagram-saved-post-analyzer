@@ -3,13 +3,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { Facets } from '@/lib/library';
-import { fetchUnsorted, quoteUsd, sortBatch, sortBatches, SortError, type Unsorted } from '@/lib/sorting';
+import { fetchUnsorted, isTransient, quoteUsd, retryFailed, sortBatch, sortBatches, SortError, type Unsorted } from '@/lib/sorting';
 
 type Phase =
   | { kind: 'idle' }
   | { kind: 'confirm'; posts: Unsorted[] }
   | { kind: 'running'; done: number; total: number }
-  | { kind: 'finished'; sorted: number; embedded: number; unreadable: number; usd: number; stopped: string | null };
+  | {
+      kind: 'finished';
+      sorted: number;
+      embedded: number;
+      transcribed: number;
+      unreadable: number;
+      /** Posts the server tried and could not index; recorded on each post with the reason. */
+      failed: number;
+      usd: number;
+      stopped: string | null;
+    };
 
 function usd(n: number): string {
   return n < 0.01 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
@@ -28,9 +38,9 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const stop = useRef<AbortController | null>(null);
-  const unsure = facets.needsLook - facets.unsorted;
-  // Never indexed, plus indexed before search by meaning existed.
-  const todo = facets.unsorted + facets.unembedded;
+  const unsure = facets.needsLook - facets.unsorted - facets.failed;
+  // Never indexed, plus indexed before search by meaning or reel transcripts existed.
+  const todo = facets.unsorted + facets.unembedded + facets.untranscribed;
 
   useEffect(() => () => stop.current?.abort(), []);
 
@@ -38,7 +48,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
     setError(null);
     try {
       const list = await fetchUnsorted();
-      if (list.length === 0) return setPhase({ kind: 'finished', sorted: 0, embedded: 0, unreadable: 0, usd: 0, stopped: null });
+      if (list.length === 0) return setPhase({ kind: 'finished', sorted: 0, embedded: 0, transcribed: 0, unreadable: 0, failed: 0, usd: 0, stopped: null });
       setPhase({ kind: 'confirm', posts: list });
     } catch (e) {
       setError((e as Error).message);
@@ -52,7 +62,9 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
     let done = 0;
     let sorted = 0;
     let embedded = 0;
+    let transcribed = 0;
     let unreadable = 0;
+    let failed = 0;
     let spent = 0;
     let stopped: string | null = null;
     setPhase({ kind: 'running', done, total: list.length });
@@ -66,18 +78,40 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         const reply = await sendWithRetry(batch, controller.signal);
         sorted += reply.sorted;
         embedded += reply.embedded;
+        transcribed += reply.transcribed;
         unreadable += reply.unreadable.length;
+        failed += reply.failed.filter((s) => !reply.unreadable.includes(s)).length;
         spent += reply.usd;
       } catch (e) {
-        stopped = controller.signal.aborted ? 'Stopped.' : (e as Error).message;
-        break;
+        if (controller.signal.aborted) {
+          stopped = 'Stopped.';
+          break;
+        }
+        // One batch the server could not finish does not end the run: its posts are counted
+        // as failed and the next batch goes on. A refusal (sign in, daily limit) ends it.
+        if (!isTransient(e)) {
+          stopped = (e as Error).message;
+          break;
+        }
+        failed += batch.length;
       }
       done += batch.length;
       setPhase({ kind: 'running', done, total: list.length });
     }
     stop.current = null;
-    setPhase({ kind: 'finished', sorted, embedded, unreadable, usd: spent, stopped });
-    if (sorted > 0 || embedded > 0) onSorted();
+    setPhase({ kind: 'finished', sorted, embedded, transcribed, unreadable, failed, usd: spent, stopped });
+    // Failures are recorded on the posts too, so the counts change even when nothing was indexed.
+    if (sorted > 0 || embedded > 0 || transcribed > 0 || failed > 0 || unreadable > 0) onSorted();
+  }
+
+  async function retry() {
+    setError(null);
+    try {
+      await retryFailed();
+      onSorted();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   return (
@@ -95,6 +129,23 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
               <p>
                 <span className="font-medium text-foreground">{posts(facets.unembedded)} not searchable by meaning yet.</span>{' '}
                 Indexing them again only adds that, for a fraction of a cent.
+              </p>
+            )}
+            {facets.untranscribed > 0 && (
+              <p>
+                <span className="font-medium text-foreground">
+                  {facets.untranscribed.toLocaleString()} {facets.untranscribed === 1 ? 'reel' : 'reels'} not transcribed yet.
+                </span>{' '}
+                Indexing writes down what is said in them, so you can search by it.
+              </p>
+            )}
+            {facets.failed > 0 && (
+              <p>
+                <span className="font-medium text-foreground">{posts(facets.failed)} couldn’t be indexed</span> after three
+                tries, so Index leaves them out. Open one to see why.{' '}
+                <button type="button" onClick={() => void retry()} className="font-medium text-foreground underline underline-offset-2">
+                  Try again
+                </button>
               </p>
             )}
             {unsure > 0 && (
@@ -117,7 +168,7 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
           <p>
             Indexing {posts(phase.posts.length)} costs at most{' '}
             <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts))}</span>, usually much less. Posts the
-            keyword rules can file cost nothing.
+            keyword rules can file cost nothing. Reels cost a little more: what is said in them is transcribed.
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>
@@ -153,11 +204,12 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
             <span className="font-medium text-foreground">
-              {phase.sorted > 0 || phase.embedded > 0
-                ? `Indexed ${posts(Math.max(phase.sorted, phase.embedded))} for ${usd(phase.usd)}.`
+              {phase.sorted > 0 || phase.embedded > 0 || phase.transcribed > 0
+                ? `Indexed ${posts(Math.max(phase.sorted, phase.embedded, phase.transcribed))} for ${usd(phase.usd)}.`
                 : 'Nothing was indexed.'}
             </span>
             {phase.unreadable > 0 && ` ${posts(phase.unreadable)} had no caption or picture to go on.`}
+            {phase.failed > 0 && ` ${posts(phase.failed)} couldn’t be indexed this time and will be tried again.`}
             {phase.stopped && ` ${phase.stopped}`}
           </p>
           <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>
@@ -171,13 +223,17 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
   );
 }
 
-/** OpenAI rate limits are temporary: wait and try the same batch again, a few times. */
+/**
+ * A rate limit or a server hiccup is temporary: wait and send the same batch again. A
+ * rate limit gets a few tries; any other failure one, since the server may have billed it.
+ */
 async function sendWithRetry(batch: string[], signal: AbortSignal) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await sortBatch(batch, signal);
     } catch (e) {
-      if (!(e instanceof SortError) || e.status !== 429 || attempt >= 3) throw e;
+      const limited = e instanceof SortError && e.status === 429;
+      if (!isTransient(e) || attempt >= (limited ? 3 : 1)) throw e;
       await new Promise((resolve) => setTimeout(resolve, 5_000 * (attempt + 1)));
       if (signal.aborted) throw e;
     }
