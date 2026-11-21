@@ -1,7 +1,8 @@
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
-import { Search, Settings } from 'lucide-react';
+import { Search, Settings, Workflow } from 'lucide-react';
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mark } from '@/components/logo';
 import { PostCard } from '@/components/post-card';
@@ -198,6 +199,11 @@ export function Library({ session }: { session: Session }) {
           <kbd className="pointer-events-none absolute right-2 rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground max-sm:hidden">⌘K</kbd>
         </label>
         <div className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="icon" asChild>
+            <Link href="/how-it-works" aria-label="How indexing works" title="How indexing works">
+              <Workflow />
+            </Link>
+          </Button>
           <ThemeToggle />
           <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
             <Settings />

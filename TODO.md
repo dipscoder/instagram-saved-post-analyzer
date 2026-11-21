@@ -376,6 +376,9 @@ before being acted on.
 - [x] `supabase/eval/labeled.json` + `npm run eval`; verify pins that rules misfile none
 - [ ] Reel transcripts (phase 4 of the plan)
 - [ ] Grow the eval set from real mistakes: a "wrong category" action in the web app
+- [x] `/how-it-works` in the web app: the pipeline step by step with the library's own
+      counts, one of the user's posts taken apart, prices and guardrails. Steps from a
+      migration not yet run are left out; verify pins its models and prices to the server's
 
 ## Not done — needs the user
 
