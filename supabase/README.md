@@ -14,6 +14,7 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261120090000_hybrid_search.sql` | pgvector embeddings, the weighted full-text document, `set_embeddings()` and `search_posts()` (keyword and meaning rankings fused) |
 | `migrations/20261120120000_reel_transcripts.sql` | `posts.video_url`, `transcript`, `transcribed_at`; `set_transcripts()`; transcripts in search and in what is embedded. Run before loading an extension build that syncs `video_url` |
 | `migrations/20261121090000_index_failures.sql` | `posts.index_error`, `index_attempts`, `index_failed_at`; `record_index_failures()` and `retry_index_failures()`; `library_facets()` counts given-up posts apart |
+| `migrations/20261121120000_corrections.sql` | `public.corrections` and `correct_category()`: a category fixed by hand becomes a verdict (`model_used = 'you'`) and an eval case; `clear_library()` erases corrections too |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
 | `functions/sort/` | The `sort` Edge Function: sorts the caller's own unsorted posts by shortcode and saves the verdicts (web app) |
 | `functions/_shared/` | Caller check, daily cap, usage and the OpenAI call, used by both functions |
@@ -68,6 +69,11 @@ document, `search_posts`). Until it is deployed the web app falls back to keywor
 for free. `OPENAI_API_KEY=… npm run eval -- --model` runs the full pipeline (about a tenth
 of a cent) and lists every post filed in the wrong category. Export the key in your own
 shell only; never write it to a file here.
+
+**Your own mistakes.** Every category fixed with **Wrong category?** in the web app is kept
+with the post's words. Settings → **Download corrections** saves them as eval cases;
+`npm run eval -- --with /path/to/saved-index-corrections.json` adds them to the run. The
+file is your own library: keep it out of the repository.
 
 The bundle is needed because `shared/` uses extensionless imports, which Deno does not
 resolve; `config.toml` points the function at it. `verify_jwt` is off because the function

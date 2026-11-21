@@ -6,6 +6,10 @@
  *   npm run eval                 rules only, free, no key needed
  *   OPENAI_API_KEY=… npm run eval -- --model
  *                                the full pipeline; costs about a tenth of a cent
+ *   npm run eval -- --with /path/to/saved-index-corrections.json
+ *                                adds the categories you fixed in the web app (Settings →
+ *                                Download corrections): real mistakes, on your own posts.
+ *                                Keep that file out of the repository; it is your library.
  *
  * The key is read from the environment of your own shell and sent only to OpenAI. Never
  * put it in a file in this repository.
@@ -29,8 +33,9 @@ import { report, score, type Labeled, type Outcome } from './score';
 
 declare const process: { argv: string[]; env: Record<string, string | undefined>; exit(code: number): never };
 
-const posts = labeled.posts as Labeled[];
 const useModel = process.argv.includes('--model');
+const extra = process.argv[process.argv.indexOf('--with') + 1];
+const posts = [...(labeled.posts as Labeled[]), ...(process.argv.includes('--with') ? await readCases(extra) : [])];
 const key = process.env['OPENAI_API_KEY'];
 if (useModel && !key) {
   console.error('Set OPENAI_API_KEY in your shell to run the model. Rules only: npm run eval');
@@ -72,6 +77,18 @@ for (let i = 0; i < forModel.length; i += MAX_POSTS) {
 
 console.log(useModel ? 'Full pipeline: rules, then the model\n' : 'Rules only (free). Add --model for the full pipeline.\n');
 console.log(report(score(outcomes), usd));
+
+/** Eval cases from a corrections file. Loaded at run time, so it is never bundled in. */
+async function readCases(path: string | undefined): Promise<Labeled[]> {
+  if (!path) {
+    console.error('Name the file: npm run eval -- --with /path/to/saved-index-corrections.json');
+    process.exit(1);
+  }
+  const fs = (await import('node:fs' as string)) as { readFileSync(p: string, encoding: 'utf8'): string };
+  const cases = (JSON.parse(fs.readFileSync(path, 'utf8')) as { posts?: Labeled[] }).posts ?? [];
+  console.log(`+ ${cases.length} of your corrections\n`);
+  return cases;
+}
 
 async function call(endpoint: string, body: object): Promise<unknown> {
   const res = await fetch(`https://api.openai.com/v1/${endpoint}`, {
