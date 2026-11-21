@@ -270,7 +270,15 @@ export function Library({ session }: { session: Session }) {
       </div>
 
       <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} session={session} facets={facets} onCleared={refresh} />
-      <PostSheet post={open} thumb={open ? knownThumbnail(open) : undefined} onClose={() => setOpen(null)} />
+      <PostSheet
+        post={open}
+        thumb={open ? knownThumbnail(open) : undefined}
+        onClose={() => setOpen(null)}
+        onFixed={(post, category) => {
+          setOpen({ ...post, category, subcategory: null, categorized_at: new Date().toISOString() });
+          refresh();
+        }}
+      />
     </div>
   );
 }

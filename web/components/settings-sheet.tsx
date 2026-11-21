@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { clearLibrary, fetchSpend, type Spend } from '@/lib/account';
+import { countCorrections, downloadCorrections } from '@/lib/corrections';
 import type { Facets } from '@/lib/library';
 import { supabase } from '@/lib/supabase';
 
@@ -32,6 +33,8 @@ export function SettingsSheet({
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState<string | null>(null);
   const [cleared, setCleared] = useState(false);
+  const [corrections, setCorrections] = useState<number | null>(null);
+  const [correctionsError, setCorrectionsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -39,6 +42,7 @@ export function SettingsSheet({
     setClearError(null);
     setCleared(false);
     fetchSpend().then(setSpend, (e: Error) => setSpendError(e.message));
+    countCorrections().then(setCorrections, () => setCorrections(null));
   }, [open]);
 
   const total = facets?.total ?? 0;
@@ -94,9 +98,27 @@ export function SettingsSheet({
             )}
           </Section>
 
+          <Section title="Corrections">
+            <Row label="Categories you fixed" value={corrections === null ? '…' : corrections.toLocaleString()} />
+            <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
+              Each fix is a real mistake to measure filing against. Download them to run the accuracy eval on your own posts.
+            </p>
+            <div className="pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!corrections}
+                onClick={() => downloadCorrections().catch((e: Error) => setCorrectionsError(e.message))}
+              >
+                Download corrections
+              </Button>
+            </div>
+            {correctionsError && <p className="pt-2 text-[13px] text-destructive">{correctionsError}</p>}
+          </Section>
+
           <Section title="Clear library">
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              Erases every post, picture, collection and AI summary in your account, and in each browser running the
+              Erases every post, picture, collection, AI summary and correction in your account, and in each browser running the
               extension the next time it syncs. You can then find and index from scratch. Indexing is paid again, and
               your spend record is kept.
             </p>
