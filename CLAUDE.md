@@ -17,7 +17,7 @@ version plus the things that are easy to break without noticing.
 npm run app          # install, build the extension, start the web app (localhost:3000)
 npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 284 pure-function checks, no browser needed — run this
+npm run verify       # 287 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -130,7 +130,7 @@ resilience, the Supabase account (sync, thumbnails, the ledger), server-side ind
 daily cap, frame-accurate video controls, a light theme with a dark toggle, the web app as the
 product, hybrid search by meaning, reels transcribed with `gpt-transcribe`, category
 corrections, and an extension that only collects (Phase 42). `npm run verify` currently
-contains 284 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 287 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

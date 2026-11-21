@@ -32,9 +32,11 @@ import {
   combine,
   costUsd,
   decisionsBody,
+  DECISIONS_MODEL,
   MAX_POSTS,
   MIN_PROBABILITY,
   parseRequest,
+  SUMMARY_MODEL,
   readDecisions,
   readSummaries,
   salvageResults,
@@ -53,11 +55,13 @@ import {
 import {
   cleanQuery,
   EMBEDDING_DIMENSIONS,
+  EMBEDDING_MODEL,
   embeddingCostUsd,
   embeddingText,
   readEmbeddings,
   vectorLiteral,
 } from '@saved-index/shared/embedding';
+import { PIPELINE } from '../../web/lib/pipeline-facts';
 import { CORRECTION_TARGETS, evalCases, isCorrectionTarget } from '@saved-index/shared/corrections';
 import { filedFromResult, needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
 import {
@@ -905,6 +909,21 @@ console.log('\nanalysis v2');
     try { parseSearch(bad); } catch (e) { if (e instanceof BadSearch) refused++; }
   }
   check('a malformed search is refused', refused === 4);
+}
+
+console.log('\nhow indexing works page');
+{
+  check('the page names the models the server uses',
+    PIPELINE.decisionsModel === DECISIONS_MODEL && PIPELINE.summaryModel === SUMMARY_MODEL && PIPELINE.embeddingModel === EMBEDDING_MODEL);
+  check('the page gives the server\'s confidence floor and batch size', PIPELINE.minProbability === MIN_PROBABILITY && PIPELINE.batchSize === MAX_POSTS);
+  const million = { inputTokens: 1_000_000, outputTokens: 0 };
+  const none = { inputTokens: 0, outputTokens: 0 };
+  check('the page quotes the prices the server bills by',
+    Math.abs(costUsd(million, none) - PIPELINE.price.decisionsInput) < 1e-9 &&
+      Math.abs(costUsd(none, million) - PIPELINE.price.summaryInput) < 1e-9 &&
+      Math.abs(costUsd(none, { inputTokens: 0, outputTokens: 1_000_000 }) - PIPELINE.price.summaryOutput) < 1e-9 &&
+      Math.abs(embeddingCostUsd({ usage: { total_tokens: 1_000_000 } }) - PIPELINE.price.embeddings) < 1e-9 &&
+      Math.abs(transcribeCostUsd(60) - PIPELINE.price.transcribePerMinute) < 1e-12);
 }
 
 console.log('\ncategory corrections');

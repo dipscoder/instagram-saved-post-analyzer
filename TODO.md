@@ -377,6 +377,9 @@ before being acted on.
 - [x] Grow the eval set from real mistakes: **Wrong category?** in the post panel files the
       post by hand (a verdict that sticks) and keeps it in `corrections`; Settings downloads
       them, `npm run eval -- --with <file>` runs them
+- [x] `/how-it-works` in the web app: the pipeline step by step with the library's own
+      counts, one of the user's posts taken apart, prices and guardrails. Steps from a
+      migration not yet run are left out; verify pins its models and prices to the server's constants
 
 ## Phase 41 — Reels are filed and searched by what is said in them
 - [x] The extension captures each reel's smallest video rendition and syncs it (`video_url`)
