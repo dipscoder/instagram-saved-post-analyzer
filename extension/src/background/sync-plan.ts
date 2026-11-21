@@ -19,6 +19,7 @@ export interface PostRow {
   caption: string;
   hashtags: string[];
   thumbnail_url: string;
+  video_url: string | null;
   is_video: boolean;
   duration_sec: number | null;
   audio_track_name: string | null;
@@ -48,6 +49,7 @@ export function toRow(r: PostRecord): PostRow {
     caption: r.caption,
     hashtags: r.hashtags,
     thumbnail_url: r.thumbnailUrl,
+    video_url: r.videoUrl ?? null,
     is_video: r.isVideo,
     duration_sec: r.durationSec,
     audio_track_name: r.audioTrackName,

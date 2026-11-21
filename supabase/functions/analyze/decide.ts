@@ -131,7 +131,9 @@ export function summaryBody(req: AnalyzeRequest): object {
     instructions: FILING_PROMPT,
     // JSON mode needs the word JSON in the input itself, not only in the instructions.
     input: [{ role: 'user', content: postContent(req, `Return the result as JSON.\n\n${ask}`) }],
-    max_output_tokens: Math.max(256, 100 + 70 * req.posts.length),
+    // Reasoning tokens count against this too. One result is ~80 tokens of JSON; at the old
+    // 70 a post, a full batch ran out mid-answer and lost every summary in it.
+    max_output_tokens: 300 + 120 * req.posts.length,
     reasoning: { effort: 'low', context: 'current_turn' },
     text: { format: { type: 'json_object' }, verbosity: 'low' },
     store: false,
@@ -152,8 +154,37 @@ export function readSummaries(reply: unknown): ModelResult[] {
   try {
     return parseResults(text);
   } catch {
-    return [];
+    return salvageResults(text);
   }
+}
+
+/**
+ * The complete result objects in an answer that was cut off: everything before the cut is
+ * still good, and throwing it away re-bills those posts on the next run.
+ */
+export function salvageResults(text: string): ModelResult[] {
+  // A result holds no nested object, so it runs from the last "{" before a "}" to that "}".
+  const out: ModelResult[] = [];
+  let start = -1;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '{') start = i;
+    else if (c === '}' && start !== -1) {
+      try {
+        const item = JSON.parse(text.slice(start, i + 1)) as ModelResult;
+        if (item && typeof item === 'object' && 'id' in item) out.push(item);
+      } catch {
+        // A malformed object is skipped; its post is retried.
+      }
+      start = -1;
+    }
+  }
+  return out;
 }
 
 // --- putting them together ----------------------------------------------------------

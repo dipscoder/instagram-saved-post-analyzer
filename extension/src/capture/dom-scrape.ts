@@ -50,6 +50,7 @@ function scrape(root: ParentNode): CapturedPost[] {
       // currentSrc is the candidate the browser actually selected from Instagram's
       // srcset. `src` can still be a lazy-loading placeholder or an expired low-res URL.
       thumbnailUrl: img?.currentSrc || img?.getAttribute('src') || '',
+      videoUrl: null,
       isVideo: Boolean(a.querySelector('svg[aria-label*="Reel" i], svg[aria-label*="Video" i], video')),
       durationSec: null,
       audioTrackName: null,

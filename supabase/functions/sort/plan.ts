@@ -20,17 +20,20 @@ import {
   type ModelResult,
 } from '@saved-index/shared/filing';
 import type { EmbeddingFields } from '@saved-index/shared/embedding';
+import { MAX_TRANSCRIBE_POSTS, needsTranscript } from '@saved-index/shared/transcript';
 import { hashText } from '@saved-index/shared/hash';
 import { classifyByRules, RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
 
 /** One request's posts, and of those, how many may need a picture. */
 export const MAX_SORT_POSTS = 25;
 export const MAX_VISION_POSTS = 4;
+/** Failed attempts after which a post is left out until it changes or the user retries. */
+export const MAX_ATTEMPTS = 3;
 
 /** The post columns the function reads. */
 export const SORT_COLUMNS =
   'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
-  'category,subcategory,tags,summary,embedded_at';
+  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at,index_attempts';
 
 export interface SortRow {
   shortcode: string;
@@ -49,6 +52,11 @@ export interface SortRow {
   tags: string[] | null;
   summary: string | null;
   embedded_at: string | null;
+  video_url: string | null;
+  transcript: string | null;
+  transcribed_at: string | null;
+  /** Failed indexing attempts since the post last changed; at MAX_ATTEMPTS it is left out. */
+  index_attempts: number;
 }
 
 export class BadSortRequest extends Error {}
@@ -72,7 +80,28 @@ export function toInput(row: SortRow): FilingInput {
     isVideo: row.is_video === true,
     durationSec: row.duration_sec,
     audioTrackName: row.audio_track_name,
+    transcript: row.transcript || null,
   };
+}
+
+/**
+ * The reels this request transcribes before anything is filed: the first few never
+ * transcribed. A reel is worth waiting for, since what is said in it is usually the best
+ * signal of what it is about.
+ */
+export function pickTranscribe(rows: SortRow[]): SortRow[] {
+  return rows.filter((r) => needsTranscript(r) && !givenUp(r)).slice(0, MAX_TRANSCRIBE_POSTS);
+}
+
+/** Failed often enough that only a change to the post, or the user, brings it back. */
+export function givenUp(row: Pick<SortRow, 'index_attempts'>): boolean {
+  return (row.index_attempts ?? 0) >= MAX_ATTEMPTS;
+}
+
+/** Any words at all to file from, when the picture a thin post needed cannot be read. */
+export function hasAnyText(row: SortRow): boolean {
+  const p = toInput(row);
+  return p.caption.trim() !== '' || p.hashtags.length > 0 || (p.altText ?? '').trim() !== '' || (p.transcript ?? '') !== '';
 }
 
 export interface SortPlan {
@@ -86,6 +115,10 @@ export interface SortPlan {
   embedOnly: SortRow[];
   /** Neither text nor a stored thumbnail: nothing to file from. */
   unreadable: SortRow[];
+  /** Reels still waiting for a transcript: left for a later request rather than filed blind. */
+  waiting: SortRow[];
+  /** Failed too often: left out, and never billed again, until the post changes. */
+  skipped: SortRow[];
 }
 
 /**
@@ -94,8 +127,16 @@ export interface SortPlan {
  * so a request sent twice bills nothing the second time.
  */
 export function planSort(rows: SortRow[]): SortPlan {
-  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [] };
+  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [], skipped: [] };
   for (const row of rows) {
+    if (givenUp(row) && !row.categorized_at) {
+      plan.skipped.push(row);
+      continue;
+    }
+    if (needsTranscript(row)) {
+      plan.waiting.push(row);
+      continue;
+    }
     if (row.categorized_at) {
       if (!row.embedded_at) plan.embedOnly.push(row);
       continue;
@@ -122,6 +163,7 @@ export function embeddingFields(row: SortRow, filed?: Filed): EmbeddingFields {
     subcategory: filed ? filed.subcategory : row.subcategory,
     tags: filed ? filed.tags : row.tags,
     summary: filed ? filed.summary : row.summary,
+    transcript: row.transcript,
   };
 }
 
