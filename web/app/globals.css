@@ -85,4 +85,6 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   body { @apply bg-background text-foreground antialiased; font-feature-settings: "ss01", "cv11"; }
+  /* Tailwind v4 left buttons on the arrow cursor. Anything you can press shows a hand. */
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]), [role="menuitem"], label[for], summary { cursor: pointer; }
 }

@@ -9,7 +9,7 @@ npm run build:web
 npm run typecheck -w web
 ```
 
-**What is here.** Sign in with the extension's account; a sidebar of All saved, Needs a look
+**What is here.** Sign in with the extension's account; a sidebar of All saved, To review
 (no confident category), your Instagram collections and the categories; a grid newest-saved
 first; search (⌘K or `/`) across caption, handle, summary, category, alt text, audio, tags and
 hashtags; a side panel with the summary, tags, caption and a link back to Instagram. Light
@@ -32,10 +32,13 @@ views. Sidebar counts come from `library_facets()`, one grouped query, with a sc
 fallback until that migration runs. A view that is loading shows skeletons sized to its
 known count, never "nothing here".
 
-**Sorting.** Needs a look has a Sort button for posts never sorted. The first press
-fetches them and shows the most the run can cost; the second sends them to the `sort`
-Edge Function in batches (25 with text, 4 that need their picture), newest saved first,
-with Stop. See `lib/sorting.ts` and `supabase/README.md`.
+**Indexing.** Wherever there are posts to index, a bar above the grid offers Index N posts.
+The first press fetches them and shows the most the run can cost; the second sends them to
+the `sort` Edge Function in batches (25 with text, 4 that need their picture, 4 reels to
+transcribe), newest saved first, with Stop. See `lib/sorting.ts` and `supabase/README.md`.
 
-**Not yet.** Vector search (Phase 3 adds embeddings and hybrid search behind the same box),
-editing a category from the panel, and deployment to Vercel.
+**In the post panel.** Change category files the post by hand (free, and it sticks), with
+a toast that can undo it; ← and → step through the grid. Every icon has a tooltip, from
+`components/ui/tooltip.tsx`; toasts come from `components/ui/toast.tsx`.
+
+**Not yet.** Deployment to Vercel.

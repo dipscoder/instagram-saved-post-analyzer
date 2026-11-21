@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type { Facets } from '@/lib/library';
@@ -118,40 +119,41 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
     <div className="mb-6 rounded-lg border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
       {phase.kind === 'idle' && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            {facets.unsorted > 0 && (
+          <div className="space-y-1">
+            {todo > 0 && (
               <p>
-                <span className="font-medium text-foreground">{posts(facets.unsorted)} not indexed yet.</span> Indexing reads
-                each post and files it under a topic with a short summary and tags, so you can find it by searching.
+                <span className="font-medium text-foreground">{posts(todo)} ready to index.</span> Indexing files each post under a
+                topic with a short summary, so you can find it by searching.{' '}
+                <Link href="/how-it-works" className="underline underline-offset-2 hover:text-foreground">
+                  How does this work?
+                </Link>
               </p>
             )}
-            {facets.unembedded > 0 && (
-              <p>
-                <span className="font-medium text-foreground">{posts(facets.unembedded)} not searchable by meaning yet.</span>{' '}
-                Indexing them again only adds that, for a fraction of a cent.
-              </p>
-            )}
-            {facets.untranscribed > 0 && (
-              <p>
-                <span className="font-medium text-foreground">
-                  {facets.untranscribed.toLocaleString()} {facets.untranscribed === 1 ? 'reel' : 'reels'} not transcribed yet.
-                </span>{' '}
-                Indexing writes down what is said in them, so you can search by it.
+            {todo > 0 && (facets.untranscribed > 0 || facets.unembedded > 0) && (
+              <p className="text-[12px]">
+                {[
+                  facets.unsorted > 0 && `${posts(facets.unsorted)} new`,
+                  facets.untranscribed > 0 && `${facets.untranscribed.toLocaleString()} ${facets.untranscribed === 1 ? 'reel' : 'reels'} to listen to`,
+                  facets.unembedded > 0 && `${posts(facets.unembedded)} to update for better search`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
               </p>
             )}
             {facets.failed > 0 && (
               <p>
-                <span className="font-medium text-foreground">{posts(facets.failed)} couldn’t be indexed</span> after three
-                tries, so Index leaves them out. Open one to see why.{' '}
+                <span className="font-medium text-foreground">{posts(facets.failed)} couldn’t be indexed.</span> Open one to see
+                why, or{' '}
                 <button type="button" onClick={() => void retry()} className="font-medium text-foreground underline underline-offset-2">
-                  Try again
+                  try again
                 </button>
+                .
               </p>
             )}
             {unsure > 0 && (
               <p>
-                <span className="font-medium text-foreground">{unsure.toLocaleString()} the model wasn’t sure about.</span> Rather
-                than guess, it left them here for you.
+                <span className="font-medium text-foreground">{posts(unsure)} the AI wasn’t sure about.</span> Rather than guess,
+                it left them for you: open one and choose a category.
               </p>
             )}
           </div>
@@ -167,8 +169,8 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
             Indexing {posts(phase.posts.length)} costs at most{' '}
-            <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts))}</span>, usually much less. Posts the
-            keyword rules can file cost nothing. Reels cost a little more: what is said in them is transcribed.
+            <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts))}</span>, usually much less. Reels cost a
+            little more, because the AI listens to them.
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>

@@ -3,6 +3,7 @@
 import { Bookmark, CircleHelp, Folder } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Facets, View } from '@/lib/library';
+import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 function same(a: View, b: View): boolean {
@@ -12,8 +13,8 @@ function same(a: View, b: View): boolean {
   return true;
 }
 
-function Row({ active, onClick, onHover, icon, label, count }: { active: boolean; onClick: () => void; onHover?: () => void; icon?: ReactNode; label: string; count: number }) {
-  return (
+function Row({ active, onClick, onHover, icon, label, count, hint }: { active: boolean; onClick: () => void; onHover?: () => void; icon?: ReactNode; label: string; count: number; hint?: string }) {
+  const button = (
     <button
       onClick={onClick}
       onMouseEnter={onHover}
@@ -27,6 +28,13 @@ function Row({ active, onClick, onHover, icon, label, count }: { active: boolean
       <span className="flex-1 truncate">{label}</span>
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{count.toLocaleString()}</span>
     </button>
+  );
+  return hint ? (
+    <Tooltip label={hint} side="right">
+      {button}
+    </Tooltip>
+  ) : (
+    button
   );
 }
 
@@ -62,13 +70,13 @@ export function Sidebar({
       </div>
     );
   }
-  const row = (v: View, label: string, count: number, icon?: ReactNode, key?: string) => (
-    <Row key={key} active={same(view, v)} onClick={() => onView(v)} onHover={() => onPrefetch(v)} icon={icon} label={label} count={count} />
+  const row = (v: View, label: string, count: number, icon?: ReactNode, key?: string, hint?: string) => (
+    <Row key={key} active={same(view, v)} onClick={() => onView(v)} onHover={() => onPrefetch(v)} icon={icon} label={label} count={count} hint={hint} />
   );
   return (
     <nav className="p-3">
       {row({ kind: 'all' }, 'All saved', facets.total, <Bookmark />)}
-      {facets.needsLook > 0 && row({ kind: 'needs-look' }, 'Needs a look', facets.needsLook, <CircleHelp />)}
+      {facets.needsLook > 0 && row({ kind: 'needs-look' }, 'To review', facets.needsLook, <CircleHelp />, undefined, 'Not indexed yet, or the AI wasn’t sure')}
       {facets.collections.length > 0 && (
         <Section title="Collections">
           {facets.collections.map((c) => row({ kind: 'collection', id: c.key }, c.label, c.count, <Folder />, c.key))}
@@ -88,7 +96,7 @@ export function FilterChips({ facets, view, onView }: { facets: Facets | null; v
   if (!facets) return null;
   const items: { v: View; label: string }[] = [
     { v: { kind: 'all' }, label: 'All' },
-    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `Needs a look · ${facets.needsLook}` }] : []),
+    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `To review · ${facets.needsLook}` }] : []),
     ...facets.collections.map((c) => ({ v: { kind: 'collection', id: c.key } as View, label: c.label })),
     ...facets.categories.map((c) => ({ v: { kind: 'category', name: c.key } as View, label: c.label })),
   ];

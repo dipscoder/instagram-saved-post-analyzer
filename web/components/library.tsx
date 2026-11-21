@@ -1,9 +1,9 @@
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
-import { Search, Settings, Workflow } from 'lucide-react';
+import { Search, Settings, Workflow, X } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mark } from '@/components/logo';
 import { PostCard } from '@/components/post-card';
 import { PostSheet } from '@/components/post-sheet';
@@ -12,6 +12,7 @@ import { SettingsSheet } from '@/components/settings-sheet';
 import { SortPanel } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   fetchFacets,
   fetchPosts,
@@ -42,7 +43,7 @@ function title(view: View, facets: Facets | null): string {
     case 'all':
       return 'All saved';
     case 'needs-look':
-      return 'Needs a look';
+      return 'To review';
     case 'category':
       return view.name;
     case 'collection':
@@ -178,6 +179,16 @@ export function Library({ session }: { session: Session }) {
   const known = debounced ? null : expected(view, facets);
   const count = settled ? posts.length : (known ?? posts.length);
 
+  // The open post's neighbours in the grid, for ← and → in the panel.
+  const at = open ? posts.findIndex((p) => p.shortcode === open.shortcode) : -1;
+  const step = useMemo(
+    () => ({
+      prev: at > 0 ? () => setOpen(posts[at - 1] ?? null) : undefined,
+      next: at >= 0 && at < posts.length - 1 ? () => setOpen(posts[at + 1] ?? null) : undefined,
+    }),
+    [at, posts],
+  );
+
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
@@ -196,18 +207,36 @@ export function Library({ session }: { session: Session }) {
             aria-label="Search your saves"
             className="h-9 w-full rounded-md border bg-muted/50 pl-9 pr-12 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-[3px] focus:ring-ring/15"
           />
-          <kbd className="pointer-events-none absolute right-2 rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground max-sm:hidden">⌘K</kbd>
+          {query ? (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                searchRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="absolute right-1.5 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-4" />
+            </button>
+          ) : (
+            <kbd className="pointer-events-none absolute right-2 rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground max-sm:hidden">⌘K</kbd>
+          )}
         </label>
         <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="icon" asChild>
-            <Link href="/how-it-works" aria-label="How indexing works" title="How indexing works">
-              <Workflow />
-            </Link>
-          </Button>
+          <Tooltip label="How indexing works">
+            <Button variant="ghost" size="icon" asChild>
+              <Link href="/how-it-works" aria-label="How indexing works">
+                <Workflow />
+              </Link>
+            </Button>
+          </Tooltip>
           <ThemeToggle />
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings" title="Settings">
-            <Settings />
-          </Button>
+          <Tooltip label="Settings">
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings">
+              <Settings />
+            </Button>
+          </Tooltip>
         </div>
       </header>
 
@@ -227,7 +256,7 @@ export function Library({ session }: { session: Session }) {
               </span>
             </div>
 
-            {/* Indexing is offered wherever there is something to index, not only in Needs a look. */}
+            {/* Indexing is offered wherever there is something to index, not only in To review. */}
             {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
               <SortPanel facets={facets} onSorted={refresh} />
             )}
@@ -242,6 +271,11 @@ export function Library({ session }: { session: Session }) {
                     ? 'Try fewer or different words.'
                     : 'Open your saved posts on Instagram and press Find new posts in the Saved Index extension. Posts appear here as they sync.'}
                 </p>
+                {!debounced && (
+                  <Link href="/how-it-works" className="mt-4 inline-block text-sm font-medium underline underline-offset-4">
+                    See how it works
+                  </Link>
+                )}
               </div>
             )}
 
@@ -275,9 +309,11 @@ export function Library({ session }: { session: Session }) {
         thumb={open ? knownThumbnail(open) : undefined}
         onClose={() => setOpen(null)}
         onFixed={(post, category) => {
-          setOpen({ ...post, category, subcategory: null, categorized_at: new Date().toISOString() });
+          // An undo can land after the panel closed or moved on; only the post it is about changes.
+          setOpen((o) => (o?.shortcode === post.shortcode ? { ...o, category, subcategory: null, categorized_at: new Date().toISOString() } : o));
           refresh();
         }}
+        onStep={step}
       />
     </div>
   );
