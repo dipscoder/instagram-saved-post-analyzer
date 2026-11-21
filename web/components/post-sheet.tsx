@@ -1,11 +1,23 @@
 'use client';
 
 import { ExternalLink } from 'lucide-react';
+import { CategoryFix } from '@/components/category-fix';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { handleOf, instagramUrl, profileUrl, type Post } from '@/lib/library';
 
-export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?: string; onClose: () => void }) {
+export function PostSheet({
+  post,
+  thumb,
+  onClose,
+  onFixed,
+}: {
+  post: Post | null;
+  thumb?: string;
+  onClose: () => void;
+  /** The user moved the post to another category. */
+  onFixed: (post: Post, category: string | null) => void;
+}) {
   return (
     <Sheet open={post !== null} onOpenChange={(open) => !open && onClose()}>
       {post && (
@@ -30,6 +42,9 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                     'Unknown account'
                   )}
                 </SheetDescription>
+                <div className="mt-2">
+                  <CategoryFix key={post.shortcode} post={post} onFixed={(category) => onFixed(post, category)} />
+                </div>
               </div>
               {post.summary && <p className="text-sm leading-relaxed">{post.summary}</p>}
               {post.tags.length > 0 && (

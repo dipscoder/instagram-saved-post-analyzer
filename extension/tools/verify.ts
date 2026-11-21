@@ -57,6 +57,7 @@ import {
   vectorLiteral,
 } from '@saved-index/shared/embedding';
 import { needsPicture } from '@saved-index/shared/filing';
+import { CORRECTION_TARGETS, evalCases, isCorrectionTarget } from '@saved-index/shared/corrections';
 import { BadSearch, parseSearch } from '../../supabase/functions/search/parse';
 import labeled from '../../supabase/eval/labeled.json';
 import { score, verdictOf, type Labeled } from '../../supabase/eval/score';
@@ -1036,6 +1037,23 @@ console.log('\nanalysis v2');
     try { parseSearch(bad); } catch (e) { if (e instanceof BadSearch) refused++; }
   }
   check('a malformed search is refused', refused === 4);
+}
+
+console.log('\ncategory corrections');
+{
+  check('every category, and Unknown, can be chosen', CORRECTION_TARGETS.length === CATEGORY_NAMES.length + 1 && CORRECTION_TARGETS.includes(null));
+  check('Uncategorized is not a category you can choose', !isCorrectionTarget('Uncategorized') && !isCorrectionTarget('Nope') && isCorrectionTarget(null));
+  const file = evalCases([
+    { shortcode: 'C1', from_category: 'Travel', to_category: 'Food & Recipes', handle: '@eater', caption: 'tonkatsu in Shinjuku', hashtags: ['tokyo'] },
+    { shortcode: 'C2', from_category: null, to_category: null, handle: 'x', caption: 'obsessed', hashtags: [] },
+    { shortcode: 'C3', from_category: 'Design', to_category: 'Retired category', handle: 'y', caption: 'z', hashtags: [] },
+  ]);
+  check('a fix becomes an eval case labeled with your answer',
+    file.posts.length === 2 && file.posts[0]?.id === 'you-C1' && file.posts[0]?.expected === 'Food & Recipes' && file.posts[0]?.handle === 'eater', file);
+  check('a fix to Unknown is labeled null, as the eval expects', file.posts[1]?.expected === null);
+  check('a fix to a category that no longer exists is left out', !file.posts.some((p) => p.id === 'you-C3'));
+  const scored = score(file.posts.map((p) => ({ id: p.id, expected: p.expected, got: null, byRules: false })));
+  check('the eval scores your corrections like any labeled post', scored.total === 2 && scored.right === 1);
 }
 
 console.log('\nfiling eval');

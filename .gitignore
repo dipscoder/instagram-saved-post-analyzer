@@ -22,3 +22,4 @@ supabase/.branches/
 web/.next/
 web/next-env.d.ts
 web/*.tsbuildinfo
+supabase/eval/*corrections*.json

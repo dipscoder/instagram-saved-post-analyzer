@@ -375,7 +375,9 @@ before being acted on.
 - [x] Thin captions (under six words, no alt text) are filed with their picture too
 - [x] `supabase/eval/labeled.json` + `npm run eval`; verify pins that rules misfile none
 - [ ] Reel transcripts (phase 4 of the plan)
-- [ ] Grow the eval set from real mistakes: a "wrong category" action in the web app
+- [x] Grow the eval set from real mistakes: **Wrong category?** in the post panel files the
+      post by hand (a verdict that sticks) and keeps it in `corrections`; Settings downloads
+      them, `npm run eval -- --with <file>` runs them
 
 ## Not done — needs the user
 
