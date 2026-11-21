@@ -14,8 +14,10 @@ done and what remains, and `README.md` is the user-facing guide. This file is th
 version plus the things that are easy to break without noticing.
 
 ```bash
+npm run app          # install, build the extension, start the web app (localhost:3000)
+npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 291 pure-function checks, no browser needed — run this
+npm run verify       # 320 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -127,11 +129,11 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 
 ## State
 
-The work through Phase 38 is the current implementation: paid-result ledger,
+The work through Phase 41 is the current implementation: paid-result ledger,
 bounded/resumable indexing, provider hardening and current model support, capture/media
 resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
-the ledger, and server-side analysis with a daily cap), frame-accurate video controls, and a light theme with a dark toggle. `npm run verify` currently
-contains 291 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+the ledger, and server-side analysis with a daily cap), frame-accurate video controls, a light theme with a dark toggle, the web app as the product, hybrid search by meaning, and reels transcribed with `gpt-transcribe`. `npm run verify` currently
+contains 320 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

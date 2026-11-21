@@ -11,6 +11,9 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261119150000_sharper_thumbnails.sql` | `posts.thumbnail_format` and WebP in the `thumbnails` bucket (800px copies, replacing the first 480px JPEGs) |
 | `migrations/20261119160000_library_facets.sql` | `library_facets()`: the web app's sidebar counts in one grouped query, under the caller's own RLS |
 | `migrations/20261119170000_server_sorting.sql` | Categorisations never go backwards (triggers on `posts` and `verdicts`), `apply_verdicts()` for the `sort` function, and `library_facets()` counting "not sorted yet" by `categorized_at` |
+| `migrations/20261120090000_hybrid_search.sql` | pgvector embeddings, the weighted full-text document, `set_embeddings()` and `search_posts()` (keyword and meaning rankings fused) |
+| `migrations/20261120120000_reel_transcripts.sql` | `posts.video_url`, `transcript`, `transcribed_at`; `set_transcripts()`; transcripts in search and in what is embedded. Run before loading an extension build that syncs `video_url` |
+| `migrations/20261121090000_index_failures.sql` | `posts.index_error`, `index_attempts`, `index_failed_at`; `record_index_failures()` and `retry_index_failures()`; `library_facets()` counts given-up posts apart |
 | `migrations/20261121120000_corrections.sql` | `public.corrections` and `correct_category()`: a category fixed by hand becomes a verdict (`model_used = 'you'`) and an eval case; `clear_library()` erases corrections too |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
 | `functions/sort/` | The `sort` Edge Function: sorts the caller's own unsorted posts by shortcode and saves the verdicts (web app) |
@@ -49,15 +52,15 @@ Security applies and it needs no service-role key.
 | `OPENAI_API_KEY` | The OpenAI key that pays for analysis. Required. |
 | `DAILY_CAP_USD` | Spend limit per user per UTC day. Optional, default `1`. |
 
-**Deploying**, from the repository root:
+**Deploying**, from the repository root, after running any new migration:
 
 ```bash
-npm run build:functions        # bundles shared/ into functions/*/dist/
-npx supabase login
-npx supabase functions deploy analyze --project-ref siwmxcsrzdvvtouolvph --use-api
-npx supabase functions deploy sort --project-ref siwmxcsrzdvvtouolvph --use-api
-npx supabase functions deploy search --project-ref siwmxcsrzdvvtouolvph --use-api
+npm run deploy      # installs, bundles shared/ into functions/*/dist/, deploys every function
 ```
+
+It deploys every function listed in `config.toml` to its `project_id`, and lists the newest
+migrations at the end as a reminder. The first time on a computer, run `npx supabase login`
+once.
 
 `search` needs the `20261120090000_hybrid_search.sql` migration (pgvector, the full-text
 document, `search_posts`). Until it is deployed the web app falls back to keyword search.
@@ -86,6 +89,23 @@ in one batch, then up to four caption-less posts from their stored thumbnail. Th
 go to `verdicts` and `posts` in one `apply_verdicts` call. The input hash is built by the
 same `signature()` the extension uses, so the extension treats the answer as already paid
 for and picks it up on its next sync. Same secrets and daily cap as `analyze`.
+
+**Reels.** Before filing, up to four reels per request are transcribed with
+`gpt-transcribe` ($0.0045 a minute): the function downloads the reel's smallest rendition
+from Instagram's CDN (only `*.cdninstagram.com` and `*.fbcdn.net`, at most 25 MB), sends
+it to `/v1/audio/transcriptions`, and saves the text with `set_transcripts()`. The reel is
+then filed from its caption, its transcript and its cover image, and embedded with the
+transcript. Each reel is transcribed once: a reel with nothing said is stored as an empty
+transcript, one over ten minutes is skipped unbilled, and one whose address had expired
+is tried again when a sync brings a fresh address. A reel already filed before
+transcripts existed is transcribed and re-embedded, never filed again.
+
+**Failures are recorded on the post.** A post `sort` could not index gets a reason
+(`nothing_to_read`, `no_answer`, `openai_error`, `transcribe_failed`) and an attempt count.
+After three failed attempts Index leaves it out, so a post that keeps failing is not
+billed on every run; a new caption, picture or transcript brings it back, as does
+**Try again** in the web app. The post panel shows the reason. The full error is in the
+function's logs (Dashboard → Edge Functions → sort → Logs).
 
 Before any run the web app shows the most it can cost (`SERVER_QUOTE_USD_PER_POST` in
 `shared/src/filing.ts`) and spends nothing until a second press.

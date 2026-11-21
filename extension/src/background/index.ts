@@ -453,6 +453,8 @@ function clamp(p: CapturedPost): CapturedPost {
       p.audioTrackName === null ? null : String(p.audioTrackName).slice(0, 200),
     handle: String(p.handle ?? '').slice(0, 100),
     thumbnailUrl: safeMediaUrl(p.thumbnailUrl),
+    // Only a reel has a video, and only from Instagram's CDN.
+    videoUrl: p.isVideo === true ? safeMediaUrl(p.videoUrl) || null : null,
     hashtags: (Array.isArray(p.hashtags) ? p.hashtags : [])
       .slice(0, MAX_HASHTAGS)
       .map((t) => String(t).slice(0, 100)),

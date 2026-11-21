@@ -11,6 +11,7 @@
     "./config": "./src/config.ts",
     "./search": "./src/search.ts",
     "./embedding": "./src/embedding.ts",
+    "./transcript": "./src/transcript.ts",
     "./corrections": "./src/corrections.ts"
   },
   "scripts": {

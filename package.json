@@ -10,6 +10,8 @@
     "web"
   ],
   "scripts": {
+    "app": "npm install && npm run build && npm run dev:web",
+    "deploy": "node scripts/deploy.mjs",
     "build": "npm run build -w extension",
     "watch": "npm run watch -w extension",
     "typecheck": "npm run typecheck --workspaces",

@@ -1,8 +1,10 @@
 /**
- * The I/O both Edge Functions share: who the caller is, what they have spent today, and
- * one OpenAI call. Everything runs with the caller's own session, so Row Level Security
+ * The I/O the Edge Functions share: who the caller is, what they have spent today, one
+ * OpenAI call, and transcribing a reel. Everything runs with the caller's own session, so Row Level Security
  * applies to every read and write; the OpenAI key is used only as a request header.
  */
+
+import { isInstagramVideoUrl, MAX_VIDEO_BYTES, readTranscript, TRANSCRIBE_MODEL } from '@saved-index/shared/transcript';
 
 const OPENAI = 'https://api.openai.com/v1';
 
@@ -21,6 +23,13 @@ export async function callerOf(req: Request, supabaseUrl: string): Promise<{ cal
   return typeof user.id === 'string' ? { caller, userId: user.id } : null;
 }
 
+/**
+ * Time limits, inside the platform's 150-second request limit: a request that transcribes,
+ * files and embeds does them one after another, and a request cut off by the platform
+ * loses its answers after they were paid for.
+ */
+const TIMEOUT_MS = { download: 20_000, transcribe: 50_000, model: 50_000, embeddings: 15_000 };
+
 /** One OpenAI call. `reply` is null on any failure; `status` says which. */
 export async function openai(endpoint: string, body: object, key: string): Promise<{ reply: unknown; status: number }> {
   try {
@@ -28,7 +37,7 @@ export async function openai(endpoint: string, body: object, key: string): Promi
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(endpoint === 'embeddings' ? TIMEOUT_MS.embeddings : TIMEOUT_MS.model),
     });
     if (!res.ok) {
       // The status and OpenAI's own message, never the request: it carries the key.
@@ -67,4 +76,65 @@ export function capReached(capUsd: number): string {
 
 export function error(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+/**
+ * How transcribing one reel went:
+ *   done         a transcript, possibly '' when nothing was said; billed for `seconds`
+ *   unavailable  the video could not be downloaded (its address expired, or it is too
+ *                big); nothing was billed, and a fresh address from a sync retries it
+ *   retry        OpenAI failed; recorded as a failed attempt, and tried again next run
+ */
+export type Transcribed = { kind: 'done'; text: string; seconds: number | null } | { kind: 'unavailable' } | { kind: 'retry'; status: number };
+
+/** Downloads a reel from Instagram's CDN and transcribes it. Never throws. */
+export async function transcribe(videoUrl: string, durationSec: number | null, key: string): Promise<Transcribed> {
+  const video = await download(videoUrl, MAX_VIDEO_BYTES);
+  if (!video) return { kind: 'unavailable' };
+  const form = new FormData();
+  form.append('file', video, 'reel.mp4');
+  form.append('model', TRANSCRIBE_MODEL);
+  form.append('response_format', 'json');
+  try {
+    const res = await fetch(`${OPENAI}/audio/transcriptions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}` },
+      body: form,
+      signal: AbortSignal.timeout(TIMEOUT_MS.transcribe),
+    });
+    if (!res.ok) {
+      console.error(`OpenAI audio/transcriptions ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      // Even a 400 is retried: it can be this file (no audio track), but it can as well be
+      // a setting every reel would hit, and that must not quietly blank every transcript.
+      // After a few runs the reel is filed without its words.
+      return { kind: 'retry', status: res.status };
+    }
+    const { text, seconds } = readTranscript(await res.json(), durationSec);
+    return text === null ? { kind: 'retry', status: 502 } : { kind: 'done', text, seconds };
+  } catch (err) {
+    console.error(`OpenAI audio/transcriptions failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: 'retry', status: 0 };
+  }
+}
+
+/** A video, or null when it cannot be had from Instagram's CDN within the size limit. */
+async function download(url: string, maxBytes: number): Promise<Blob | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS.download) });
+    // A redirect is followed only if it lands on Instagram's CDN too.
+    if (!res.ok || !res.body || !isInstagramVideoUrl(res.url || url)) return null;
+    const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim();
+    if (!type.startsWith('video/')) return null;
+    if (Number(res.headers.get('content-length')) > maxBytes) return null;
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+    let size = 0;
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array<ArrayBuffer>>) {
+      size += chunk.length;
+      if (size > maxBytes) return null;
+      chunks.push(chunk);
+    }
+    return new Blob(chunks, { type });
+  } catch {
+    return null;
+  }
 }
