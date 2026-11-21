@@ -11,6 +11,7 @@ Database migrations and the server function for the Saved Index backend.
 | `migrations/20261119150000_sharper_thumbnails.sql` | `posts.thumbnail_format` and WebP in the `thumbnails` bucket (800px copies, replacing the first 480px JPEGs) |
 | `migrations/20261119160000_library_facets.sql` | `library_facets()`: the web app's sidebar counts in one grouped query, under the caller's own RLS |
 | `migrations/20261119170000_server_sorting.sql` | Categorisations never go backwards (triggers on `posts` and `verdicts`), `apply_verdicts()` for the `sort` function, and `library_facets()` counting "not sorted yet" by `categorized_at` |
+| `migrations/20261121120000_corrections.sql` | `public.corrections` and `correct_category()`: a category fixed by hand becomes a verdict (`model_used = 'you'`) and an eval case; `clear_library()` erases corrections too |
 | `functions/analyze/` | The `analyze` Edge Function: files up to 25 posts per call for the signed-in user |
 | `functions/sort/` | The `sort` Edge Function: sorts the caller's own unsorted posts by shortcode and saves the verdicts (web app) |
 | `functions/_shared/` | Caller check, daily cap, usage and the OpenAI call, used by both functions |
@@ -65,6 +66,11 @@ document, `search_posts`). Until it is deployed the web app falls back to keywor
 for free. `OPENAI_API_KEY=… npm run eval -- --model` runs the full pipeline (about a tenth
 of a cent) and lists every post filed in the wrong category. Export the key in your own
 shell only; never write it to a file here.
+
+**Your own mistakes.** Every category fixed with **Wrong category?** in the web app is kept
+with the post's words. Settings → **Download corrections** saves them as eval cases;
+`npm run eval -- --with /path/to/saved-index-corrections.json` adds them to the run. The
+file is your own library: keep it out of the repository.
 
 The bundle is needed because `shared/` uses extensionless imports, which Deno does not
 resolve; `config.toml` points the function at it. `verify_jwt` is off because the function
