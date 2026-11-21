@@ -17,7 +17,7 @@ import { LEDGER_SYNC_STORE, openDb, SYNC_STORE, THUMB_STORE } from './db';
 import { currentUserId, supabase } from './account';
 import { fetchThumbnail, toStoredThumbnail } from './media';
 import { collectionNames } from './collections';
-import { redact } from './providers/index';
+import { redact } from './redact';
 import {
   changed,
   digest,
@@ -286,7 +286,7 @@ async function copyThumbnails(
 /**
  * Restores what the account already holds: verdicts into the local ledger (newer wins, so
  * nothing local is overwritten by something older), and which thumbnails are stored.
- * Nothing is indexed as a result: the next indexing run replays these verdicts for free.
+ * Nothing is bought as a result.
  */
 async function pull(userId: string, thumbs: Map<string, ThumbState>): Promise<void> {
   const verdicts: ledger.Verdict[] = [];

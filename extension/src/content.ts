@@ -9,7 +9,8 @@ import { startBridge } from './capture/bridge';
 import { isPillMounted, mountPill, unmountPill } from './page/pill';
 import { setScrubberSkin, startVideoControls } from './page/video';
 import { collectionFromPath } from './routes';
-import { send, subscribe, type SafeSettings } from './messaging';
+import { send, subscribe } from './messaging';
+import type { Settings } from './types';
 
 startBridge();
 
@@ -18,10 +19,9 @@ whenBodyReady(() => {
 });
 
 async function boot(): Promise<void> {
-  let settings: SafeSettings | null = null;
+  let settings: Settings | null = null;
   try {
-    const res = await send<{ settings: SafeSettings }>({ type: 'settings:get' });
-    settings = res.settings;
+    settings = await send<Settings>({ type: 'settings:get' });
   } catch {
     // Service worker still waking. Video controls are worth having regardless.
   }

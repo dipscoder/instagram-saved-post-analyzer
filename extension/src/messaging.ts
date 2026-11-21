@@ -3,10 +3,7 @@
  *   MAIN world  --window.postMessage-->  ISOLATED  --chrome.runtime-->  service worker
  */
 
-import type { LedgerFile } from './background/ledger';
-import type { CapturedPost, IndexProgress, PostRecord, Settings } from './types';
-
-export type { LedgerFile };
+import type { CapturedPost, Settings } from './types';
 
 /** Namespace tag on window.postMessage traffic — instagram.com posts plenty of its own. */
 export const WIRE = 'saved-index';
@@ -34,12 +31,6 @@ export type MainWorldMessage =
 
 export type BridgeMessage = { wire: typeof WIRE; kind: 'bridge-ready' };
 
-/**
- * `saved` is the order Instagram lists them in, newest-saved first — the closest thing to
- * a save date that exists. The other two are the post's own timestamp.
- */
-export type SortKey = 'saved' | 'newest' | 'oldest';
-
 /** content script / popup → service worker */
 export type Request =
   /** `pageId` identifies the visit, which is what makes feed order into save order. */
@@ -50,45 +41,20 @@ export type Request =
       /** The user's own collection on screen, if any. Page-influenced: validated in the worker. */
       collection?: SavedCollectionRef | null;
     }
-  | {
-      type: 'posts:query';
-      search: string;
-      categories: string[];
-      limit: number;
-      sort: SortKey;
-      collection?: string | null;
-    }
-  | { type: 'posts:stats' }
-  | { type: 'post:get'; shortcode: string }
+  /** How many posts this browser has found. */
+  | { type: 'posts:count' }
   /** How many records a sweep started at `since` did not re-confirm. */
   | { type: 'posts:strays'; since: number }
   | { type: 'posts:prune'; since: number }
-  | { type: 'post:reindex'; shortcode: string }
-  /** Sort the posts already found. Never scrolls. */
-  | { type: 'index:start' }
-  /** Scroll the open collection to find posts; sorting follows when it reaches the end. */
+  /** Scroll the open collection to find posts. Free: Instagram loads them either way. */
   | { type: 'find:start' }
   | { type: 'find:stop' }
-  | { type: 'index:pause' }
-  | { type: 'index:reindex' }
-  /** What a re-index would actually cost, given what the ledger already holds. */
-  | { type: 'index:quote' }
-  | { type: 'ledger:export' }
-  | { type: 'ledger:import'; file: unknown }
-  | { type: 'index:progress' }
   /** The page owns scrolling and reports when a requested sweep naturally ends. */
   | { type: 'harvest:finished'; reason: 'complete' | 'stopped' | 'rate-limited' }
-  | { type: 'spend:reset' }
-  /** Where the popup's "Open Library" goes: the saved feed last seen capturing. */
+  /** Where the popup's Find goes when no saved feed is open: the one last seen capturing. */
   | { type: 'library:url' }
   | { type: 'settings:get' }
-  | { type: 'settings:set'; patch: Partial<Settings> }
-  /** The one setting the library on instagram.com may change. */
   | { type: 'theme:set'; theme: Settings['theme'] }
-  | { type: 'settings:clear-key' }
-  | { type: 'settings:test-key' }
-  /** Test before persistence so an invalid replacement never becomes the active key. */
-  | { type: 'settings:test-candidate'; provider: Settings['provider']; model: string; apiKey: string }
   /** Account requests are accepted from extension pages only, never a content script. */
   | { type: 'account:get' }
   | { type: 'account:sign-in'; email: string; password: string }
@@ -100,43 +66,24 @@ export type Response =
   | { ok: true; value: unknown }
   | { ok: false; error: string };
 
-/** The honest price of a re-index: only the posts the ledger cannot answer for. */
-export interface ReindexQuote {
-  total: number;
-  billable: number;
-  usd: number;
-}
-
 /** One of the user's own Instagram collections: numeric id and the name from its URL. */
 export interface SavedCollectionRef {
   id: string;
   name: string;
 }
 
-export interface Stats {
-  total: number;
-  categorized: number;
-  byCategory: Record<string, number>;
-  /** The user's Instagram collections that hold at least one post, by name. */
-  collections: (SavedCollectionRef & { count: number })[];
-  lastRunAt: number | null;
-  /** Verdicts on file — the work that survives a prune, a re-index or a reinstall. */
-  ledgerCount: number;
-}
-
 /**
  * service worker → content script / popup (broadcast)
  *
  * `harvest` is a command rather than a notification: only the page can scroll, so when
- * indexing is paused or started from the popup the worker has to ask the content script
- * to stop or start auto-scrolling on its behalf.
+ * finding is started or stopped from the popup the worker has to ask the content script
+ * to do it on its behalf.
  */
 export type Broadcast =
-  | { type: 'progress'; progress: IndexProgress }
+  /** How many posts this browser has found, pushed as capture adds to it. */
+  | { type: 'found'; total: number }
   | { type: 'harvest'; action: 'start' | 'stop' }
-  /** Captured metadata changed without changing library counts (for example a fresh CDN URL). */
-  | { type: 'posts:updated' }
-  | { type: 'settings'; settings: SafeSettings };
+  | { type: 'settings'; settings: Settings };
 
 /** The account as it may leave the service worker: who is signed in, never their tokens. */
 export interface AccountState {
@@ -150,12 +97,6 @@ export interface AccountState {
   /** Set after sign-up when the project requires email confirmation first. */
   confirmEmail?: boolean;
 }
-
-/** Settings as they may safely leave the service worker — key replaced by a mask. */
-export type SafeSettings = Omit<Settings, 'apiKey'> & {
-  keyMask: string;
-  hasKey: boolean;
-};
 
 export async function send<T = unknown>(req: Request): Promise<T> {
   const res: Response | undefined = await chrome.runtime.sendMessage(req);

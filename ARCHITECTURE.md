@@ -1,18 +1,22 @@
 # Architecture — Saved Index
 
-A Chrome MV3 extension (TypeScript, unpacked) that turns Instagram's blind saved-posts
-grid into a searchable, AI-categorised library, and gives Instagram videos real seek
-controls.
+A web app, a Supabase backend and a Chrome MV3 extension (TypeScript, unpacked) that turn
+Instagram's blind saved-posts grid into a searchable, AI-categorised library, and give
+Instagram videos real seek controls.
 
 For the documentation reading order, current implementation status, code ownership, and
 handoff checklist, start with [`PROJECT_INDEX.md`](PROJECT_INDEX.md). This document is the
 technical source of truth for architecture and design decisions.
 
-Two surfaces, per `design/Saved Index - Journey v2.dc.html`:
+Three surfaces:
 
-- **Popup** (380×560) — connect a provider, pick a model, paste a key, run/pause indexing.
-- **In-page library** — replaces the thumbnail grid on `instagram.com/saved`, rendered by a
-  content script into a Shadow DOM.
+- **The web app** (`web/`) — the product: the library, search, Index, corrections, Settings.
+- **The popup** — sign in, Find new posts, open the library. Nothing else.
+- **The pill** — a small Shadow DOM element inside a saved collection on instagram.com:
+  what has been found, Find new posts, Remove for posts you unsaved, a link to the library.
+
+The extension is a collector. It finds posts and syncs them; it calls no model and holds no
+model key. Indexing runs in the Edge Functions, which hold the OpenAI key as a secret.
 
 ---
 
@@ -24,24 +28,24 @@ This is the constraint everything else bends around.
 ┌─ MAIN world (page JS context) ─────────────┐
 │ capture-main.js                            │   Sees Instagram's fetch/XHR.
 │   patches window.fetch + XMLHttpRequest    │   Instagram's own JS can read it.
-│   postMessage(JSON) ──────────┐            │   NEVER holds the API key.
+│   postMessage(JSON) ──────────┐            │   Never sees the session.
 └───────────────────────────────┼────────────┘
                                 │ window.postMessage
 ┌─ ISOLATED world (content script) ──────────┐
 │ content.js                                 │   Same DOM, separate JS heap.
-│   receives → chrome.runtime.sendMessage    │   Cannot read the API key
-│   video controls + library UI              │   (storage.local is TRUSTED_CONTEXTS).
+│   receives → chrome.runtime.sendMessage    │   Cannot read the session
+│   video controls + the pill                │   (storage.local is TRUSTED_CONTEXTS).
 └───────────────────────────────┼────────────┘
                                 │ chrome.runtime
 ┌─ Service worker (extension context) ───────┐
-│ background/index.js                        │   Holds the API key.
-│   IndexedDB · categoriser · provider calls │   Only place that talks to model APIs.
+│ background/index.js                        │   Holds the account session.
+│   IndexedDB · sync · thumbnail copy        │   Only place that talks to Supabase.
 └────────────────────────────────────────────┘
 ```
 
 `chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })` runs on every
 service-worker start. `storage.local` is content-script-readable **by default** — without
-that call, any script on instagram.com in the ISOLATED world could read the key. It is
+that call, any script on instagram.com in the ISOLATED world could read the session. It is
 called on every startup, not just install, because the setting is per-storage-area and
 cheap to re-assert.
 
@@ -49,27 +53,28 @@ The MAIN-world script is a manifest-declared `content_script` using `world: "MAI
 a `<script>` tag with a string body. It does not need `web_accessible_resources`; avoiding
 that declaration keeps the bundle from being exposed as a page-loadable resource.
 
-### Where the key lives, and what that does and doesn't protect against
+### Where the session lives, and what that does and doesn't protect against
 
-`chrome.storage.local`, under the extension's own origin — **not** `localStorage`, which is
-per-site and would put the key on instagram.com's own doorstep. It is **not encrypted at
-rest**, and encrypting it would be theatre: the key that decrypted it would have to sit in
-the same bundle, so anything able to read one could read the other. What actually carries
-the security is the access boundary, and there are three layers of it:
+The Supabase session (an access token and a refresh token) is the only credential in the
+extension. It sits in `chrome.storage.local`, under the extension's own origin — **not**
+`localStorage`, which is per-site and would put it on instagram.com's own doorstep. It is
+**not encrypted at rest**, and encrypting it would be theatre: the key that decrypted it
+would have to sit in the same bundle. What carries the security is the access boundary:
 
 | Threat | What stops it |
 |---|---|
-| Instagram's own page JS reading the key | Different world *and* different origin — page script cannot call `chrome.storage` at all |
-| Our own content script being tricked into leaking it | `setAccessLevel({ TRUSTED_CONTEXTS })` — even *we* cannot read the key from a content script |
-| A model call leaking it into a page | Every call is `fetch` from the service worker; the key never enters the content script or page |
-| It appearing in a log or an error toast | `redact()` on every error path, and only `SafeSettings` (mask + boolean) ever leaves the worker |
+| Instagram's own page JS reading it | Different world *and* different origin — page script cannot call `chrome.storage` at all |
+| Our own content script being tricked into leaking it | `setAccessLevel({ TRUSTED_CONTEXTS })` — even *we* cannot read it from a content script |
+| A content script acting as the user | `account:*` requests from a tab are refused; only the email ever leaves the worker |
+| It appearing in a log or an error | `redact()` (`background/redact.ts`) on every error path strips `sk-*`, `Bearer …` and JWT shapes |
 | Another extension reading it | Extension storage is per-extension; there is no cross-extension read |
 
-What it does **not** protect against, stated plainly: anyone with your unlocked computer and
-your Chrome profile can load `chrome://extensions`, open the service worker console, and
-print the key. That is true of every browser extension that holds a credential. The
-mitigation is the provider's own: scope the key, set a spend limit, and rotate it — the
-popup's **Remove** button clears it in one click without touching your indexed posts.
+What it does **not** protect against: anyone with your unlocked computer and Chrome profile
+can open the service worker console and print it. Signing out ends the session.
+
+The OpenAI key is not in the extension at all. Older builds stored the user's own key;
+settings v3 drops it, and the worker writes the migrated settings back on every wake, so it
+is deleted from storage rather than merely ignored.
 
 
 ## 2. Data capture — intercept, never scrape
@@ -151,10 +156,10 @@ session would be missing from the census and look like strays.
 fit this workload better than one large settings object. `unlimitedStorage` covers both
 IndexedDB and extension storage and exempts them from normal quota/eviction pressure.
 
-Three stores: `posts` (the local library), `analysis` (paid verdicts), and `indexQueue`
-(the frozen members of the current run). All are keyed on `shortcode`; the queue keeps a
-stable order, force flag, and completion flag so a worker restart resumes the same finish
-line. `posts` has indexes on `category`, `postedAt`, and `categorizedAt`.
+Stores: `posts` (the local library), `analysis` (paid verdicts), and `sync`, `ledgerSync`
+and `thumbs` (what has been uploaded). All are keyed on `shortcode`. `posts` has indexes on
+`category`, `postedAt`, and `categorizedAt`. DB v9 deleted `indexQueue`, the run queue of
+the indexing that used to happen here.
 
 Instagram thumbnail URLs are signed and temporary, so they are treated as refreshable
 capture data rather than permanent media. Every later saved-feed capture may replace the
@@ -205,12 +210,12 @@ cheaper than every alternative, all of which involve guessing.
 ### 3b. The ledger — what was paid for, kept apart from what was captured
 
 The two durable content stores in `saved-index` look alike and are governed by opposite
-rules (`indexQueue` is transient run state).
+rules.
 
 `posts` is a **view of what is currently saved**. It is free to rebuild — scroll the grid
 again and the same records come back — so anything that legitimately wants to discard it
 may. `analysis` is a **record of work that was bought**: a summary and a category that cost
-tokens on the user's own key and that no amount of scrolling reproduces.
+tokens and that no amount of scrolling reproduces.
 
 Keeping the second inside the first meant every operation that correctly discarded the view
 discarded the purchase with it. `prune()` hard-deleted the records for posts you had
@@ -236,10 +241,7 @@ longer exists. `extension/tools/verify.ts` pins the committed value, so a taxono
 re-bills every affected post in every installed library — shows up as a line in the diff
 rather than as a surprise on someone's invoice.
 
-Locally it needs no account and no permission. Portability across machines is either the
-account (below) or a file: the popup builds
-a Blob and clicks its own link, which an extension page may do with no permission at all —
-`chrome.downloads` would have added a line to the install prompt for nothing.
+Portability across machines is the account (below): `public.verdicts` mirrors the ledger.
 
 ### Backend: an account the library mirrors to
 
@@ -253,7 +255,7 @@ working copy; Supabase holds a mirror per user that the web app will read.
   as wide as the capture clamps in `background/index.ts`, so a valid local record is never
   rejected.
 - **Auth.** Email + password through supabase-js in the service worker. The session is a
-  credential and is stored like the API key: `chrome.storage.local`, trusted contexts only.
+  credential: `chrome.storage.local`, trusted contexts only (see §1).
   Only the email leaves the worker, and `account:*` requests from a content script are
   refused, because that script runs inside instagram.com.
 - **Sync is a diff, not an event log** (`sync-plan.ts`). Each upload records a digest of
@@ -272,27 +274,29 @@ working copy; Supabase holds a mirror per user that the web app will read.
 - **The ledger goes up, and comes back down.** `public.verdicts` mirrors the local ledger
   and has no delete policy: invariant 4 holds on the server too. The first sync for an
   account pulls it into the local ledger (newer wins, per shortcode), records what the
-  server holds so nothing is sent straight back, and starts nothing: the next indexing run
-  replays those verdicts for free, and no pull ever triggers a paid run on its own.
+  server holds so nothing is sent straight back, and starts nothing. Every later sync pulls
+  the verdicts that changed since (a cursor on `updated_at`) and applies each to its post
+  when it is newer, so the posts the extension uploads never carry an older category.
 - **Thumbnails are copied, gently.** Instagram's CDN URLs are signed and expire, so each
-  synced post gets one JPEG, at most 480 px, in the private `thumbnails` bucket at
-  `{user_id}/{shortcode}.jpg`, and `posts.thumbnail_stored` turns true. The copy runs 20 at
+  synced post gets one WebP, at most 800 px, in the private `thumbnails` bucket at
+  `{user_id}/{shortcode}.webp` (older copies are JPEG; `posts.thumbnail_format` says
+  which), and `posts.thumbnail_stored` turns true. The copy runs 20 at
   a time, one download after another with a 0.4–1.2 s pause, newest saved first, from URLs
   the page already loaded and with no cookies attached. An expired URL is remembered and
   retried only when the post comes back with a fresh one. Pruning a post removes its file.
 
-### Analysis through the account
+### Indexing on the server
 
-Signed in, the worker no longer needs an OpenAI key: an *analyst* (`background/analysts.ts`)
-sends each batch to the `analyze` Edge Function (`supabase/functions/analyze/`), which
-holds the project's OpenAI key as a function secret. Without an account, the same
-interface calls OpenAI with your own key, so the rules, the ledger, the fixed run queue,
-the quote and the retries are shared by both paths and nothing about them changed.
+Indexing is started from the web app and runs in the `sort` Edge Function
+(`supabase/functions/sort/`), which holds the project's OpenAI key as a function secret.
+The web app quotes the run and asks for confirmation, then sends it in batches; the
+function reads each post with the caller's own session, files it, and writes the verdict
+with `apply_verdicts`. The extension used to index with the user's own key, through a local
+run queue; that path was removed in Phase 42.
 
 - **Two calls per batch, sent together.** The Decisions API (`gpt-6-luna`) picks each
   post's category from the fixed taxonomy plus `unknown`, with a probability; below 0.6 the
-  post is filed as Uncategorized. The filing prompt the extension already uses
-  (`shared/src/filing.ts`) writes the summary, tags and subcategory with `gpt-5.6-luna`, and
+  post is filed as Uncategorized. The filing prompt (`shared/src/filing.ts`) writes the summary, tags and subcategory with `gpt-5.6-luna`, and
   its subcategory is kept only when it belongs to the chosen category. A batch fails only
   if both calls fail; either one answering is a usable result.
 - **The caller's own session does the database work.** The function checks the caller with
@@ -300,7 +304,7 @@ the quote and the retries are shared by both paths and nothing about them change
   Row Level Security applies and no service-role key exists anywhere. `record_usage` only
   ever adds.
 - **A daily cap per user.** `DAILY_CAP_USD` (default $1) per UTC day. Over it the function
-  answers 402, which the worker treats as final rather than retrying, and the run stops
+  answers 402, which the web app treats as final rather than retrying, and the run stops
   with the message.
 - **The request is untrusted.** At most 25 posts, 1,500 characters each, ids reassigned as
   positions, and an image only with a single post, as a small base64 data URL.
@@ -308,8 +312,10 @@ the quote and the retries are shared by both paths and nothing about them change
 The function is bundled with esbuild (`npm run build:functions`) because `shared/` uses
 extensionless imports, and deployed with the Supabase CLI (`supabase/README.md`).
 
-No transcription yet: Instagram's web payload has no caption track for reels, so their
-words need speech-to-text on the audio (`gpt-transcribe`), planned as a separate step.
+Reels have no caption track in Instagram's web payload, so `sort` transcribes their audio
+with `gpt-transcribe` (at most four per request, Instagram's CDN only, 25 MB, 10 minutes)
+and files the reel from its caption, transcript and cover. A post that fails three times is
+left out of Index until it changes or the user presses Try again.
 
 ---
 
@@ -322,7 +328,7 @@ Hashtag and keyword rules against the fixed taxonomy. A post matches only when i
 winning category clears both a score floor and a margin over the runner-up — a weak or
 ambiguous match falls through to the LLM rather than being guessed at.
 
-**Tier 2 — text-only LLM** (`categorize.ts`).
+**Tier 2 — text** (`supabase/functions/sort/`, prompt in `shared/src/filing.ts`).
 Caption + hashtags + handle, batched **25 posts per request**, JSON-only response with
 fixed keys. Text tokens are ~1/50th the cost of image tokens, so this is where the bulk
 of posts should land.
@@ -332,8 +338,7 @@ Only when the caption is empty or under **15 characters**. Sends the *smallest a
 thumbnail — image tokens dominate cost, and a 150px thumbnail is enough to tell a recipe
 from a gym reel.
 
-No transcription: Instagram's web payload carries no transcript or caption track, so a
-reel's words would need speech-to-text on its audio, a separate cost centre left for later.
+Reels add their transcript to the text, as described above.
 
 **Accuracy.** The prompt carries each category's subcategory list, which turns that field
 from free text into a closed vocabulary. Every post is described with its handle, caption,
@@ -342,79 +347,43 @@ caption-less reel is usually the strongest signal available and costs nothing. T
 returns a `confidence`; a `low` answer keeps its summary but drops the category, so an
 unplaceable post lands in Uncategorized rather than somewhere you would never look for it.
 
-**Execution:** concurrency limit of **3** in-flight requests, exponential backoff with
-jitter on 429/5xx, and resume-on-failure. A run snapshots the currently pending shortcodes
-before auto-scroll begins; newly captured posts wait for the next run. The snapshot lives
-in IndexedDB, so a restarted service worker keeps the original target. An individual retry
-bypasses the ledger and deterministic rules so a wrong answer gets a genuinely fresh model
-classification rather than the same cached result.
+**Execution:** the web app sends a run in batches, retries a failed batch once and then
+skips it, and records which posts failed and why. A user's own correction (`model_used =
+'you'`) is never re-filed.
 
 ---
 
 ## 4a. Cost accounting
 
-Estimates were a placeholder; spend is now metered. Every provider returns token counts on
-its response, so `Provider.chat` hands back `{ text, usage }` and `background/spend.ts`
-accumulates tokens and dollars in `storage.local` — outliving the service worker, which is
-killed between batches.
-
-| Number | Where it comes from |
-|---|---|
-| **spent** | reported `usage` × the model's published per-million list price |
-| **left, at most** | pending posts × ~145 input + ~50 output tokens each, at list price |
-
-The estimate is deliberately an upper bound: it assumes every pending post reaches the
-model, when in practice the free rule pre-pass takes a large share first. Spend is recorded
-in `callWithRetry`, so a response that then fails to parse still counts — the provider
-billed for it either way.
-
-Reasoning models are deliberately constrained for this workload. GPT-5.6 Luna and Terra
-use the Responses API with low reasoning effort and non-persistent responses. Output-token accounting includes provider-reported reasoning
-tokens. Time-limited model prices carry their announced next rate and switch automatically.
+Every OpenAI response reports its token usage, and the server records the dollars with
+`record_usage` into `public.usage`, per user and UTC day; `DAILY_CAP_USD` bounds it. A run
+is quoted before it starts at `SERVER_QUOTE_USD_PER_POST` (a ceiling, since the free rules
+take a share first) plus the transcription minutes, and the web app asks for confirmation.
 
 The cost of a **capture** is zero: it reads responses the page was already fetching.
 
 ---
 
-## 5. Provider adapter
+## 5. OpenAI calls
 
-`background/providers/` — one interface, one implementation. OpenAI is the only provider
-by product decision (October 2026); Anthropic, Gemini and OpenRouter were removed, and a
-stored settings object that still names one of them falls back to OpenAI with its key
-cleared.
-
-```ts
-interface Provider {
-  chat(req: ChatRequest, key: string, model: string): Promise<ChatResult>
-}
-type ChatResult = { text: string; usage: { inputTokens: number; outputTokens: number } }
-```
-
-| Provider | Endpoint | Note |
-|---|---|---|
-| OpenAI | `api.openai.com/v1/responses` for GPT-5.6; `/v1/chat/completions` for 4o | Responses usage includes reasoning/output tokens; legacy usage is `usage.{prompt,completion}_tokens` |
-
-The adapter is hand-written against the REST API rather than pulling in the vendor SDK:
-an MV3 service worker bundle has to stay small. The interface stays, because the planned
-backend calls the same provider from a server function.
-
-Every call happens in the service worker. The key is masked after save (`sk-proj-…9f2c`)
-and never logged — `providers/index.ts` has a `redact()` used on every error path, which
-strips `sk-*` and `Bearer …` shapes out of anything headed for a log or the UI.
+Server-side only, hand-written against the REST API (`supabase/functions/_shared/server.ts`,
+`supabase/functions/analyze/decide.ts`): the Decisions API for the category, the Responses
+API for the summary, embeddings for search, and `/v1/audio/transcriptions`. Each call has a
+time limit that fits inside the function's own request limit. OpenAI is the only provider
+by product decision.
 
 ---
 
 ## 5a. Theme
 
 Light is the default; dark is a choice, stored as `Settings.theme` in the worker like any
-other setting. The library sets `data-theme` on its shadow host and the popup on `<html>`;
+other setting. The pill sets `data-theme` on its shadow host and the popup on `<html>`;
 both stylesheets define their colours as tokens, so a theme is one attribute, not a second
 stylesheet. The system's `prefers-color-scheme` is deliberately ignored: the person asked
 for light unless they say otherwise.
 
-The library on instagram.com may change exactly one setting, through `theme:set`, so the
-content script never needs `settings:set`. The worker broadcasts the new safe settings and
-both surfaces repaint. The popup also caches the theme in its own `localStorage`, so it
+Only the popup changes it, through `theme:set`; the worker broadcasts the new settings and
+the pill repaints. The popup also caches the theme in its own `localStorage`, so it
 paints in the right colours before the worker answers.
 
 ## 6. Video controls
@@ -500,14 +469,15 @@ typed in the library's search box were seeking the video instead of moving the c
 ## 7. Permissions
 
 ```
-storage           settings + IndexedDB quota
+storage           settings, the account session + IndexedDB quota
 unlimitedStorage  thousands of posts
-host_permissions  https://www.instagram.com/*, Instagram's CDNs, https://api.openai.com/*
+host_permissions  https://www.instagram.com/*, Instagram's CDNs (thumbnail copy),
+                  the Supabase project (sign-in and sync)
 ```
 
 No `tabs`, no `scripting`, no `<all_urls>`, no `activeTab`. The popup reaches the active
 tab through `chrome.runtime` messaging from the content script, which needs no extra
-permission. `sidePanel` is **not** requested — this build uses popup + in-page library.
+permission.
 
 ---
 

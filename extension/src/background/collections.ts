@@ -42,14 +42,3 @@ export async function rememberCollection(c: SavedCollectionRef): Promise<boolean
   await chrome.storage.local.set({ [KEY]: { ...names, [c.id]: c.name } });
   return true;
 }
-
-/** Collections that hold posts, alphabetically, for the library's sidebar. */
-export function listCollections(
-  counts: Record<string, number>,
-  names: Record<string, string>,
-): (SavedCollectionRef & { count: number })[] {
-  return Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .map(([id, count]) => ({ id, name: names[id] ?? 'Collection', count }))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-}

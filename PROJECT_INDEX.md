@@ -4,7 +4,7 @@ Start here when taking over the project. This file answers **what to read**, **w
 feature lives**, **what is complete**, and **what still needs attention**. It deliberately
 links to the detailed source of truth instead of repeating it.
 
-Last reviewed: **2026-10-24**.
+Last reviewed: **2026-11-21**.
 
 ## Reading order
 
@@ -23,26 +23,24 @@ copying the same explanation into all four.
 
 ## Current product state
 
-- Chrome Manifest V3 extension, TypeScript + esbuild, loaded unpacked from `extension/dist/`.
-- npm workspaces: `extension/`, `shared/` (taxonomy, digest, filing prompt) and
-  `supabase/` (migrations and the `analyze` Edge Function). `web/` is reserved for the
-  planned web app. OpenAI is the only model provider.
+- The web app (`web/`, Next.js) is the product: the library, search, indexing, corrections,
+  Settings and Clear library all live there. `npm run app` starts it.
+- The Chrome MV3 extension is a collector (TypeScript + esbuild, loaded unpacked from
+  `extension/dist/`). It signs in, finds saved posts by scrolling the open collection, and
+  syncs them, with thumbnails, to the account. It calls no model and holds no model key.
+- npm workspaces: `extension/`, `shared/` (taxonomy, digest, filing prompt, search,
+  transcripts, corrections), `supabase/` (migrations and the `analyze`, `sort` and `search`
+  Edge Functions) and `web/`. OpenAI is the only model provider; its key lives only in the
+  Edge Functions' secrets. `npm run deploy` deploys every function.
 - Saved-post capture is restricted by route, payload context, and DOM scope.
-- Finding and sorting are separate (`src/page/flow.ts`): Find new posts scrolls the open
-  collection and hands over to sorting when it reaches the end; sorting never scrolls. A
-  sorting run freezes its starting set and processes exactly that set.
-- Classification uses deterministic rules first, batched text analysis second, and a
-  bounded thumbnail fallback only when text is insufficient.
-- Individual posts can be re-indexed from their detail view. The action intentionally
-  bypasses rules and the paid-result ledger to obtain a fresh judgment.
-- Indexed posts and purchased analysis live in IndexedDB and, when signed in, mirror to a
-  Supabase account (posts, thumbnails, and the ledger). Signed in, analysis runs through
-  the account's `analyze` function and no OpenAI key is needed in the browser.
-- The library and popup share one responsive visual system, light by default with a
-  synced dark toggle. Expired or unavailable media
-  uses a deliberate placeholder; later saved-feed captures refresh signed media URLs.
-- The regression suite currently contains **323 checks**. It does not replace a live
-  Instagram/provider smoke test.
+- Indexing runs on the server: keyword rules first, then the Decisions API for the category
+  and a summary model for the rest, a thumbnail when the text is too thin, and a transcript
+  for reels. Every run is quoted and confirmed, failures are recorded, and a daily cap
+  bounds spend.
+- Posts and verdicts live in IndexedDB and mirror to the Supabase account. The extension
+  pulls each verdict filed on the server so its uploads never carry an older category.
+- The regression suite currently contains **287 checks**. It does not replace a live
+  Instagram smoke test.
 
 ## Code map by question
 
@@ -53,13 +51,12 @@ Paths are under `extension/` unless they start with `shared/`.
 | Saved-page detection or capture scope | `src/routes.ts`, `src/capture/main-world.ts`, `src/capture/bridge.ts` |
 | Instagram response parsing | `src/capture/extract.ts`, `src/capture/dom-scrape.ts` |
 | IndexedDB records, migration, media refresh | `src/background/db.ts`, `src/types.ts` |
-| Fixed-run queue and pause/resume | `src/background/index.ts`, `src/background/categorize.ts` |
-| Paid-result reuse and re-index charging | `src/background/ledger.ts`, `shared/src/hash.ts`, `shared/src/taxonomy.ts` |
-| Model support, requests, prices, token usage | `src/background/providers/`, `src/background/spend.ts` |
-| Own key vs. account analysis | `src/background/analysts.ts`, `src/background/filing.ts`, `shared/src/filing.ts` |
-| Server analysis, daily cap, deploy | `supabase/functions/analyze/`, `supabase/migrations/` |
-| In-page library and post detail | `src/page/library.ts`, `src/page/library.css.ts` |
-| Popup setup and controls | `src/popup/popup.ts`, `public/popup.html` |
+| Ledger of verdicts, pulled from the account | `src/background/ledger.ts`, `src/background/sync-plan.ts` |
+| Filing logic, prices, transcripts | `shared/src/filing.ts`, `shared/src/transcript.ts`, `shared/src/embedding.ts` |
+| Server indexing, daily cap, failures | `supabase/functions/sort/`, `supabase/functions/analyze/`, `supabase/migrations/` |
+| The web app: library, Index, Settings | `web/components/`, `web/lib/` |
+| The pill on instagram.com and the Find button | `src/page/pill.ts`, `src/page/flow.ts` |
+| Popup: sign in, Find new posts, open the library | `src/popup/popup.ts`, `public/popup.html` |
 | Reel controls, frame stepping, stills | `src/page/video.ts`, `src/page/frames.ts` |
 | Account sign-in and sync to Supabase | `src/background/account.ts`, `src/background/sync.ts`, `src/background/sync-plan.ts`, `src/background/media.ts`, `src/config.ts` |
 | Database schema and access rules | `supabase/migrations/` |
@@ -71,15 +68,12 @@ Paths are under `extension/` unless they start with `shared/`.
 
 The detailed version is in [`CLAUDE.md`](CLAUDE.md). In short:
 
-1. After entry in the popup, provider keys are stored and read only by the service worker;
-   they never enter Instagram's page or the content script. All surfaced errors are
-   redacted.
+1. The OpenAI key lives only in the Edge Functions' secrets. The account session stays in
+   the service worker's locked storage, and all surfaced errors are redacted.
 2. Capture is accepted only from the saved grid and a saved-feed payload context.
 3. Pruning is allowed only after a completed sweep of the full saved feed.
 4. Post cleanup never deletes purchased analysis from the ledger.
 5. Any operation that can re-bill many posts shows an estimate and requires confirmation.
-6. The members of an active indexing run come from its persisted starting snapshot, not
-   from a fresh query of every currently pending post.
 
 ## Important open items
 
@@ -87,13 +81,9 @@ The detailed version is in [`CLAUDE.md`](CLAUDE.md). In short:
    It has been removed from the current tree, but deleting or rewriting Git history cannot
    make an exposed credential safe again. Revoke it at OpenAI before using this repository.
 2. **Run one live smoke test before distribution.** Automated checks mock provider calls
-   and cannot prove the current Instagram DOM, an actual account session, CORS behaviour,
-   or a real provider key. Follow the checklist below.
-3. **Virtualise only when needed.** Rendering is capped and avoids redundant rebuilds, but
-   a library of several thousand posts will eventually benefit from windowed rows.
-4. **Collection membership only grows.** Posts record the Instagram collections they were seen in, but removing a post from a collection is not detected.
-5. **Offline recovery is manual.** Network failures are represented correctly, but an
-   indexing run does not automatically resume when connectivity returns.
+   and cannot prove the current Instagram DOM, an actual account session, or CORS
+   behaviour. Follow the checklist below.
+3. **Collection membership only grows.** Posts record the Instagram collections they were seen in, but removing a post from a collection is not detected.
 
 ## Release / handoff checklist
 
@@ -106,15 +96,14 @@ npm run build
 
 Then reload `extension/dist/` in `chrome://extensions` and verify:
 
-1. Test and save an OpenAI key; confirm the key never appears in page DevTools.
-2. Open the full Instagram Saved page and confirm only saved posts enter the library.
-3. Start with a known pending count; confirm the run stops at that count while newly
-   discovered posts remain pending.
-4. Search, filter, sort, switch Library ↔ Instagram, and open/close a post detail view.
-5. Re-index one post and confirm the quote, confirmation, fresh category, and spend update.
-6. Confirm image placeholders are clean, then revisit the saved feed and verify available
-   thumbnails refresh.
-7. Pause/resume from both surfaces and reload the extension during a run once.
+1. Sign in from the popup; confirm no token or key appears in Instagram's DevTools.
+2. Open a saved collection, press Find new posts in the pill, and confirm only saved posts
+   are found and the count rises.
+3. Let a sweep of All posts finish and confirm Remove offers only posts you unsaved.
+4. Open the web app and confirm the posts and thumbnails arrived; index a few.
+5. Confirm the extension adopts those categories on its next sync and does not overwrite
+   them.
+6. Reload the extension mid-sweep once and confirm it stops cleanly.
 
 ## Documentation maintenance
 

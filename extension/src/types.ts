@@ -122,9 +122,6 @@ export function toRecord(
   };
 }
 
-/** OpenAI only, by product decision. Kept as a type so the settings shape stays explicit. */
-export type ProviderId = 'openai';
-
 /**
  * 'overlay' is our own control bar, drawn into document.body. 'native' hands the job to
  * the browser's control strip, which Instagram's click-catcher often sits on top of —
@@ -132,62 +129,24 @@ export type ProviderId = 'openai';
  */
 export type VideoControls = 'overlay' | 'native';
 
-/** The popup and the library share one appearance, light unless you switch it. */
+/** The popup and the pill share one appearance, light unless you switch it. */
 export type Theme = 'light' | 'dark';
 
 /** Bump when a stored default needs revisiting. Migrations live in settings.ts. */
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
+/**
+ * Everything the extension remembers about how it looks. It holds no key: indexing runs
+ * on the server, and the OpenAI key lives only in the Edge Functions' secrets.
+ */
 export interface Settings {
-  provider: ProviderId;
-  model: string;
-  /** Present only in the service worker; storage.local is TRUSTED_CONTEXTS. */
-  apiKey: string;
-  autoIndex: boolean;
   scrubberSkin: VideoControls;
   theme: Theme;
   settingsVersion: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  provider: 'openai',
-  model: 'gpt-5.6-luna',
-  apiKey: '',
-  autoIndex: true,
   scrubberSkin: 'overlay',
   theme: 'light',
   settingsVersion: SETTINGS_VERSION,
-};
-
-export type IndexPhase = 'idle' | 'running' | 'paused' | 'done' | 'error' | 'offline';
-
-export interface IndexProgress {
-  phase: IndexPhase;
-  /** Posts captured into the DB. Grows as you scroll — it is not "all your saves". */
-  total: number;
-  categorized: number;
-  /** Captured but not yet through a tier. */
-  pending: number;
-  /** Posts frozen into the current/most recent run when it began. */
-  runTotal: number;
-  /** Posts from that frozen set which have reached a final verdict. */
-  runCompleted: number;
-  /** USD actually charged, summed from the token usage every provider reports back. */
-  spentUsd: number;
-  /** Upper-bound USD for `pending` at current list prices. Rules make it cheaper. */
-  estimateUsd: number;
-  /** Human-readable cause when phase is 'error' — surfaced verbatim in the UI. */
-  message: string | null;
-}
-
-export const IDLE_PROGRESS: IndexProgress = {
-  phase: 'idle',
-  total: 0,
-  categorized: 0,
-  pending: 0,
-  runTotal: 0,
-  runCompleted: 0,
-  spentUsd: 0,
-  estimateUsd: 0,
-  message: null,
 };

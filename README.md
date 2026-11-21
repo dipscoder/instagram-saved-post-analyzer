@@ -133,15 +133,16 @@ There is no telemetry.
 
 **Your account (optional).** Signed in, the extension mirrors three things to your
 Supabase account, readable only by you under Row Level Security: the post metadata, the
-summaries and categories you paid for, and one small JPEG thumbnail per post (about 30 KB,
-480 px on the long edge) in a private bucket. Never videos. Thumbnails are copied a few at
+summaries and categories you paid for, and one small WebP thumbnail per post (about 50 KB,
+800 px on the long edge) in a private bucket. Never videos. Thumbnails are copied a few at
 a time, one download after another with a pause between them, from the same CDN URLs the
 page already loaded. Summaries are never deleted from the account, so a new browser, or a
 post you unsave and save again, never pays for the same answer twice.
 
-Signed in, posts are analysed by the account's server function instead of your own key:
-the same post text and thumbnails go to OpenAI from there, with a daily spending limit per
-user. Your own key, if you saved one, is not used while you are signed in.
+Indexing runs on the server, never in the extension: the post text, a thumbnail when the
+text is too thin, and a reel's audio go to OpenAI from there, with a daily spending limit per
+user. The extension holds no OpenAI key. If an older version stored one, it is deleted the
+first time this version starts.
 
 **Your Instagram account.** The extension never calls Instagram's API. It reads the
 responses the page fetches for itself, which is why no `doc_id` is ever forged and no
@@ -166,35 +167,37 @@ and an owner. That's why it handles both the REST (`items[].media`) and GraphQL
 (`data.xdt_api__v1__feed__saved__posts.…`) shapes, and survives either being renamed.
 `npm run verify` proves this against a deliberately made-up GraphQL field name.
 
-**The API key never enters a page context.** `chrome.storage.local` is readable by content
+**Your session never enters a page context.** `chrome.storage.local` is readable by content
 scripts *by default*; the service worker calls
 `chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })` on every start
-to close that. Every model call happens in the service worker.
+to close that. The OpenAI key is not in the extension at all: it lives only in the server's
+secrets.
 
-**Categorisation is cheapest-first.** Local hashtag/keyword rules → batched text-only LLM
-(25 posts per request) → vision, but only for posts whose caption is empty or under 15
-characters, and always with the smallest available thumbnail.
+**Indexing is cheapest-first, on the server.** Local hashtag/keyword rules → batched text
+analysis (25 posts per request) → a thumbnail, but only for posts with too little text, and
+a transcript for reels. The web app's How it works page walks through it with your own
+posts.
 
 ---
 
 ## Where each piece lives
 
 ```
-package.json               npm workspaces: shared + extension; root scripts delegate
+package.json               npm workspaces: shared, extension, supabase, web
 tsconfig.base.json         compiler options every package extends
 
 shared/src/                pure code for the extension, backend and web app alike
   hash.ts                  short stable digest, for "is this the same input as before?"
   taxonomy.ts              12 categories + the free rule-based pre-pass
 
-web/                       the web app (planned, Phase 4)
-supabase/                  database migrations + server functions (planned, Phase 2)
+web/                       the web app: library, search, Index, Settings
+supabase/                  database migrations + the analyze, sort and search functions
 
 extension/src/
   types.ts                 PostRecord schema (incl. the nullable pipeline fields)
   routes.ts                which Instagram routes capture is allowed to run on
   messaging.ts             typed contracts for all three contexts
-  content.ts               ISOLATED-world entry: bridge + video + library + SPA routing
+  content.ts               ISOLATED-world entry: bridge + video + pill + SPA routing
 
   capture/
     main-world.ts          MAIN world: patches fetch + XHR, reports 429s   → capture-main.js
@@ -206,19 +209,14 @@ extension/src/
     index.ts               service worker: message router, port broadcasts → background.js
     db.ts                  IndexedDB store, dedupe + gap-filling merge
     ledger.ts              paid-for verdicts, kept apart from the disposable post cache
-    settings.ts            settings, the TRUSTED_CONTEXTS lockdown, key masking
+    settings.ts            appearance settings and the TRUSTED_CONTEXTS lockdown
     account.ts             Supabase sign-in; the session never leaves the worker
     sync.ts                mirrors posts, the ledger and thumbnails to the account
-    media.ts               bounded thumbnail downloads and the stored JPEG
+    media.ts               bounded thumbnail downloads and the stored WebP
     sync-plan.ts           pure diff: which posts to upload or delete
     order.ts               feed position -> save order, across visits
-    spend.ts               metered tokens + dollars, survives worker restarts
-    categorize.ts          the three-tier pipeline, concurrency, backoff
-    analysts.ts            who answers: OpenAI with your key, or your account
-    filing.ts              pure: what the model sees, and how its answer is applied
-    providers/
-      index.ts             adapter interface, registry, pricing, key redaction
-      openai.ts            Responses API for GPT-5.6, Chat Completions for 4o
+    collections.ts         names of your Instagram collections
+    redact.ts              strips credentials from every surfaced error
 
   page/
     pill.ts                the in-page pill (Shadow DOM): Find new posts, strays, link to the web app
@@ -234,7 +232,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                147 regression checks across the critical flows
+  verify.ts                287 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -248,21 +246,22 @@ CLAUDE.md                  compact coding-agent orientation
 
 | | |
 |---|---|
+| `npm run app` | install, build the extension, start the web app |
+| `npm run deploy` | install, bundle and deploy every Edge Function |
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 147 pure-function regression checks |
+| `npm run verify` | run 287 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why
 
 | | |
 |---|---|
-| `storage` | settings and the API key |
+| `storage` | settings and the account session |
 | `unlimitedStorage` | thousands of posts in IndexedDB |
 | `https://www.instagram.com/*` | the content scripts |
-| `https://*.cdninstagram.com/*`, `https://*.fbcdn.net/*` | reading thumbnail bytes for the vision fallback |
-| `https://api.openai.com/*` | categorisation calls |
+| `https://*.cdninstagram.com/*`, `https://*.fbcdn.net/*` | copying each thumbnail to your account |
 | `https://siwmxcsrzdvvtouolvph.supabase.co/*` | account sign-in and library sync |
 
 No `tabs`, no `scripting`, no `activeTab`, no `<all_urls>`. Service-worker pushes go over
@@ -277,15 +276,8 @@ errors from `capture-main.js`. If Instagram has moved its saved-feed endpoints, 
 patterns are one list at the top of `extension/src/capture/main-world.ts` — widen `URL_PATTERNS` and
 rebuild. The extractor downstream is shape-driven and won't need touching.
 
-**"Key rejected — provider returned 401."** The key is wrong or has no credit.
-
-**Indexing stops with "returned nothing usable".** The chosen model isn't returning
-parseable JSON. Switch to a stronger model; progress is kept, so it resumes where it
-stopped.
-
-**The library covers something I need.** Switch to **Instagram** in the header, or press
-Esc. Instagram's own grid is underneath, untouched, and the pill in the bottom-right
-opens the library again.
+**A post couldn't be indexed.** The web app says so on the post and in Index, and keeps the
+reason. Press Try again; the real error text is in Supabase → Edge Functions → `sort` → Logs.
 
 **Reels keep muting themselves when I pause.** Fixed — but the fix only applies to the mute
 button on *our* control bar, which is what records that you want sound. Instagram's own
