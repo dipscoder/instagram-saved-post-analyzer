@@ -27,6 +27,8 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
       .select('shortcode, caption, hashtags, alt_text, categorized_at, embedded_at, is_video, video_url, transcribed_at, duration_sec')
       // Never filed, filed but not yet searchable by meaning, or a reel not yet transcribed.
       .or('categorized_at.is.null,embedded_at.is.null,and(is_video.is.true,video_url.not.is.null,transcribed_at.is.null)')
+      // Failed three times: left out until the post changes or the user presses Try again.
+      .lt('index_attempts', 3)
       .order('saved_rank', { ascending: false, nullsFirst: false })
       .order('shortcode')
       .range(from, from + 999)
@@ -85,17 +87,35 @@ export class SortError extends Error {
   }
 }
 
+/** Puts every post that failed three times back into the next run. Spends nothing. */
+export async function retryFailed(): Promise<void> {
+  const { error } = await supabase.rpc('retry_index_failures');
+  if (error) throw new Error(error.message);
+}
+
+/** A server or network failure worth one more try, unlike a refusal (sign in, limit, setup). */
+export function isTransient(e: unknown): boolean {
+  if (!(e instanceof SortError)) return !(e instanceof DOMException && e.name === 'AbortError');
+  return e.status === 429 || e.status === 0 || e.status >= 502;
+}
+
 /** One request to the `sort` function. */
 export async function sortBatch(shortcodes: string[], signal: AbortSignal): Promise<SortReply> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SortError('Sign in again to index.', 401);
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
-    method: 'POST',
-    headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ shortcodes }),
-    signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ shortcodes }),
+      signal,
+    });
+  } catch (e) {
+    if (signal.aborted) throw e;
+    throw new SortError('Could not reach the server.', 0);
+  }
   const body = (await res.json().catch(() => ({}))) as Partial<SortReply> & { error?: string };
   if (!res.ok) {
     const message =

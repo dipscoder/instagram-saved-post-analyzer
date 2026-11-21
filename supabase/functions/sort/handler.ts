@@ -35,6 +35,7 @@ import {
   BadSortRequest,
   embeddingFields,
   filedFrom,
+  hasAnyText,
   modelText,
   parseSortRequest,
   pickTranscribe,
@@ -53,6 +54,8 @@ export interface Env {
 
 /** The largest stored thumbnail the function will send on: ten times a normal one. */
 const MAX_THUMBNAIL_BYTES = 512 * 1024;
+/** OpenAI failing on a reel this many runs in a row: file it without its words. */
+const MAX_TRANSCRIBE_ATTEMPTS = 3;
 
 export async function handle(req: Request, env: Env): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -91,7 +94,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   const verdicts = plan.ruled.map(({ row, filed }) => verdictRow(row, filed, 'rules', at));
   // Everything filed in this request, plus anything filed earlier but not yet embedded.
   const toEmbed: { row: SortRow; filed?: Filed }[] = [...plan.ruled, ...plan.embedOnly.map((row) => ({ row }))];
-  const failed: string[] = plan.waiting.map((r) => r.shortcode);
+  // Recorded on the posts, so a post that cannot be indexed says why and is not retried forever.
+  const failures: Failure[] = [...reels.failures];
   let usd = reels.usd;
   let rateLimited = reels.rateLimited;
   const billed = reels.count + plan.text.length + plan.vision.length;
@@ -104,29 +108,38 @@ async function route(req: Request, env: Env): Promise<Response> {
       openai('responses', summaryBody(body), env.openaiKey),
     ]);
     usd += costUsd(usageOf(decisions.reply), usageOf(summaries.reply));
-    if (decisions.status === 429 || summaries.status === 429) rateLimited = true;
+    const busy = decisions.status === 429 || summaries.status === 429;
+    if (busy) rateLimited = true;
     const results = new Map<number, ModelResult>(
       combine(body, readDecisions(decisions.reply), readSummaries(summaries.reply)).map((r) => [r.id, r]),
     );
+    const reason = decisions.reply === null && summaries.reply === null ? 'openai_error' : 'no_answer';
     batch.forEach((row, id) => {
       const result = results.get(id);
-      if (!result) return void failed.push(row.shortcode);
+      // A rate limit is ours, not the post's: it is retried without counting against it.
+      if (!result) return void (busy ? failures.push({ row, reason, counted: false }) : failures.push({ row, reason }));
       const filed = filedFrom(row, result);
       verdicts.push(verdictRow(row, filed, MODEL_LABEL, at));
       toEmbed.push({ row, filed });
     });
   };
 
+  const textBatch = [...plan.text];
+  const pictures = await Promise.all(plan.vision.map((row) => thumbnail(env.supabaseUrl, caller, thumbnailPath(userId, row))));
   const jobs: Promise<void>[] = [];
-  if (plan.text.length) jobs.push(file(plan.text));
-  for (const row of plan.vision) {
-    jobs.push(
-      thumbnail(env.supabaseUrl, caller, thumbnailPath(userId, row)).then((image) =>
-        image ? file([row], image) : void plan.unreadable.push(row),
-      ),
-    );
-  }
+  plan.vision.forEach((row, i) => {
+    const image = pictures[i];
+    if (image) jobs.push(file([row], image));
+    // The picture could not be read this time: file from whatever words there are.
+    else if (hasAnyText(row)) textBatch.push(row);
+    else failures.push({ row, reason: 'nothing_to_read' });
+  });
+  if (textBatch.length) jobs.push(file(textBatch));
   await Promise.all(jobs);
+  for (const row of plan.unreadable) failures.push({ row, reason: 'nothing_to_read', final: true });
+
+  const failed = [...new Set([...failures.map((f) => f.row.shortcode), ...plan.waiting.map((r) => r.shortcode)])];
+  await recordFailures(env.supabaseUrl, caller, failures);
 
   if (verdicts.length) {
     const saved = await fetch(`${env.supabaseUrl}/rest/v1/rpc/apply_verdicts`, {
@@ -162,16 +175,43 @@ async function route(req: Request, env: Env): Promise<Response> {
 }
 
 /**
+ * A post this request could not index, and why. `final` gives up on it at once; a failure
+ * not `counted` (a rate limit) is not held against the post at all.
+ */
+interface Failure {
+  row: SortRow;
+  reason: 'nothing_to_read' | 'no_answer' | 'openai_error' | 'transcribe_failed';
+  final?: boolean;
+  counted?: false;
+}
+
+/** Saves failures on the posts. Logged, not fatal: the next run simply tries again. */
+async function recordFailures(url: string, caller: Caller, failures: Failure[]): Promise<void> {
+  const rows = failures
+    .filter((f) => f.counted !== false)
+    .map((f) => ({ shortcode: f.row.shortcode, reason: f.reason, final: f.final === true }));
+  if (!rows.length) return;
+  const res = await fetch(`${url}/rest/v1/rpc/record_index_failures`, {
+    method: 'POST',
+    headers: { ...caller, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_rows: rows }),
+  });
+  if (!res.ok) console.error(`record_index_failures ${res.status}: ${(await res.text()).slice(0, 300)}`);
+}
+
+/**
  * Transcribes reels and saves the transcripts, updating `rows` to match what the database
  * now holds. A reel too long to pay for, or with an address the server will not fetch, is
- * recorded as tried with nothing said, and never billed.
+ * recorded as tried with nothing said, and never billed. A reel OpenAI fails on is tried
+ * again on the next two runs, then filed without its words rather than held back forever.
  */
 async function transcribeReels(
   env: Env,
   caller: Caller,
   reels: SortRow[],
-): Promise<{ count: number; usd: number; rateLimited: boolean }> {
-  if (!reels.length) return { count: 0, usd: 0, rateLimited: false };
+): Promise<{ count: number; usd: number; rateLimited: boolean; failures: Failure[] }> {
+  const failures: Failure[] = [];
+  if (!reels.length) return { count: 0, usd: 0, rateLimited: false, failures };
   const outcomes = await Promise.all(
     reels.map((row): Promise<Transcribed> | Transcribed =>
       tooLong(row) || !isInstagramVideoUrl(row.video_url)
@@ -183,12 +223,19 @@ async function transcribeReels(
   let usd = 0;
   const writes: { row: SortRow; transcript: string | null }[] = [];
   outcomes.forEach((outcome, i) => {
-    if (outcome.kind === 'retry') return;
+    const row = reels[i]!;
+    if (outcome.kind === 'retry') {
+      if (outcome.status === 429) failures.push({ row, reason: 'transcribe_failed', counted: false });
+      else if (row.index_attempts >= MAX_TRANSCRIBE_ATTEMPTS - 1) writes.push({ row, transcript: '' });
+      else failures.push({ row, reason: 'transcribe_failed' });
+      return;
+    }
     if (outcome.kind === 'done' && outcome.seconds !== 0) usd += transcribeCostUsd(outcome.seconds);
-    writes.push({ row: reels[i]!, transcript: outcome.kind === 'done' ? outcome.text : null });
+    writes.push({ row, transcript: outcome.kind === 'done' ? outcome.text : null });
   });
   const rateLimited = outcomes.some((o) => o.kind === 'retry' && o.status === 429);
-  if (!writes.length) return { count: 0, usd, rateLimited };
+  const heard = outcomes.filter((o) => o.kind === 'done' && o.text !== '').length;
+  if (!writes.length) return { count: 0, usd, rateLimited, failures };
 
   const saved = await fetch(`${env.supabaseUrl}/rest/v1/rpc/set_transcripts`, {
     method: 'POST',
@@ -198,7 +245,8 @@ async function transcribeReels(
   if (!saved.ok) {
     // Paid for but not kept: the reels wait, and the next run transcribes them again.
     console.error(`set_transcripts ${saved.status}: ${(await saved.text()).slice(0, 300)}`);
-    return { count: 0, usd, rateLimited };
+    for (const { row } of writes) failures.push({ row, reason: 'transcribe_failed' });
+    return { count: 0, usd, rateLimited, failures };
   }
   const now = new Date().toISOString();
   for (const { row, transcript } of writes) {
@@ -206,7 +254,7 @@ async function transcribeReels(
     if (transcript !== row.transcript) row.embedded_at = null; // as reset_stale_embedding does
     row.transcript = transcript;
   }
-  return { count: writes.length, usd, rateLimited };
+  return { count: heard, usd, rateLimited, failures };
 }
 
 /** Embeds posts and saves the vectors. Returns how many were saved and what it cost. */

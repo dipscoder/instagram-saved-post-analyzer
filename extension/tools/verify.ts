@@ -33,10 +33,13 @@ import {
   combine,
   costUsd,
   decisionsBody,
+  MAX_POSTS,
   MIN_PROBABILITY,
   parseRequest,
   readDecisions,
   readSummaries,
+  salvageResults,
+  summaryBody,
 } from '../../supabase/functions/analyze/decide';
 import {
   changed,
@@ -56,7 +59,7 @@ import {
   readEmbeddings,
   vectorLiteral,
 } from '@saved-index/shared/embedding';
-import { needsPicture, signature, type FilingInput } from '@saved-index/shared/filing';
+import { needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
 import {
   cleanTranscript,
   isInstagramVideoUrl,
@@ -72,6 +75,8 @@ import labeled from '../../supabase/eval/labeled.json';
 import { score, verdictOf, type Labeled } from '../../supabase/eval/score';
 import {
   embeddingFields,
+  hasAnyText,
+  MAX_ATTEMPTS,
   MAX_SORT_POSTS,
   parseSortRequest,
   pickTranscribe,
@@ -957,7 +962,7 @@ console.log('\nserver sorting');
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
     duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
     category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
-    video_url: null, transcript: null, transcribed_at: null,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0,
     ...over,
   });
   const textual = row({ shortcode: 'T', caption: 'A slow Sunday walk along the canal, thinking about nothing much' });
@@ -1004,7 +1009,7 @@ console.log('\nanalysis v2');
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
     duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: true, thumbnail_format: 'webp',
     category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
-    video_url: null, transcript: null, transcribed_at: null, ...over,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0, ...over,
   });
   const thin = { caption: 'obsessed 😍 #interiors #home', hashtags: ['interiors', 'home'], altText: null };
   check('a caption of a few words needs the picture', needsPicture(thin));
@@ -1061,7 +1066,7 @@ console.log('\nreel transcripts');
     shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: true,
     duration_sec: 30, audio_track_name: null, categorized_at: null, thumbnail_stored: true, thumbnail_format: 'webp',
     category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
-    video_url: 'https://scontent.cdninstagram.com/v/reel.mp4?oe=1', transcript: null, transcribed_at: null, ...over,
+    video_url: 'https://scontent.cdninstagram.com/v/reel.mp4?oe=1', transcript: null, transcribed_at: null, index_attempts: 0, ...over,
   });
   check('a reel with a video and no transcript needs one', needsTranscript(row({})));
   check('a photo never needs a transcript', !needsTranscript(row({ is_video: false })));
@@ -1103,6 +1108,33 @@ console.log('\nreel transcripts');
       !isInstagramVideoUrl('https://scontent.cdninstagram.com:8443/x.mp4') &&
       !isInstagramVideoUrl('https://169.254.169.254/latest') &&
       !isInstagramVideoUrl(`https://a.cdninstagram.com/${'x'.repeat(4_000)}`));
+}
+
+console.log('\nindexing failures');
+{
+  const row = (over: Partial<SortRow>): SortRow => ({
+    shortcode: 'S1', handle: '@cafe.oshi', caption: '', hashtags: [], alt_text: null, is_video: false,
+    duration_sec: null, audio_track_name: null, categorized_at: null, thumbnail_stored: false, thumbnail_format: null,
+    category: null, subcategory: null, tags: [], summary: null, embedded_at: null,
+    video_url: null, transcript: null, transcribed_at: null, index_attempts: 0, ...over,
+  });
+  const caption = 'A slow Sunday walk along the canal, thinking about nothing much';
+  const plan = planSort([row({ shortcode: 'G', caption, index_attempts: MAX_ATTEMPTS }), row({ shortcode: 'T', caption, index_attempts: 2 })]);
+  check('a post that failed three times is never sent again', plan.skipped.map((r) => r.shortcode).join() === 'G' && plan.text.map((r) => r.shortcode).join() === 'T', plan);
+  const filed = planSort([row({ shortcode: 'F', caption, index_attempts: MAX_ATTEMPTS, categorized_at: 'x' })]);
+  check('a filed post is still embedded whatever its failures', filed.embedOnly.length === 1);
+  check('a given-up reel is not transcribed',
+    pickTranscribe([row({ is_video: true, video_url: 'https://a.cdninstagram.com/1.mp4', index_attempts: MAX_ATTEMPTS })]).length === 0);
+  check('a thin post whose picture cannot be read still has its words', hasAnyText(row({ caption: 'obsessed' })) && !hasAnyText(row({})));
+
+  check('the summary call has room for a full batch to answer',
+    (summaryBody({ posts: Array.from({ length: MAX_POSTS }, (_, id) => ({ id, text: 'x' })) }) as { max_output_tokens: number }).max_output_tokens >= 100 * MAX_POSTS);
+  const cut = '{"results":[{"id":0,"category":"Travel","tags":["a{b"],"summary":"one \\"quoted\\" }"},{"id":1,"category":"Design","summary":"two"},{"id":2,"categ';
+  const saved = salvageResults(cut);
+  check('an answer cut off mid-post keeps every complete post before the cut',
+    saved.map((r) => r.id).join() === '0,1' && saved[0]?.summary === 'one "quoted" }', saved);
+  check('a cut-off answer is read through readSummaries', readSummaries({ output_text: cut }).length === 2);
+  check('the quote covers a post filed alone with its picture', SERVER_QUOTE_USD_PER_POST >= 0.0011);
 }
 
 console.log('\nfiling eval');

@@ -27,11 +27,13 @@ import { classifyByRules, RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/
 /** One request's posts, and of those, how many may need a picture. */
 export const MAX_SORT_POSTS = 25;
 export const MAX_VISION_POSTS = 4;
+/** Failed attempts after which a post is left out until it changes or the user retries. */
+export const MAX_ATTEMPTS = 3;
 
 /** The post columns the function reads. */
 export const SORT_COLUMNS =
   'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
-  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at';
+  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at,index_attempts';
 
 export interface SortRow {
   shortcode: string;
@@ -53,6 +55,8 @@ export interface SortRow {
   video_url: string | null;
   transcript: string | null;
   transcribed_at: string | null;
+  /** Failed indexing attempts since the post last changed; at MAX_ATTEMPTS it is left out. */
+  index_attempts: number;
 }
 
 export class BadSortRequest extends Error {}
@@ -86,7 +90,18 @@ export function toInput(row: SortRow): FilingInput {
  * signal of what it is about.
  */
 export function pickTranscribe(rows: SortRow[]): SortRow[] {
-  return rows.filter(needsTranscript).slice(0, MAX_TRANSCRIBE_POSTS);
+  return rows.filter((r) => needsTranscript(r) && !givenUp(r)).slice(0, MAX_TRANSCRIBE_POSTS);
+}
+
+/** Failed often enough that only a change to the post, or the user, brings it back. */
+export function givenUp(row: Pick<SortRow, 'index_attempts'>): boolean {
+  return (row.index_attempts ?? 0) >= MAX_ATTEMPTS;
+}
+
+/** Any words at all to file from, when the picture a thin post needed cannot be read. */
+export function hasAnyText(row: SortRow): boolean {
+  const p = toInput(row);
+  return p.caption.trim() !== '' || p.hashtags.length > 0 || (p.altText ?? '').trim() !== '' || (p.transcript ?? '') !== '';
 }
 
 export interface SortPlan {
@@ -102,6 +117,8 @@ export interface SortPlan {
   unreadable: SortRow[];
   /** Reels still waiting for a transcript: left for a later request rather than filed blind. */
   waiting: SortRow[];
+  /** Failed too often: left out, and never billed again, until the post changes. */
+  skipped: SortRow[];
 }
 
 /**
@@ -110,8 +127,12 @@ export interface SortPlan {
  * so a request sent twice bills nothing the second time.
  */
 export function planSort(rows: SortRow[]): SortPlan {
-  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [] };
+  const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [], skipped: [] };
   for (const row of rows) {
+    if (givenUp(row) && !row.categorized_at) {
+      plan.skipped.push(row);
+      continue;
+    }
     if (needsTranscript(row)) {
       plan.waiting.push(row);
       continue;

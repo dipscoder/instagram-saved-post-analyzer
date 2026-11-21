@@ -386,6 +386,10 @@ before being acted on.
 - [x] Transcripts are in keyword search, in the meaning embedding, and in the post panel
 - [x] The quote adds each reel's transcription by its length; the Index bar counts reels
       still to transcribe
+- [x] Indexing failures are recorded on the post with a reason; three failures and Index
+      leaves it out until it changes or the user presses Try again
+- [x] A full batch no longer runs out of output tokens mid-answer (and a cut-off answer
+      keeps every complete post); one failed batch no longer ends the whole run
 - [ ] Several frames per reel rather than only the cover (needs video decoding on the server)
 
 ## Not done — needs the user

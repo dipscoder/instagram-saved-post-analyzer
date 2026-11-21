@@ -50,6 +50,8 @@ export interface Facets {
   unembedded: number;
   /** Filed and searchable, but reels whose words are not transcribed yet. */
   untranscribed: number;
+  /** Never indexed, and failed three times: left out of Index until retried. */
+  failed: number;
   categories: Facet[];
   collections: Facet[];
 }
@@ -116,18 +118,19 @@ export async function fetchFacets(): Promise<Facets> {
   type FacetRow = { kind: string; key: string; count: number };
   const rows: FacetRow[] = rpc.error ? await facetRowsByScan() : ((rpc.data ?? []) as FacetRow[]);
 
-  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, unembedded: 0, untranscribed: 0, categories: [], collections: [] };
+  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, unembedded: 0, untranscribed: 0, failed: 0, categories: [], collections: [] };
   for (const row of rows) {
     const count = Number(row.count);
     if (row.kind === 'total') facets.total = count;
     else if (row.kind === 'unsorted') facets.unsorted = count;
     else if (row.kind === 'unembedded') facets.unembedded = count;
     else if (row.kind === 'untranscribed') facets.untranscribed = count;
+    else if (row.kind === 'failed') facets.failed = count;
     else if (row.kind === 'unsure') facets.needsLook += count;
     else if (row.kind === 'category') facets.categories.push({ key: row.key, label: row.key, count });
     else if (row.kind === 'collection') facets.collections.push({ key: row.key, label: nameOf.get(row.key) ?? 'Collection', count });
   }
-  facets.needsLook += facets.unsorted;
+  facets.needsLook += facets.unsorted + facets.failed;
   facets.categories.sort((a, b) => a.label.localeCompare(b.label));
   facets.collections.sort((a, b) => a.label.localeCompare(b.label));
   return facets;
@@ -213,11 +216,28 @@ export function instagramUrl(post: Pick<Post, 'permalink' | 'shortcode'>): strin
   return `https://www.instagram.com/p/${encodeURIComponent(post.shortcode)}/`;
 }
 
-/**
- * What is said in a reel, read when its panel opens rather than with every grid page:
- * a transcript can run to thousands of words. Null when there is none.
- */
-export async function fetchTranscript(shortcode: string): Promise<string | null> {
-  const { data } = await supabase.from('posts').select('transcript').eq('shortcode', shortcode).maybeSingle<{ transcript: string | null }>();
-  return data?.transcript || null;
+/** Why a post could not be indexed, as the post panel says it. */
+export const INDEX_ERRORS: Record<string, string> = {
+  nothing_to_read: 'There is no caption and no picture to go on.',
+  no_answer: 'The model did not answer for this post.',
+  openai_error: 'OpenAI did not respond.',
+  transcribe_failed: 'The reel could not be transcribed.',
+};
+
+/** What a post's panel reads when it opens, rather than with every grid page. */
+export interface PostDetails {
+  /** What is said in a reel; a transcript can run to thousands of words. */
+  transcript: string | null;
+  /** Why the last indexing attempt failed, and how many have, while it is not indexed. */
+  indexError: string | null;
+  indexAttempts: number;
+}
+
+export async function fetchDetails(shortcode: string): Promise<PostDetails> {
+  const { data } = await supabase
+    .from('posts')
+    .select('transcript, index_error, index_attempts')
+    .eq('shortcode', shortcode)
+    .maybeSingle<{ transcript: string | null; index_error: string | null; index_attempts: number | null }>();
+  return { transcript: data?.transcript || null, indexError: data?.index_error ?? null, indexAttempts: data?.index_attempts ?? 0 };
 }

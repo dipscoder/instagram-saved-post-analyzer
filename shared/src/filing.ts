@@ -214,7 +214,7 @@ function text(value: unknown): string {
 
 /**
  * The most sorting one post on the account's server costs, rounded up, for the quote
- * shown before a run. A post filed alone with its picture costs about $0.0006; one in a
+ * shown before a run. A post filed alone with its picture costs at most about $0.0011; one in a
  * batch of 25 costs a fraction of that, and keyword rules cost nothing.
  */
-export const SERVER_QUOTE_USD_PER_POST = 0.0008;
+export const SERVER_QUOTE_USD_PER_POST = 0.0012;
