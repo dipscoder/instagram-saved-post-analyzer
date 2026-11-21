@@ -14,6 +14,8 @@ done and what remains, and `README.md` is the user-facing guide. This file is th
 version plus the things that are easy to break without noticing.
 
 ```bash
+npm run app          # install, build the extension, start the web app (localhost:3000)
+npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
 npm run verify       # 314 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions

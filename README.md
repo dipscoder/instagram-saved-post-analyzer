@@ -34,7 +34,7 @@ The build prints the exact folder to load. Then in Chrome:
    you paste the path the build printed.
 
 Needs **Chrome 111 or newer** (that's when manifest-declared `world: "MAIN"` content
-scripts landed). Run the web app with `npm run dev:web`.
+scripts landed). Run everything locally with `npm run app` (installs, builds the extension into `extension/dist/`, starts the web app on http://localhost:3000); deploy the server with `npm run deploy`.
 
 `npm run watch` rebuilds on save; hit the reload icon on the extension card to pick
 changes up.

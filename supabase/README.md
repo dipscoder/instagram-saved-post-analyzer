@@ -51,15 +51,15 @@ Security applies and it needs no service-role key.
 | `OPENAI_API_KEY` | The OpenAI key that pays for analysis. Required. |
 | `DAILY_CAP_USD` | Spend limit per user per UTC day. Optional, default `1`. |
 
-**Deploying**, from the repository root:
+**Deploying**, from the repository root, after running any new migration:
 
 ```bash
-npm run build:functions        # bundles shared/ into functions/*/dist/
-npx supabase login
-npx supabase functions deploy analyze --project-ref siwmxcsrzdvvtouolvph --use-api
-npx supabase functions deploy sort --project-ref siwmxcsrzdvvtouolvph --use-api
-npx supabase functions deploy search --project-ref siwmxcsrzdvvtouolvph --use-api
+npm run deploy      # installs, bundles shared/ into functions/*/dist/, deploys every function
 ```
+
+It deploys every function listed in `config.toml` to its `project_id`, and lists the newest
+migrations at the end as a reminder. The first time on a computer, run `npx supabase login`
+once.
 
 `search` needs the `20261120090000_hybrid_search.sql` migration (pgvector, the full-text
 document, `search_posts`). Until it is deployed the web app falls back to keyword search.
