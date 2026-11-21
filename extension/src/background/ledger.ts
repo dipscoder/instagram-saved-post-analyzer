@@ -1,45 +1,23 @@
 /**
- * The ledger: everything the user has already paid a model to say.
+ * The ledger: every verdict this browser has, which is work that was paid for.
  *
  * The two durable content stores, `posts` and this one, look similar and are governed by
- * opposite rules, which is the whole point of separating them (`indexQueue` is transient
- * run state). A post record is a *view of what is currently
- * saved* — free to rebuild, because scrolling the grid again reproduces it exactly. A
- * verdict is *work that was bought* — a summary and a category that cost tokens, and that
- * no amount of scrolling brings back. Storing the second inside the first meant every
- * operation that legitimately wanted to discard the view discarded the purchase with it:
+ * opposite rules, which is the whole point of separating them. A post record is a *view
+ * of what is currently saved* — free to rebuild, because scrolling the grid again
+ * reproduces it exactly. A verdict is *work that was bought* — a summary and a category
+ * that cost tokens, and that no amount of scrolling brings back. So `prune()` may forget
+ * a post you unsaved, and nothing in db.ts may delete from here (invariant 4).
  *
- *   - `prune()` hard-deleted records for posts you had unsaved. Instagram's save button is
- *     a toggle; re-saving something billed for it a second time.
- *   - `reindex` nulled every categorisation field and re-ran the whole library, which is
- *     the honest behaviour when the *taxonomy* changed and pure waste when it hadn't.
- *   - A cleared profile, an evicted database, or loading the unpacked extension from a
- *     different folder — which changes the extension id, and therefore the origin the
- *     database is keyed to — started from zero.
- *
- * So verdicts live here, in their own store, and nothing in db.ts may delete from it.
- *
- * **Staleness is a question this store can answer.** Each verdict records a hash of the
- * exact text that was sent to the model and the hash of the taxonomy it was filed against;
- * free rule verdicts additionally identify the rule strategy that produced them.
- * "Is this still valid?" is then a comparison rather than a guess, which is what makes a
- * re-index cost only the posts that actually changed. Without those two fields the only
- * available answers are "re-spend everything" and "serve an answer from a prompt that no
- * longer exists", and this file exists to avoid choosing between them.
- *
- * The store itself is local. Portability across machines is the account, when signed in
- * (sync.ts mirrors every verdict and pulls them back with `merge`), or a file: `exportAll`
- * writes one, `importAll` reads one, and the popup does both without asking for a single
- * extra permission, because an extension page can hand the browser a Blob directly.
+ * Indexing runs on the server now. This store holds what an older build bought with the
+ * user's own key, and every verdict the account has filed since, which sync.ts pulls down
+ * with `merge` so the posts it uploads never carry an older category over a newer one.
+ * Each verdict still records the hash of the exact text the model was shown and the
+ * taxonomy it was filed against, because the account's ledger keys on them.
  */
 
-import { hashText } from '@saved-index/shared/hash';
-import { RULES_HASH, TAXONOMY_HASH } from '@saved-index/shared/taxonomy';
+import { LEDGER_VERSION } from '@saved-index/shared/filing';
 import type { PostRecord } from '../types';
 import { LEDGER_STORE, openDb } from './db';
-
-import { LEDGER_VERSION } from '@saved-index/shared/filing';
-export { LEDGER_VERSION };
 
 export interface Verdict {
   /** Primary key, shared with the post it describes. */
@@ -64,47 +42,6 @@ export interface Verdict {
   ledgerVersion: number;
 }
 
-/**
- * A verdict is worth reusing when it was produced from the same input against the same
- * taxonomy. Anything else and we genuinely do not know whether the answer still holds,
- * so we pay for a new one rather than serve a stale one confidently.
- *
- * `modelUsed: 'skipped'` is deliberately *not* reusable. It records that a thumbnail
- * could not be fetched, which is usually an expired CDN URL rather than a fact about the
- * post — treating it as a permanent verdict is how a post gets stuck as Uncategorized
- * forever. It is still stored, so the queue does not spin on it within a run.
- */
-export function isFresh(v: Verdict | undefined, inputHash: string): v is Verdict {
-  return (
-    v !== undefined &&
-    v.modelUsed !== 'skipped' &&
-    v.inputHash === inputHash &&
-    v.taxonomyHash === TAXONOMY_HASH &&
-    (v.modelUsed !== 'rules' || v.rulesHash === RULES_HASH)
-  );
-}
-
-/** The digest of one post's model-visible text. `signature` comes from filing.ts. */
-export function inputHash(signature: string): string {
-  return hashText(signature);
-}
-
-export function verdictFrom(post: PostRecord, signature: string): Verdict {
-  return {
-    shortcode: post.shortcode,
-    category: post.category,
-    subcategory: post.subcategory,
-    tags: post.tags,
-    summary: post.summary,
-    modelUsed: post.modelUsed ?? 'unknown',
-    categorizedAt: post.categorizedAt ?? Date.now(),
-    inputHash: inputHash(signature),
-    taxonomyHash: TAXONOMY_HASH,
-    rulesHash: RULES_HASH,
-    ledgerVersion: LEDGER_VERSION,
-  };
-}
-
 /** Apply a stored verdict to a post. The post's own captured fields are untouched. */
 export function applyVerdict(post: PostRecord, v: Verdict): PostRecord {
   return {
@@ -120,14 +57,8 @@ export function applyVerdict(post: PostRecord, v: Verdict): PostRecord {
 
 // --- storage ----------------------------------------------------------------
 //
-// Held resident for the same reason the post cache is: the hydrate step asks about every
-// pending post at once, and 500 individual `get` round-trips per round is the kind of cost
-// that only shows up on the libraries big enough to care about.
-
-// The promise is cached rather than the map, for the reason set out in db.ts — and here
-// the cost of getting it wrong is measured in dollars: a verdict written into an orphaned
-// map is a verdict `get` cannot find, so the post goes back to the model and is paid for
-// a second time.
+// Held resident, and the promise is cached rather than the map, for the reason set out in
+// db.ts: a verdict written into an orphaned map is one `merge` cannot see.
 let cache: Promise<Map<string, Verdict>> | null = null;
 
 function resident(): Promise<Map<string, Verdict>> {
@@ -148,33 +79,7 @@ function resident(): Promise<Map<string, Verdict>> {
   return cache;
 }
 
-/** One resident-cache lookup for a batch, rather than hundreds of awaited microtasks. */
-export async function getMany(shortcodes: string[]): Promise<Map<string, Verdict>> {
-  const live = await resident();
-  const out = new Map<string, Verdict>();
-  for (const shortcode of shortcodes) {
-    const verdict = live.get(shortcode);
-    if (verdict) out.set(shortcode, verdict);
-  }
-  return out;
-}
-
-export async function countStale(
-  entries: { shortcode: string; inputHash: string }[],
-): Promise<number> {
-  const live = await resident();
-  let stale = 0;
-  for (const entry of entries) {
-    if (!isFresh(live.get(entry.shortcode), entry.inputHash)) stale++;
-  }
-  return stale;
-}
-
-export async function count(): Promise<number> {
-  return (await resident()).size;
-}
-
-export async function putMany(verdicts: Verdict[]): Promise<void> {
+async function putMany(verdicts: Verdict[]): Promise<void> {
   if (!verdicts.length) return;
   const db = await openDb();
   const live = await resident();
@@ -208,45 +113,6 @@ export async function clearAll(): Promise<void> {
   cache = null;
 }
 
-// --- portability ------------------------------------------------------------
-
-export interface LedgerFile {
-  kind: 'saved-index-ledger';
-  ledgerVersion: number;
-  taxonomyHash: string;
-  exportedAt: number;
-  verdicts: Verdict[];
-}
-
-export async function exportAll(): Promise<LedgerFile> {
-  return {
-    kind: 'saved-index-ledger',
-    ledgerVersion: LEDGER_VERSION,
-    taxonomyHash: TAXONOMY_HASH,
-    exportedAt: Date.now(),
-    verdicts: await all(),
-  };
-}
-
-/**
- * Merge a ledger file in. Newer wins per shortcode, so importing the same file twice is a
- * no-op and importing two machines' files into each other converges — there is no
- * ordering the user has to get right.
- *
- * Every field is checked rather than trusted. The file is user-supplied, it may have been
- * edited or truncated, and a malformed verdict here would surface later as a corrupt row
- * in the library with no obvious cause.
- */
-export async function importAll(raw: unknown): Promise<{ imported: number; skipped: number }> {
-  const file = raw as Partial<LedgerFile> | null;
-  if (!file || file.kind !== 'saved-index-ledger' || !Array.isArray(file.verdicts)) {
-    throw new Error('That file is not a Saved Index ledger export.');
-  }
-  const valid = file.verdicts.map(parseVerdict).filter((v): v is Verdict => v !== null);
-  const imported = await merge(valid);
-  return { imported, skipped: file.verdicts.length - imported };
-}
-
 /** Stores each verdict that is newer than the one on file. Returns how many were stored. */
 export async function merge(verdicts: Verdict[]): Promise<number> {
   const live = await resident();
@@ -265,7 +131,7 @@ export async function all(): Promise<Verdict[]> {
 
 const MAX_TEXT = 2000;
 
-/** A verdict from a file or the account, checked field by field; null if unusable. */
+/** A verdict from the account, checked field by field; null if unusable. */
 export function parseVerdict(raw: unknown): Verdict | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const v = raw as Record<string, unknown>;

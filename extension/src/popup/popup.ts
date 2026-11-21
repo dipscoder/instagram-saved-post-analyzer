@@ -9,9 +9,9 @@
  * Credentials go straight to the worker and are never kept here.
  */
 
-import { send, subscribe, type AccountState, type SafeSettings, type Stats } from '../messaging';
+import { send, subscribe, type AccountState } from '../messaging';
 import { WEB_APP_URL } from '../config';
-import type { Theme } from '../types';
+import type { Settings, Theme } from '../types';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -34,8 +34,7 @@ async function init(): Promise<void> {
   wire();
   setAccountMode(accountMode);
   try {
-    const { settings } = await send<{ settings: SafeSettings }>({ type: 'settings:get' });
-    applyTheme(settings.theme);
+    applyTheme((await send<Settings>({ type: 'settings:get' })).theme);
     account = await send<AccountState>({ type: 'account:get' });
   } catch {
     // Both screens are hidden until one is switched on, so say so rather than show nothing.
@@ -47,7 +46,7 @@ async function init(): Promise<void> {
   subscribe((msg) => {
     if (msg.type === 'settings') applyTheme(msg.settings.theme);
     else if (msg.type === 'harvest') finding = msg.action === 'start';
-    else if (msg.type === 'progress') found = msg.progress.total;
+    else if (msg.type === 'found') found = msg.total;
     else return;
     render();
   });
@@ -71,7 +70,7 @@ function wire(): void {
 
 async function refresh(): Promise<void> {
   try {
-    found = (await send<Stats>({ type: 'posts:stats' })).total;
+    found = await send<number>({ type: 'posts:count' });
   } catch {
     setStatus('homeStatus', 'bad', 'Could not reach the extension. Reopen this popup.');
   }

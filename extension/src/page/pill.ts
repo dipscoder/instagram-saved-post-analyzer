@@ -11,11 +11,11 @@
  * re-renders never tear it out.
  */
 
-import { send, subscribe, type Broadcast, type SafeSettings, type Stats } from '../messaging';
+import { send, subscribe, type Broadcast } from '../messaging';
 import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed, type SavedCollection } from '../routes';
 import { WEB_APP_URL } from '../config';
-import type { Theme } from '../types';
+import type { Settings, Theme } from '../types';
 import { pillButton, pillStatus, type PillState } from './flow';
 import { styles } from './pill.css';
 
@@ -66,8 +66,8 @@ export function mountPill(where: SavedCollection): void {
   document.body.appendChild(host);
 
   unsubscribe = subscribe(onBroadcast);
-  void send<{ settings: SafeSettings }>({ type: 'settings:get' })
-    .then((res) => applyTheme(res.settings.theme))
+  void send<Settings>({ type: 'settings:get' })
+    .then((settings) => applyTheme(settings.theme))
     .catch(() => {});
   void refresh();
   render();
@@ -129,17 +129,17 @@ function onBroadcast(msg: Broadcast): void {
     else startFinding();
     return;
   }
-  if (msg.type === 'progress') {
-    state.total = msg.progress.total;
+  if (msg.type === 'found') {
+    state.total = msg.total;
     render();
   }
 }
 
 async function refresh(): Promise<void> {
   try {
-    state.total = (await send<Stats>({ type: 'posts:stats' })).total;
+    state.total = await send<number>({ type: 'posts:count' });
   } catch {
-    // Worker waking up; the next progress push fills it in.
+    // Worker waking up; the next push fills it in.
   }
   render();
 }

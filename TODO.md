@@ -365,8 +365,7 @@ before being acted on.
 - [x] The extension never indexes on its own; indexing runs from the web app on the server
 - [x] Web app: Index bar on every view, Settings sheet (account, spend, Clear library)
 - [x] `library_state.cleared_at`: a clear in the web app empties each extension's copy on its next sync
-- [ ] Delete the extension's now-dormant indexing code (categorizer, providers, own-key
-      settings, ledger import/export, run queue) once server indexing has run live
+- [x] Delete the extension's now-dormant indexing code: see Phase 42
 
 ## Phase 40 — Analysis v2: search by meaning, better vision, an eval
 - [x] Embeddings (text-embedding-3-small, 512 dims) on every indexed post, written by `sort`
@@ -394,6 +393,17 @@ before being acted on.
       keeps every complete post); one failed batch no longer ends the whole run
 - [ ] Several frames per reel rather than only the cover (needs video decoding on the server)
 
+## Phase 42 — The extension only collects
+- [x] Removed the categoriser, the OpenAI adapter, spend metering, the own-key settings, the
+      local run queue, local search and ledger import/export (about 1,900 lines net)
+- [x] Settings v3 keeps only the theme and video controls, and deletes the OpenAI key an
+      older build stored; DB v9 drops the `indexQueue` store
+- [x] `api.openai.com` is gone from the manifest's host permissions
+- [x] Kept: capture, Find new posts, Remove for unsaved posts, sync, thumbnails, the ledger
+      pull, and following Clear library
+- [x] Checked by loading the old build into a browser profile, then the new one: posts and
+      verdicts survive, the key and the queue are gone
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,
@@ -411,12 +421,8 @@ before being acted on.
       cannot let an older sweep stop a newer one
 - [x] Verification expanded to 145 checks for carousel scoping, ambiguous rules,
       model-output coercion, current model availability, price schedules, and request contracts
-- [ ] Virtualised grid: the library renders up to 200 rows at a time, and now skips the
-      rebuild when nothing changed — but past a few thousand rows it still wants windowing
 - [ ] The resident cache (Phase 28) removed the per-keystroke full read, at the cost of
       holding ~30 MB for a 20k library. An index-backed cursor would trade that back
-- [ ] Offline: the `offline` phase is now set on a network failure, but nothing yet watches
-      `navigator.onLine` to resume automatically
 - [x] Export the library — done as the ledger export in Phase 26 (verdicts, not posts;
       the posts themselves are reproducible by scrolling)
 - [ ] Collections — Instagram's saved posts can be grouped; currently flattened

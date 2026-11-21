@@ -19,15 +19,14 @@ import {
 } from '@saved-index/shared/taxonomy';
 import { hashText } from '@saved-index/shared/hash';
 import { searchFilters, searchTerms } from '@saved-index/shared/search';
-import { applyVerdict, isFresh, parseVerdict, verdictFrom, type Verdict } from '../src/background/ledger';
-import { matchesSearch, mergeCaptured, tokenize, upgrade } from '../src/background/db';
+import { applyVerdict, parseVerdict, type Verdict } from '../src/background/ledger';
+import { mergeCaptured, upgrade } from '../src/background/db';
 import { reserveRanks } from '../src/background/order';
 import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
-import { IDLE_PROGRESS, toRecord } from '../src/types';
+import { toRecord } from '../src/types';
 import { pillButton, pillStatus, type PillState } from '../src/page/flow';
-import { listCollections, validCollection } from '../src/background/collections';
-import { applyResult } from '../src/background/filing';
+import { validCollection } from '../src/background/collections';
 import {
   BadRequest,
   combine,
@@ -59,9 +58,8 @@ import {
   readEmbeddings,
   vectorLiteral,
 } from '@saved-index/shared/embedding';
-import { needsPicture } from '@saved-index/shared/filing';
 import { CORRECTION_TARGETS, evalCases, isCorrectionTarget } from '@saved-index/shared/corrections';
-import { needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
+import { filedFromResult, needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
 import {
   cleanTranscript,
   isInstagramVideoUrl,
@@ -86,9 +84,6 @@ import {
   verdictRow,
   type SortRow,
 } from '../../supabase/functions/sort/plan';
-import { signature as extensionSignature } from '../src/background/filing';
-import { estimateUsd, PROVIDERS } from '../src/background/providers/index';
-import { usesResponsesApi } from '../src/background/providers/openai';
 import {
   DEFAULT_FRAME_SECONDS,
   frameDuration,
@@ -243,40 +238,6 @@ console.log('\nextractPosts — saved scope (the reported "it indexed posts I ne
     extractPosts(rest, 'any').length === 1);
 }
 
-console.log('\nsearch');
-{
-  const post = toRecord({
-    shortcode: 'C8xK2mLp3qR',
-    permalink: 'https://www.instagram.com/p/C8xK2mLp3qR/',
-    handle: '@cafe.oshi',
-    caption: 'Miso butter pasta in 15 minutes #recipe #weeknight',
-    hashtags: ['recipe', 'weeknight'],
-    thumbnailUrl: '',
-    isVideo: true,
-    durationSec: 47,
-    audioTrackName: 'Sunset — Nils',
-    altText: 'A bowl of noodles on a wooden table',
-    postedAt: null,
-  });
-  const indexed = { ...post, summary: 'Recipe for creamy pasta', category: 'Food & Recipes', subcategory: 'Dinner', tags: ['quick'] };
-
-  const hit = (q: string) => matchesSearch(indexed, tokenize(q));
-
-  check('single term', hit('pasta'));
-  // The old single-substring match failed this: the words are in the other order.
-  check('words match in any order', hit('pasta recipe'));
-  check('every word has to match', !hit('pasta risotto'));
-  check('finds by subcategory', hit('dinner'));
-  check('finds by hashtag, with or without the #', hit('weeknight') && hit('#weeknight'));
-  check('finds by alt text', hit('noodles'));
-  check('finds by audio track', hit('nils'));
-  check('finds by handle', hit('oshi'));
-  check('empty query matches everything', hit('') && hit('   '));
-
-  // An uncategorised post is still findable by what Instagram gave us.
-  check('works before categorisation', matchesSearch(post, tokenize('miso butter')));
-}
-
 console.log('\nclassifyByRules');
 const food = classifyByRules({
   caption: 'Miso butter pasta, preheat the oven, 2 tbsp miso',
@@ -309,10 +270,9 @@ console.log('\nmodel result validation');
     hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null,
     audioTrackName: null, altText: null, postedAt: null,
   });
-  const missingConfidence = applyResult(
+  const missingConfidence = filedFromResult(
     post,
     { id: 0, category: 'Food & Recipes', tags: [' Pasta ', 'pasta', 'X'.repeat(80)], summary: '  Useful   pasta  ' },
-    'test-model',
   );
   check('missing confidence never files a guessed category', missingConfidence.category === null);
   check('tags are normalised, deduped and bounded',
@@ -320,10 +280,9 @@ console.log('\nmodel result validation');
     missingConfidence.tags);
   check('summary whitespace is normalised', missingConfidence.summary === 'Useful pasta');
 
-  const confident = applyResult(
+  const confident = filedFromResult(
     post,
     { id: 0, category: 'food and recipes', subcategory: 'recipe', confidence: 'medium' },
-    'test-model',
   );
   check('medium-confidence closed vocabulary is accepted',
     confident.category === 'Food & Recipes' && confident.subcategory === 'Recipe');
@@ -407,37 +366,24 @@ console.log('\nsave order');
 console.log('\nsettings migration');
 {
   const fresh = migrate(undefined);
-  check('fresh install gets the overlay bar',
-    fresh.scrubberSkin === 'overlay' && fresh.settingsVersion === 2, fresh.scrubberSkin);
+  check('fresh install gets the overlay bar and the light theme',
+    fresh.scrubberSkin === 'overlay' && fresh.theme === 'light' && fresh.settingsVersion === 3, fresh);
 
-  // The reported bug: a profile created when 'native' was the default kept it, and
-  // native controls are the ones Instagram's click-catcher swallows.
-  const legacyNative = migrate({ scrubberSkin: 'native', apiKey: 'sk-keep-me' } as never);
-  check('v1 profile on native is switched over',
-    legacyNative.scrubberSkin === 'overlay', legacyNative.scrubberSkin);
-  check('migration touches nothing else',
-    legacyNative.apiKey === 'sk-keep-me', legacyNative.apiKey);
-
-  check('legacy "thin" still maps to overlay',
-    migrate({ scrubberSkin: 'thin' } as never).scrubberSkin === 'overlay');
-
+  // A profile created when 'native' was the default kept it, and native controls are the
+  // ones Instagram's click-catcher swallows.
+  check('v1 profile on native is switched over', migrate({ scrubberSkin: 'native' } as never).scrubberSkin === 'overlay');
+  check('legacy "thin" still maps to overlay', migrate({ scrubberSkin: 'thin', settingsVersion: 2 } as never).scrubberSkin === 'overlay');
   // Once migrated, the toggle has to win — otherwise native becomes unreachable.
-  const chosen = migrate({ scrubberSkin: 'native', settingsVersion: 2 } as never);
-  check('a deliberate native choice survives', chosen.scrubberSkin === 'native', chosen.scrubberSkin);
+  check('a deliberate native choice survives', migrate({ scrubberSkin: 'native', settingsVersion: 2 } as never).scrubberSkin === 'native');
+  check('idempotent', JSON.stringify(migrate(migrate({ scrubberSkin: 'native', theme: 'dark' } as never))) === JSON.stringify(migrate({ scrubberSkin: 'native', theme: 'dark' } as never)));
 
-  check('idempotent', migrate(migrate({ scrubberSkin: 'native' } as never)).scrubberSkin === 'overlay');
-
-  // Anthropic, Gemini and OpenRouter were removed. Their keys mean nothing to OpenAI.
-  const removed = migrate({ provider: 'anthropic', model: 'claude-haiku-4-5', apiKey: 'sk-ant-old' } as never);
-  check('a removed provider falls back to OpenAI',
-    removed.provider === 'openai' && removed.model === 'gpt-5.6-luna', removed);
-  check('a removed provider\'s key is dropped', removed.apiKey === '', removed.apiKey);
-  check('an OpenAI key survives migration',
-    migrate({ provider: 'openai', apiKey: 'sk-keep-me' } as never).apiKey === 'sk-keep-me');
-
-  check('the theme is light until you switch it', fresh.theme === 'light');
   check('a dark choice survives migration', migrate({ theme: 'dark', settingsVersion: 2 } as never).theme === 'dark');
   check('an unknown theme falls back to light', migrate({ theme: 'sepia' } as never).theme === 'light');
+
+  // The extension stopped indexing. A key nothing reads must not stay in the browser.
+  const old = migrate({ provider: 'openai', model: 'gpt-5.6-luna', apiKey: 'sk-proj-old', autoIndex: true, theme: 'dark', settingsVersion: 2 } as never);
+  check('an older build\'s OpenAI key is dropped', !('apiKey' in old) && !JSON.stringify(old).includes('sk-'), old);
+  check('only the appearance settings remain', Object.keys(old).sort().join() === 'scrubberSkin,settingsVersion,theme' && old.theme === 'dark', old);
 }
 
 console.log('\nroute fences');
@@ -529,7 +475,7 @@ console.log('\ncategory normalisation');
   check('free text is refused', normalizeSubcategory('Food & Recipes', 'cooking tutorial') === null);
 }
 
-console.log('\nledger freshness');
+console.log('\nverdicts from the account');
 {
   const post = toRecord({
     shortcode: 'C8xK2mLp3qR',
@@ -544,26 +490,13 @@ console.log('\nledger freshness');
     altText: null,
     postedAt: 1722200000000,
   });
-  const banked: Verdict = verdictFrom(
-    { ...post, category: 'Food & Recipes', summary: 'Miso butter pasta', modelUsed: 'rules', categorizedAt: 1 },
-    'signature-v1',
-  );
-
-  check('a matching verdict is reused', isFresh(banked, hashText('signature-v1')));
-  check('a changed caption is not', !isFresh(banked, hashText('signature-v2')));
-  check('a changed taxonomy is not', !isFresh({ ...banked, taxonomyHash: 'stale' }, hashText('signature-v1')));
-  check('an old rule strategy is not reused',
-    !isFresh({ ...banked, rulesHash: 'stale' }, hashText('signature-v1')));
-  check('a paid verdict survives a rule-only change',
-    isFresh({ ...banked, modelUsed: 'test-model', rulesHash: 'stale' }, hashText('signature-v1')));
-  check('nothing on file is not', !isFresh(undefined, hashText('signature-v1')));
-  // A skipped post is almost always an expired thumbnail rather than a fact about the
-  // post, so re-indexing has to be allowed to try again.
-  check('a skipped verdict is never reused',
-    !isFresh({ ...banked, modelUsed: 'skipped' }, hashText('signature-v1')));
-
+  const banked: Verdict = {
+    shortcode: post.shortcode, category: 'Food & Recipes', subcategory: null, tags: ['pasta'],
+    summary: 'Miso butter pasta', modelUsed: 'gpt-5.6-luna', categorizedAt: 1, inputHash: 'h',
+    taxonomyHash: TAXONOMY_HASH, rulesHash: RULES_HASH, ledgerVersion: 2,
+  };
   const restored = applyVerdict(post, banked);
-  check('applying a verdict fills the categorisation', restored.category === 'Food & Recipes');
+  check('applying a verdict fills the categorisation', restored.category === 'Food & Recipes' && restored.modelUsed === 'gpt-5.6-luna');
   check('applying a verdict leaves captured fields alone',
     restored.caption === post.caption && restored.savedRank === post.savedRank);
 }
@@ -629,28 +562,6 @@ console.log('\nfresh capture merge');
     merged?.category === old.category && merged.summary === old.summary && merged.modelUsed === old.modelUsed);
   check('the original save rank is stable', merged?.savedRank === old.savedRank);
   check('an identical capture causes no rewrite', mergeCaptured(fresh, fresh) === null);
-}
-
-console.log('\nsearch folding');
-{
-  const post = toRecord({
-    shortcode: 'B',
-    permalink: '',
-    handle: '@chef',
-    caption: 'crème brûlée, properly',
-    hashtags: [],
-    thumbnailUrl: '',
-    isVideo: false,
-    durationSec: null,
-    audioTrackName: null,
-    altText: null,
-    postedAt: null,
-  });
-  // Someone who saved this will type it without the accents, which is exactly the user
-  // whose library is not in English.
-  check('accents are optional', matchesSearch(post, tokenize('creme brulee')));
-  check('accents still match themselves', matchesSearch(post, tokenize('crème')));
-  check('every term must appear', !matchesSearch(post, tokenize('creme pasta')));
 }
 
 console.log('\naccount sync plan');
@@ -790,74 +701,13 @@ console.log('\nserver analysis');
   check('a subcategory from the category it chose is kept', combined[0]?.subcategory === 'Recipe');
   check('an unsure post keeps its summary but no category',
     combined[1]?.confidence === 'low' && combined[1]?.summary === 'A cat.');
-  check('the result files the post through applyResult as Uncategorized',
-    applyResult(toRecord({ shortcode: 'S1', permalink: '', handle: 'cat', caption: 'lol', hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null }), combined[1]!, 'm').category === null);
+  check('the result files the post as Uncategorized',
+    filedFromResult(toRecord({ shortcode: 'S1', permalink: '', handle: 'cat', caption: 'lol', hashtags: [], thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null }), combined[1]!).category === null);
   check('without a decision the summary call\'s own answer stands',
     combine(req, new Map(), summaries)[0]?.category === 'Travel');
   check('an unreadable summary reply is no answers', readSummaries({ output_text: 'sorry' }).length === 0);
   check('the Decisions API bills input only',
     Math.abs(costUsd({ inputTokens: 1_000_000, outputTokens: 999 }, { inputTokens: 0, outputTokens: 0 }) - 0.1) < 1e-9);
-}
-
-console.log('\ncurrent model catalogue');
-{
-  const openaiModels = PROVIDERS.openai.models.map((model) => model.id);
-  check('OpenAI is the only provider', Object.keys(PROVIDERS).join() === 'openai');
-  check('OpenAI includes GPT-5.6 Luna', openaiModels.includes('gpt-5.6-luna'));
-  check('OpenAI includes GPT-5.6 Terra', openaiModels.includes('gpt-5.6-terra'));
-  check('GPT-5.6 uses the reasoning-aware Responses API',
-    usesResponsesApi('gpt-5.6-luna') && usesResponsesApi('gpt-5.6-terra'));
-  check('GPT-4o keeps its proven Chat Completions path', !usesResponsesApi('gpt-4o-mini'));
-
-  const luna = PROVIDERS.openai.models.find((model) => model.id === 'gpt-5.6-luna');
-  check('estimate uses list prices',
-    Math.abs(estimateUsd(luna, 1_000) - (145_000 * 0.2 + 50_000 * 1.2) / 1_000_000) < 1e-9);
-}
-
-console.log('\nreasoning-model request contracts');
-{
-  const originalFetch = globalThis.fetch;
-  const seen = new Map<string, Record<string, unknown>>();
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
-    seen.set(url, body);
-    if (url.endsWith('/responses')) {
-      const input = body['input'] as { content?: { type?: string; text?: string }[] }[] | undefined;
-      const userText = input?.flatMap((message) => message.content ?? [])
-        .find((part) => part.type === 'input_text')?.text ?? '';
-      // Mirror the provider's validation so this exact regression fails locally instead
-      // of waiting for a real key test to discover it.
-      if (!/json/i.test(userText)) {
-        return new Response(JSON.stringify({
-          error: { message: "Response input messages must contain the word 'json'." },
-        }), { status: 400 });
-      }
-      return new Response(JSON.stringify({
-        output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
-        usage: { input_tokens: 7, output_tokens: 5 },
-      }));
-    }
-    return new Response(JSON.stringify({ error: { message: `Unexpected URL ${url}` } }), { status: 404 });
-  }) as typeof fetch;
-
-  try {
-    const request = { system: 'Return JSON.', user: 'Classify this.', maxTokens: 64 };
-    const openaiResult = await PROVIDERS.openai.chat(request, 'test-key', 'gpt-5.6-luna');
-    const openaiBody = seen.get('https://api.openai.com/v1/responses');
-    const openaiReasoning = openaiBody?.['reasoning'] as Record<string, unknown> | undefined;
-
-    check('GPT-5.6 request uses low reasoning', openaiReasoning?.['effort'] === 'low');
-    const openaiInput = openaiBody?.['input'] as { content?: { text?: string }[] }[] | undefined;
-    check('GPT-5.6 JSON mode is declared in the user input',
-      /json/i.test(openaiInput?.[0]?.content?.[0]?.text ?? ''));
-    check('GPT-5.6 response storage is disabled', openaiBody?.['store'] === false);
-    check('GPT-5.6 reserves room beyond hidden reasoning', openaiBody?.['max_output_tokens'] === 256);
-    check('GPT-5.6 output and usage are parsed',
-      openaiResult.text === '{"ok":true}' && openaiResult.usage.outputTokens === 5);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 }
 
 console.log('\nvideo frames');
@@ -918,11 +768,6 @@ console.log('\ninstagram collections');
   check('a missing collection is null', validCollection(undefined) === null);
   check('a long name is cut to 100', validCollection({ id: '1', name: 'x'.repeat(500) })?.name.length === 100);
   check('control characters are stripped', validCollection({ id: '1', name: 'a\u0007b' })?.name === 'ab');
-  const listed = listCollections({ '2': 3, '1': 5, '9': 0 }, { '1': 'Travel', '2': 'Food' });
-  check('the sidebar lists collections with posts, by name',
-    listed.map((c) => `${c.name}:${c.count}`).join() === 'Food:3,Travel:5', listed);
-  check('a collection with no known name still shows',
-    listCollections({ '7': 1 }, {})[0]?.name === 'Collection');
 }
 
 console.log('\nthe pill');
@@ -986,7 +831,7 @@ console.log('\nserver sorting');
     thumbnailUrl: '', isVideo: false, durationSec: null, audioTrackName: null, altText: null, postedAt: null,
   });
   const v = verdictRow(textual, { category: 'Travel', subcategory: null, tags: [], summary: 'x' }, 'm', new Date());
-  check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(extensionSignature(post)));
+  check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(signature(post)));
 
   check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).join() === 'A,B');
   let refused = 0;

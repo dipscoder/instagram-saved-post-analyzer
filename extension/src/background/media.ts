@@ -1,5 +1,5 @@
 /**
- * Thumbnail downloads, shared by vision categorisation and the account's thumbnail copy.
+ * Thumbnail downloads for the account's thumbnail copy.
  *
  * The URL came out of a payload the page could have written. Three bounds, because a bare
  * fetch of an attacker-chosen URL is an outbound request from the user's browser, an
@@ -51,9 +51,6 @@ export function isInstagramCdn(url: string): boolean {
 export const STORED_EDGE_PX = 800;
 const STORED_QUALITY = 0.8;
 
-/** What the model is sent. `detail: low` looks at 512px whatever it is given. */
-const MODEL_EDGE_PX = 512;
-
 /** A thumbnail redrawn no larger than `edge` on its long side, and the source's own long edge. */
 async function redraw(image: Blob, edge: number, type: string, quality: number): Promise<{ blob: Blob; sourceEdge: number }> {
   const bitmap = await createImageBitmap(image);
@@ -73,9 +70,4 @@ async function redraw(image: Blob, edge: number, type: string, quality: number):
 /** The account's copy of a thumbnail, and how large its source was. */
 export function toStoredThumbnail(image: Blob): Promise<{ blob: Blob; sourceEdge: number }> {
   return redraw(image, STORED_EDGE_PX, 'image/webp', STORED_QUALITY);
-}
-
-/** A thumbnail at the size the model actually reads, so a request carries no dead weight. */
-export async function toModelImage(image: Blob): Promise<Blob> {
-  return (await redraw(image, MODEL_EDGE_PX, 'image/jpeg', 0.85)).blob;
 }

@@ -17,7 +17,7 @@ version plus the things that are easy to break without noticing.
 npm run app          # install, build the extension, start the web app (localhost:3000)
 npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 320 pure-function checks, no browser needed — run this
+npm run verify       # 284 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -33,17 +33,13 @@ pure functions in plain Node. **Anything you can express as a pure function belo
 Breaking any of these is a real bug, not a style question. Each one is load-bearing and
 each has been broken at least once.
 
-**1. The API key never leaves the service worker.** It is read in three places, all in the
-worker, and only ever passed to a provider as a request header. `getSafeSettings()` is the
-only settings shape returned across a message boundary — it destructures `apiKey` out and
-returns a mask. The popup sends a candidate key directly to the worker to test/save it;
-the content script and MAIN world never receive it.
-Every error path runs through `redact()` before it reaches a log or the UI. `storage.local`
-is locked to `TRUSTED_CONTEXTS` on **every** worker wake, not just on install, because one
-of our content scripts runs on instagram.com. The Supabase session (access + refresh
-tokens) is a credential too and follows the same rule: it lives in that storage, only the
-signed-in email leaves the worker, and `account:*` requests from a content script are
-refused.
+**1. Credentials never leave where they live.** The OpenAI key exists only in the Edge
+Functions' secrets; the extension holds no model key and calls no model (settings v3 deletes
+the key an older build stored). The Supabase session (access + refresh tokens) lives in the
+service worker's `storage.local`, which is locked to `TRUSTED_CONTEXTS` on **every** worker
+wake, not just on install, because one of our content scripts runs on instagram.com. Only
+the signed-in email leaves the worker, `account:*` requests from a content script are
+refused, and every error path runs through `redact()` before it reaches a log or the UI.
 
 **2. Capture only ever runs on the saved grid.** Instagram serves the home feed, explore,
 profile grids and related-posts strips through the *same* GraphQL endpoint as the saved
@@ -61,7 +57,7 @@ mid-sweep.
 
 **4. Nothing deletes from the ledger.** `posts` is a disposable view of what is currently
 saved — free to rebuild by scrolling. `analysis` is work that was *bought* with the user's
-own API key and is irreproducible. `prune` and `resetCategories` touch only the first. The account's
+money and is irreproducible. `prune` touches only the first. The account's
 `verdicts` table has no delete policy for the same reason.
 See ARCHITECTURE §3b. The one sanctioned exception is **Clear library** in the web app's
 Settings (two presses, names the counts): the `clear_library()` RPC erases the account's
@@ -88,9 +84,9 @@ Three contexts, and the boundary between the first two is a trust boundary:
 MAIN world (shares the page's JS context with Instagram — hostile)
   └─ patches window.fetch + XMLHttpRequest at document_start, reads res.clone()
         │ window.postMessage
-ISOLATED world (content script: bridge, library, video controls)
+ISOLATED world (content script: bridge, pill, video controls)
         │ chrome.runtime port
-Service worker (holds the key, the database, every model call)
+Service worker (holds the session, the database, the sync)
 ```
 
 Anything arriving from the MAIN world is page-controlled: Instagram's own bundle, or
@@ -98,12 +94,12 @@ anything that gets code onto that origin, can forge it. Validate shape, bound si
 never trust a field because it looks right.
 
 **MV3 kills the worker when idle.** Nothing in `extension/src/background/` may assume continuity.
-Progress lives in IndexedDB, including the exact members of the active run. On wake, ask
-the run queue what remains; do not rebuild it from every currently uncategorised post,
-because capture may have discovered more after the run began.
+What matters lives in IndexedDB and `storage.local`: the posts, the ledger, what has been
+uploaded (sync resumes from the last confirmed batch), and whether a sweep is running is
+replayed to each port that connects.
 
-**Instagram is a React SPA.** Do not fight it. The library mounts as a fixed overlay
-sibling to React's root rather than replacing grid nodes, and the video bar goes in
+**Instagram is a React SPA.** Do not fight it. The pill mounts as a fixed element in
+`document.body`, outside React's root, rather than replacing grid nodes, and the video bar goes in
 `document.body` — React re-renders tear anything else straight back out. Note that patching
 `history.pushState` from the ISOLATED world does *nothing*: DOM wrappers are per-world, so
 Instagram calls its own copy. Route changes are detected by polling.
@@ -129,11 +125,12 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 
 ## State
 
-The work through Phase 41 is the current implementation: paid-result ledger,
-bounded/resumable indexing, provider hardening and current model support, capture/media
-resilience, per-post re-index, the redesigned popup/library, and the Supabase account (sync, thumbnails,
-the ledger, and server-side analysis with a daily cap), frame-accurate video controls, a light theme with a dark toggle, the web app as the product, hybrid search by meaning, and reels transcribed with `gpt-transcribe`. `npm run verify` currently
-contains 320 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+The work through Phase 42 is the current implementation: paid-result ledger, capture/media
+resilience, the Supabase account (sync, thumbnails, the ledger), server-side indexing with a
+daily cap, frame-accurate video controls, a light theme with a dark toggle, the web app as the
+product, hybrid search by meaning, reels transcribed with `gpt-transcribe`, category
+corrections, and an extension that only collects (Phase 42). `npm run verify` currently
+contains 284 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

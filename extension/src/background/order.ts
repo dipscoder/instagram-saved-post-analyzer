@@ -53,9 +53,8 @@ const MAX_TRACKED_VISITS = 4;
 
 /**
  * Reservations have to be serialised: two capture messages landing together would
- * otherwise both read the same `seq` and hand out the same ranks. Same shape as
- * spend.ts — the chain recovers from a rejection so one storage failure doesn't
- * permanently wedge ordering.
+ * otherwise both read the same `seq` and hand out the same ranks. The chain recovers
+ * from a rejection so one storage failure doesn't permanently wedge ordering.
  */
 let queue: Promise<number[]> = Promise.resolve([]);
 

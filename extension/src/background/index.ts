@@ -1,61 +1,37 @@
 /**
- * Service worker. Owns the API key, the database, and every model call.
+ * Service worker. Owns the database and the account session.
+ *
+ * The extension is a collector: it stores what capture finds, scrolls when asked, and
+ * syncs to the account. Indexing runs on the server, so nothing here calls a model or
+ * holds a model key.
  *
  * MV3 service workers are killed when idle and revived on the next event, so nothing here
- * may assume continuity. Indexing progress lives in IndexedDB rather than memory, which
- * is what makes "resume on failure" fall out for free: on wake we simply ask the DB what
- * is still uncategorised.
+ * may assume continuity. What matters lives in IndexedDB and storage.local.
  */
 
 import * as db from './db';
 import * as ledger from './ledger';
-import { canIndex, Categorizer } from './categorize';
-import { estimateUsd, getProvider, PROVIDERS, redact, testKey } from './providers/index';
+import { redact } from './redact';
 import { reserveRanks } from './order';
-import { resetSpend } from './spend';
 import { getAccount, signIn, signOut, signUp } from './account';
 import { getSyncStatus, onLibraryCleared, resetSync, scheduleSync, syncNow } from './sync';
-import {
-  clearKey,
-  getSafeSettings,
-  getSettings,
-  lockDownStorage,
-  migrateSettings,
-  setSettings,
-} from './settings';
-import {
-  PORT,
-  type AccountState,
-  type Broadcast,
-  type Request,
-  type Response,
-  type Stats,
-} from '../messaging';
+import { getSettings, lockDownStorage, migrateSettings, setSettings } from './settings';
+import { PORT, type AccountState, type Broadcast, type Request, type Response } from '../messaging';
 import { savedFeedPath } from '../routes';
-import { collectionNames, forgetCollections, listCollections, rememberCollection, validCollection } from './collections';
-import { IDLE_PROGRESS, toRecord, type IndexProgress } from '../types';
-import type { CapturedPost } from '../types';
+import { forgetCollections, rememberCollection, validCollection } from './collections';
+import { toRecord, type CapturedPost } from '../types';
 
 // Assert on every wake, not just install — see settings.ts.
 void lockDownStorage();
-// Land any pending settings migration in storage, so an already-open instagram.com tab
-// hears about it through storage.onChanged rather than waiting for a reload.
+// Land any pending settings migration in storage, which is also what removes the OpenAI
+// key an older build kept.
 void migrateSettings();
 chrome.runtime.onInstalled.addListener(() => {
   void lockDownStorage();
   void migrateSettings();
 });
-// Catch up on anything captured or categorised since the last upload.
+// Catch up on anything captured since the last upload.
 scheduleSync();
-
-let lastProgress: IndexProgress = IDLE_PROGRESS;
-
-const categorizer = new Categorizer((p) => {
-  lastProgress = p;
-  broadcast({ type: 'progress', progress: p });
-  // Progress means categories were written. The sync diff decides whether any changed.
-  scheduleSync();
-});
 
 /**
  * Open ports from content scripts and the popup. Using ports rather than
@@ -66,11 +42,11 @@ const subscribers = new Set<chrome.runtime.Port>();
 /**
  * Whether the page should currently be auto-scrolling.
  *
- * `harvest` is a command, and it was sent over a channel that drops: the library's port
- * reconnects a second after the worker idles out, so a Pause pressed in that window
- * reached the popup and never reached the page, which kept scrolling and capturing. Held
- * here and replayed on connect. Resetting to false when the worker dies is correct —
- * nothing is running then either.
+ * `harvest` is a command, and it was sent over a channel that drops: a port reconnects a
+ * second after the worker idles out, so a Stop pressed in that window reached the popup
+ * and never reached the page, which kept scrolling and capturing. Held here and replayed
+ * on connect. Resetting to false when the worker dies is correct — nothing is running
+ * then either.
  */
 let harvesting = false;
 
@@ -81,15 +57,12 @@ chrome.runtime.onConnect.addListener((port) => {
     void chrome.runtime.lastError;
     subscribers.delete(port);
   });
-  // Bring a fresh subscriber up to date immediately — both what is happening and what it
-  // should be doing about it.
-  void categorizer.progress().then((progress) => {
+  // Bring a fresh subscriber up to date immediately — both what has been found and what
+  // it should be doing about it.
+  void db.count().then((total) => {
     try {
-      port.postMessage({ type: 'progress', progress } satisfies Broadcast);
-      port.postMessage({
-        type: 'harvest',
-        action: harvesting ? 'start' : 'stop',
-      } satisfies Broadcast);
+      port.postMessage({ type: 'found', total } satisfies Broadcast);
+      port.postMessage({ type: 'harvest', action: harvesting ? 'start' : 'stop' } satisfies Broadcast);
     } catch {
       subscribers.delete(port);
     }
@@ -99,27 +72,6 @@ chrome.runtime.onConnect.addListener((port) => {
 function setHarvest(action: 'start' | 'stop'): void {
   harvesting = action === 'start';
   broadcast({ type: 'harvest', action });
-}
-
-/** Surface a background failure through the channel the UI is already watching. */
-function reportFailure(err: unknown): void {
-  const progress: IndexProgress = {
-    ...lastProgress,
-    phase: 'error',
-    message: redact(err instanceof Error ? err.message : String(err)),
-  };
-  lastProgress = progress;
-  broadcast({ type: 'progress', progress });
-}
-
-function trackCompletion(): void {
-  void categorizer
-    .completion()
-    ?.then(async () => {
-      const progress = await categorizer.progress();
-      if (progress.phase === 'done') await chrome.storage.local.set({ lastRunAt: Date.now() });
-    })
-    .catch(reportFailure);
 }
 
 function broadcast(msg: Broadcast): void {
@@ -132,11 +84,18 @@ function broadcast(msg: Broadcast): void {
   }
 }
 
+async function broadcastFound(): Promise<void> {
+  broadcast({ type: 'found', total: await db.count() });
+}
+
 // Clear Library in the web app: this browser's copy goes too, so it cannot sync it back.
+// The only caller of either clear (invariant 4).
 onLibraryCleared(async () => {
   setHarvest('stop');
-  await categorizer.startOver();
+  await db.clearLibrary();
+  await ledger.clearAll();
   await forgetCollections();
+  await broadcastFound();
 });
 
 chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
@@ -175,51 +134,15 @@ async function handle(req: Request): Promise<unknown> {
       const { inserted, refreshed } = await db.putIfNew(
         posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null, collection?.id ?? null)),
       );
-      if (renamed) scheduleSync();
-      if (inserted > 0 || refreshed > 0) {
-        scheduleSync();
-        // Push the new total straight away so the library's counts and rows update as
-        // you scroll. Existing records matter too: their Instagram CDN thumbnail may
-        // have just been replaced with a fresh signed URL.
-        broadcast({ type: 'progress', progress: await categorizer.progress() });
-        if (refreshed > 0) {
-          // Counts do not change when an expired CDN URL is refreshed, so a progress
-          // event alone would not make the library query its cards again.
-          broadcast({ type: 'posts:updated' });
-        }
-
-        // Indexing is the web app's job; the extension only collects and syncs.
-      }
+      // A refreshed record matters too: its Instagram CDN thumbnail may have just been
+      // replaced with a fresh signed URL, which the thumbnail copy needs.
+      if (renamed || inserted > 0 || refreshed > 0) scheduleSync();
+      if (inserted > 0) await broadcastFound();
       return { inserted, refreshed };
     }
 
-    case 'posts:query':
-      return db.query({
-        search: req.search,
-        categories: req.categories,
-        limit: req.limit,
-        sort: req.sort,
-        collection: typeof req.collection === 'string' ? req.collection : null,
-      });
-
-    case 'posts:stats': {
-      const [s, ledgerCount, stored, names] = await Promise.all([
-        db.stats(),
-        ledger.count(),
-        chrome.storage.local.get('lastRunAt'),
-        collectionNames(),
-      ]);
-      const { byCollection, ...rest } = s;
-      return {
-        ...rest,
-        collections: listCollections(byCollection, names),
-        lastRunAt: (stored['lastRunAt'] as number | undefined) ?? null,
-        ledgerCount,
-      } satisfies Stats;
-    }
-
-    case 'post:get':
-      return (await db.byShortcode(String(req.shortcode ?? ''))) ?? null;
+    case 'posts:count':
+      return db.count();
 
     case 'posts:strays':
       return { count: (await db.strays(req.since)).length };
@@ -228,84 +151,27 @@ async function handle(req: Request): Promise<unknown> {
       const removed = await db.prune(req.since);
       if (removed > 0) {
         scheduleSync();
-        broadcast({ type: 'progress', progress: await categorizer.progress() });
+        await broadcastFound();
       }
       return { removed };
-    }
-
-    case 'post:reindex': {
-      const shortcode = String(req.shortcode ?? '');
-      if (!/^[A-Za-z0-9_-]{5,30}$/.test(shortcode)) throw new Error('Invalid post id.');
-      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
-      const post = await categorizer.reindexOne(shortcode);
-      trackCompletion();
-      return { post, progress: await categorizer.progress() };
-    }
-
-    // Sorting and finding are separate on purpose (see page/flow.ts): sorting never
-    // scrolls, and finding hands over to sorting itself when it reaches the end.
-    case 'index:start': {
-      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
-      await categorizer.start();
-      trackCompletion();
-      return categorizer.progress();
     }
 
     case 'find:start':
       // Free: scrolling only lets Instagram load what it would load anyway.
       setHarvest('start');
-      return categorizer.progress();
+      return { finding: true };
 
     case 'find:stop':
       setHarvest('stop');
-      return categorizer.progress();
-
-    case 'index:pause':
-      setHarvest('stop');
-      categorizer.pause();
-      return categorizer.progress();
-
-    case 'index:reindex':
-      if (!(await canIndex())) throw new Error(NOTHING_TO_INDEX_WITH);
-      // Without the catch, a failed `resetCategories` rejected into `void`: the page was
-      // already scrolling, the button already said Pause, and nothing ever ran.
-      await categorizer.reindex();
-      trackCompletion();
-      return categorizer.progress();
+      return { finding: false };
 
     case 'harvest:finished':
       // A natural end used to leave `harvesting=true` in the worker forever. The next
       // popup/content port to connect replayed "start" and silently began another sweep.
-      if (req.reason === 'rate-limited') categorizer.pause();
       if (harvesting) setHarvest('stop');
       // Finishing a sweep sends what it found to the account; indexing happens there.
       scheduleSync(500);
       return { stopped: true, reason: req.reason };
-
-    case 'index:quote':
-      return categorizer.quoteReindex();
-
-    case 'ledger:export':
-      return ledger.exportAll();
-
-    case 'ledger:import': {
-      const result = await ledger.importAll(req.file);
-      // Imported verdicts are only worth anything once they reach the posts. Clearing the
-      // categorisation lets the next run replay them from the ledger for free.
-      if (result.imported > 0) {
-        await db.resetCategories();
-        void categorizer.start().catch(reportFailure);
-        scheduleSync();
-      }
-      return result;
-    }
-
-    case 'index:progress':
-      return categorizer.isRunning() ? categorizer.progress() : refreshProgress();
-
-    case 'spend:reset':
-      await resetSpend();
-      return categorizer.progress();
 
     case 'library:url': {
       const stored = await chrome.storage.local.get(LIBRARY_KEY);
@@ -313,75 +179,18 @@ async function handle(req: Request): Promise<unknown> {
     }
 
     case 'settings:get':
-      return {
-        settings: await getSafeSettings(),
-        providers: Object.values(PROVIDERS).map((p) => ({
-          id: p.id,
-          label: p.label,
-          keyPlaceholder: p.keyPlaceholder,
-          keysUrl: p.keysUrl,
-          // per1kPosts is derived here so the token-per-post assumptions live in one
-          // place rather than being re-guessed by whichever UI wants to show a price.
-          models: p.models.map((m) => ({ ...m, per1kPosts: estimateUsd(m, 1000) })),
-        })),
-      };
-
-    case 'settings:set': {
-      // An empty apiKey in a patch means "unchanged", never "clear it" — the popup
-      // shows a mask, and re-saving other fields must not wipe the key.
-      const patch = { ...req.patch };
-      if (patch.apiKey !== undefined && patch.apiKey.trim() === '') delete patch.apiKey;
-      await setSettings(patch);
-      const safe = await getSafeSettings();
-      // storage.local is TRUSTED_CONTEXTS, so a content script never receives its change
-      // events — the listener that used to carry this was dead. The port is the only way
-      // an open instagram.com tab hears about a settings change without a reload.
-      broadcast({ type: 'settings', settings: safe });
-      return safe;
-    }
+      return getSettings();
 
     case 'theme:set': {
-      await setSettings({ theme: req.theme === 'dark' ? 'dark' : 'light' });
-      const safe = await getSafeSettings();
-      broadcast({ type: 'settings', settings: safe });
-      return safe;
-    }
-
-    case 'settings:clear-key': {
-      // Stop first: a run that loses its key mid-flight would otherwise fail noisily.
-      categorizer.pause();
-      await clearKey();
-      return getSafeSettings();
-    }
-
-    case 'settings:test-key': {
-      const { provider, model, apiKey } = await getSettings();
-      if (!apiKey) throw new Error('No key saved yet.');
-      const started = performance.now();
-      await testKey(provider, apiKey, model);
-      const ms = Math.round(performance.now() - started);
-      return { ok: true, ms, model, provider: getProvider(provider).label };
-    }
-
-    case 'settings:test-candidate': {
-      const apiKey = String(req.apiKey ?? '').trim();
-      if (!apiKey || apiKey.length > 500) throw new Error('Enter a valid API key.');
-      const provider = getProvider(req.provider);
-      if (!provider.models.some((candidate) => candidate.id === req.model)) {
-        throw new Error('Choose a model offered by that provider.');
-      }
-      const started = performance.now();
-      await testKey(req.provider, apiKey, req.model);
-      return {
-        ok: true,
-        ms: Math.round(performance.now() - started),
-        model: req.model,
-        provider: provider.label,
-      };
+      const settings = await setSettings({ theme: req.theme === 'dark' ? 'dark' : 'light' });
+      // storage.local is TRUSTED_CONTEXTS, so a content script never receives its change
+      // events. The port is how an open instagram.com tab hears about it without a reload.
+      broadcast({ type: 'settings', settings });
+      return settings;
     }
 
     case 'account:get':
-      // Opening the popup is a good moment to pick up posts sorted in the web app.
+      // Opening the popup is a good moment to pick up posts indexed in the web app.
       scheduleSync(500);
       return accountState();
 
@@ -416,8 +225,6 @@ async function handle(req: Request): Promise<unknown> {
     }
   }
 }
-
-const NOTHING_TO_INDEX_WITH = 'Sign in, or connect an OpenAI key, before indexing.';
 
 /** One page of the saved grid is ~12 tiles; a generous ceiling still bounds the damage. */
 const MAX_POSTS_PER_MESSAGE = 500;
@@ -476,17 +283,4 @@ function safeMediaUrl(value: unknown): string {
   } catch {
     return '';
   }
-}
-
-/** Progress for an idle worker: derive counts from the DB rather than stale memory. */
-async function refreshProgress(): Promise<IndexProgress> {
-  const fresh = await categorizer.progress();
-  const phase =
-    lastProgress.phase === 'running'
-      ? 'paused' // the worker was killed mid-run; it is not running now
-      : fresh.total > 0 && fresh.categorized === fresh.total
-        ? 'done'
-        : fresh.phase;
-  lastProgress = { ...fresh, phase };
-  return lastProgress;
 }
