@@ -131,6 +131,7 @@ function toCapturedPost(o: Json): CapturedPost | null {
     caption,
     hashtags: parseHashtags(caption),
     thumbnailUrl: gridThumbnail(o) ?? '',
+    videoUrl: readVideoUrl(o),
     isVideo: readIsVideo(o),
     durationSec: num(o['video_duration']) ?? num(o['video_duration_seconds']) ?? null,
     audioTrackName: readAudioTrack(o),
@@ -153,6 +154,27 @@ function readCaption(o: Json): string {
     if (text) return text;
   }
   return '';
+}
+
+/**
+ * The smallest video rendition, which is all transcription needs: the audio is the same
+ * in every rendition, and the smallest downloads fastest and stays under the size limit.
+ * REST sends `video_versions`; older GraphQL sends a single `video_url`.
+ */
+function readVideoUrl(o: Json): string | null {
+  const versions = o['video_versions'];
+  if (Array.isArray(versions)) {
+    let best: { url: string; width: number } | null = null;
+    for (const v of versions) {
+      const item = asObj(v);
+      const url = item ? str(item['url']) : null;
+      if (!url) continue;
+      const width = num(item?.['width']) ?? Number.MAX_SAFE_INTEGER;
+      if (!best || width < best.width) best = { url, width };
+    }
+    if (best) return best.url;
+  }
+  return str(o['video_url']);
 }
 
 function readIsVideo(o: Json): boolean {

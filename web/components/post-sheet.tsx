@@ -1,11 +1,14 @@
 'use client';
 
 import { ExternalLink } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
-import { handleOf, instagramUrl, profileUrl, type Post } from '@/lib/library';
+import { fetchDetails, handleOf, INDEX_ERRORS, instagramUrl, profileUrl, type Post, type PostDetails } from '@/lib/library';
 
 export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?: string; onClose: () => void }) {
+  const details = useDetails(post);
+  const transcript = details?.transcript;
   return (
     <Sheet open={post !== null} onOpenChange={(open) => !open && onClose()}>
       {post && (
@@ -31,6 +34,12 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                   )}
                 </SheetDescription>
               </div>
+              {post.categorized_at === null && details?.indexError && (
+                <p className="rounded-md border px-3 py-2 text-[13px] text-muted-foreground">
+                  Couldn’t index this post. {INDEX_ERRORS[details.indexError] ?? ''}{' '}
+                  {details.indexAttempts >= 3 ? 'Index leaves it out until it changes, or you press Try again.' : 'Index will try it again.'}
+                </p>
+              )}
               {post.summary && <p className="text-sm leading-relaxed">{post.summary}</p>}
               {post.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -49,6 +58,12 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
                   <p className="whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">{post.caption}</p>
                 </div>
               )}
+              {transcript && (
+                <div>
+                  <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">What’s said</p>
+                  <p className="text-[13px] leading-relaxed text-muted-foreground">{transcript}</p>
+                </div>
+              )}
             </div>
           </div>
           <div className="border-t p-4">
@@ -62,4 +77,22 @@ export function PostSheet({ post, thumb, onClose }: { post: Post | null; thumb?:
       )}
     </Sheet>
   );
+}
+
+/** What the panel reads when it opens: a reel's transcript, or why a post was not indexed. */
+function useDetails(post: Post | null): PostDetails | null {
+  const [loaded, setLoaded] = useState<{ shortcode: string; details: PostDetails } | null>(null);
+  const shortcode = post && (post.is_video || post.categorized_at === null) ? post.shortcode : null;
+  useEffect(() => {
+    if (!shortcode) return;
+    let live = true;
+    fetchDetails(shortcode).then(
+      (details) => live && setLoaded({ shortcode, details }),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [shortcode]);
+  return shortcode && loaded?.shortcode === shortcode ? loaded.details : null;
 }

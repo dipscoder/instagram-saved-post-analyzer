@@ -128,6 +128,7 @@ const FIELD_DEFAULTS: Record<string, unknown> = {
   caption: '',
   hashtags: [],
   thumbnailUrl: '',
+  videoUrl: null,
   isVideo: false,
   durationSec: null,
   audioTrackName: null,
@@ -330,6 +331,7 @@ export function mergeCaptured(existing: PostRecord, incoming: PostRecord): PostR
   refresh('hashtags');
   refresh('handle');
   refresh('thumbnailUrl');
+  refresh('videoUrl');
   refresh('permalink');
   refresh('altText');
   refresh('audioTrackName');

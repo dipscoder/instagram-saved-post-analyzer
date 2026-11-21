@@ -374,8 +374,23 @@ before being acted on.
 - [x] Web search uses it, falling back to keyword search when the function is missing
 - [x] Thin captions (under six words, no alt text) are filed with their picture too
 - [x] `supabase/eval/labeled.json` + `npm run eval`; verify pins that rules misfile none
-- [ ] Reel transcripts (phase 4 of the plan)
+- [x] Reel transcripts: see Phase 41
 - [ ] Grow the eval set from real mistakes: a "wrong category" action in the web app
+
+## Phase 41 — Reels are filed and searched by what is said in them
+- [x] The extension captures each reel's smallest video rendition and syncs it (`video_url`)
+- [x] `sort` transcribes up to four reels a request with `gpt-transcribe`, then files the
+      reel from caption + transcript + cover image, and embeds the transcript
+- [x] Transcribed once: silence and over-ten-minute reels are recorded, an expired address
+      is retried when a sync brings a fresh one; only Instagram's CDN is fetched
+- [x] Transcripts are in keyword search, in the meaning embedding, and in the post panel
+- [x] The quote adds each reel's transcription by its length; the Index bar counts reels
+      still to transcribe
+- [x] Indexing failures are recorded on the post with a reason; three failures and Index
+      leaves it out until it changes or the user presses Try again
+- [x] A full batch no longer runs out of output tokens mid-answer (and a cut-off answer
+      keeps every complete post); one failed batch no longer ends the whole run
+- [ ] Several frames per reel rather than only the cover (needs video decoding on the server)
 
 ## Not done — needs the user
 

@@ -10,6 +10,12 @@ export interface PostRecord {
   caption: string;
   hashtags: string[];
   thumbnailUrl: string;
+  /**
+   * A reel's smallest video rendition on Instagram's CDN, for the account to transcribe.
+   * Signed and short-lived, like the thumbnail URL, so each capture refreshes it. Null for
+   * photos, and for records captured before the field existed.
+   */
+  videoUrl: string | null;
   isVideo: boolean;
   durationSec: number | null;
   audioTrackName: string | null;
@@ -82,6 +88,7 @@ export type CapturedPost = Pick<
   | 'caption'
   | 'hashtags'
   | 'thumbnailUrl'
+  | 'videoUrl'
   | 'isVideo'
   | 'durationSec'
   | 'audioTrackName'

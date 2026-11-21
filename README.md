@@ -325,9 +325,11 @@ looping video restarts under you mid-scrub and hides where the end is.
   keeps the word "saved" in it, as it has through every rename so far. Everything else in
   the pipeline is shape-driven — this one fence has to read names, because it is the only
   thing separating your saves from the rest of the site. See `ARCHITECTURE.md` §2a.
-- **No transcription.** Instagram doesn't expose transcripts on web.
-- **`transcript`, `ocrText`, `embedding`, `perceptualHash`** are in the schema and always
-  `null`. They exist so a later pipeline can backfill without a migration.
+- **Reels are transcribed by the account, not by Instagram,** which exposes no transcript
+  on the web. Indexing a reel transcribes it once with `gpt-transcribe`, so it is filed
+  and searchable by what is said in it.
+- **`ocrText`, `perceptualHash`** are in the extension's schema and always `null`. They
+  exist so a later pipeline can backfill without a migration.
 - **The library overlays rather than replaces** Instagram's grid nodes. Tearing nodes out
   of React's tree is a fight you lose on the next re-render; the visual result is the same.
 - Fonts are the system UI stack, not Geist — a content script can't pull a webfont past
