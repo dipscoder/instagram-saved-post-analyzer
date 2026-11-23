@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { CategoryFix } from '@/components/category-fix';
+import { IndexPost } from '@/components/index-post';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -13,6 +14,7 @@ export function PostSheet({
   thumb,
   onClose,
   onFixed,
+  onIndexed,
   onStep,
 }: {
   post: Post | null;
@@ -20,10 +22,14 @@ export function PostSheet({
   onClose: () => void;
   /** The user moved the post to another category. */
   onFixed: (post: Post, category: string | null) => void;
+  /** The post was indexed from the panel; this is how the server now holds it. */
+  onIndexed: (post: Post) => void;
   /** Moves to the previous or next post in the grid; absent at either end. */
   onStep: { prev?: () => void; next?: () => void };
 }) {
-  const details = useDetails(post);
+  // Read again after the panel indexes the post, for its transcript or why it failed.
+  const [readCount, setReadCount] = useState(0);
+  const details = useDetails(post, readCount);
   const transcript = details?.transcript;
 
   // ← and → step through the grid without closing the panel. Not while a menu is open or a
@@ -64,14 +70,27 @@ export function PostSheet({
                     'Unknown account'
                   )}
                 </SheetDescription>
-                <div className="mt-3">
-                  <CategoryFix key={post.shortcode} post={post} onFixed={(category) => onFixed(post, category)} />
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <IndexPost
+                    key={post.shortcode}
+                    post={post}
+                    details={details}
+                    onIndexed={(fresh) => {
+                      setReadCount((n) => n + 1);
+                      onIndexed(fresh);
+                    }}
+                  />
+                  <CategoryFix
+                    key={`fix-${post.shortcode}`}
+                    post={post}
+                    onFixed={(category) => onFixed(post, category)}
+                  />
                 </div>
               </div>
               {post.categorized_at === null && details?.indexError && (
                 <p className="rounded-md border px-3 py-2 text-[13px] text-muted-foreground">
                   Couldn’t index this post. {INDEX_ERRORS[details.indexError] ?? ''}{' '}
-                  {details.indexAttempts >= 3 ? 'Index leaves it out until it changes, or you press Try again.' : 'Index will try it again.'}
+                  {details.indexAttempts >= 3 ? 'Index leaves it out of runs until it changes.' : 'Index will try it again.'}
                 </p>
               )}
               {post.summary && <p className="text-sm leading-relaxed">{post.summary}</p>}
@@ -124,7 +143,7 @@ export function PostSheet({
 }
 
 /** What the panel reads when it opens: a reel's transcript, or why a post was not indexed. */
-function useDetails(post: Post | null): PostDetails | null {
+function useDetails(post: Post | null, readCount: number): PostDetails | null {
   const [loaded, setLoaded] = useState<{ shortcode: string; details: PostDetails } | null>(null);
   const shortcode = post && (post.is_video || post.categorized_at === null) ? post.shortcode : null;
   useEffect(() => {
@@ -137,6 +156,6 @@ function useDetails(post: Post | null): PostDetails | null {
     return () => {
       live = false;
     };
-  }, [shortcode]);
+  }, [shortcode, readCount]);
   return shortcode && loaded?.shortcode === shortcode ? loaded.details : null;
 }

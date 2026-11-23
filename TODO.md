@@ -416,6 +416,14 @@ before being acted on.
 - [x] Plain words: To review (was Needs a look), "ready to index", "reels to listen to"
 - [ ] Edit a post's tags (needs a verdict write; goes with the categories work)
 
+## Phase 44 — Index one post
+- [x] Index this post in the panel of a post never indexed, with its price (and "including
+      listening to the reel" when it has one to transcribe); Try again for one given up on
+- [x] Index again beside Change category on a filed post, with a confirm that says what it
+      replaces and what it costs
+- [x] `sort` takes `refile: true` for one post only: the model files it whatever it holds,
+      never the keyword rules
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

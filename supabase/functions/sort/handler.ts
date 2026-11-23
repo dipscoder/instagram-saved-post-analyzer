@@ -1,5 +1,5 @@
 /**
- * POST /functions/v1/sort { shortcodes }: sorts up to 25 of the caller's own posts on
+ * POST /functions/v1/sort { shortcodes, refile? }: sorts up to 25 of the caller's own posts on
  * the server and saves the verdicts to the account, so the web app can sort without the
  * extension. Paid from the project's OpenAI key, under the same daily cap as `analyze`.
  *
@@ -10,6 +10,9 @@
  * Reels are transcribed first (up to four a request), so they are filed and searched by
  * what is said in them. Each post filed here, and any filed earlier but not yet
  * searchable by meaning, is then embedded for hybrid search.
+ *
+ * `refile: true` is Index again, from a post's panel: one post, filed by the model even if
+ * it was filed before or given up on. The web app quotes it and asks first.
  *
  *   200 { sorted, embedded, transcribed, unreadable, failed, usd }
  *   400 bad request · 401 not signed in · 402 daily limit reached
@@ -43,6 +46,7 @@ import {
   SORT_COLUMNS,
   thumbnailPath,
   verdictRow,
+  type SortRequest,
   type SortRow,
 } from './plan';
 
@@ -72,9 +76,9 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (!who) return error(401, 'Sign in first.');
   const { caller, userId } = who;
 
-  let shortcodes: string[];
+  let request: SortRequest;
   try {
-    shortcodes = parseSortRequest(await req.json());
+    request = parseSortRequest(await req.json());
   } catch (err) {
     return error(400, err instanceof BadSortRequest ? err.message : 'The request is not valid JSON.');
   }
@@ -83,12 +87,13 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (spent === null) return error(502, 'Could not read today’s usage. Try again shortly.');
   if (spent >= env.capUsd) return error(402, capReached(env.capUsd));
 
-  const rows = await readPosts(env.supabaseUrl, caller, shortcodes);
+  const { refile } = request;
+  const rows = await readPosts(env.supabaseUrl, caller, request.shortcodes);
   if (!rows) return error(502, 'Could not read your posts. Try again shortly.');
 
   // Transcripts first: they change how a reel is filed, and what it is embedded from.
-  const reels = await transcribeReels(env, caller, pickTranscribe(rows));
-  const plan = planSort(rows);
+  const reels = await transcribeReels(env, caller, pickTranscribe(rows, { refile }));
+  const plan = planSort(rows, { refile });
 
   const at = new Date();
   const verdicts = plan.ruled.map(({ row, filed }) => verdictRow(row, filed, 'rules', at));

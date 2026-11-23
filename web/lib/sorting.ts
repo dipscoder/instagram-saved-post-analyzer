@@ -53,6 +53,33 @@ export function quoteUsd(posts: Omit<Unsorted, 'shortcode' | 'caption' | 'hashta
   );
 }
 
+/** What pricing one post needs: the fields that decide what indexing it involves. */
+export type OnePost = Pick<Unsorted, 'is_video' | 'video_url' | 'transcribed_at' | 'duration_sec'>;
+
+/**
+ * The most indexing one post by hand can cost. It is filed afresh whatever it holds, and a
+ * reel never transcribed is listened to first.
+ */
+export function oneQuoteUsd(p: OnePost): number {
+  return quoteUsd([{ ...p, categorized_at: null, embedded_at: null }]);
+}
+
+/** A price small enough to read at a glance, rounded up. */
+export function priceLabel(usd: number): string {
+  return usd < 0.01 ? 'under $0.01' : `up to $${(Math.ceil(usd * 100) / 100).toFixed(2)}`;
+}
+
+/**
+ * Indexes one post from its panel. `refile` files it with the model even if it was filed
+ * before (replacing that answer) or given up on; the server takes it for one post only.
+ * True when the post was filed, false when the server could not file it this time; the
+ * reason is recorded on the post.
+ */
+export async function indexOne(shortcode: string, refile: boolean): Promise<boolean> {
+  const reply = await sortBatch([shortcode], undefined, { refile });
+  return reply.sorted > 0;
+}
+
 /**
  * Requests for the server: reels to transcribe and posts that need their picture go 4 at
  * a time, everything else 25 at a time, matching the limits the `sort` function
@@ -100,7 +127,7 @@ export function isTransient(e: unknown): boolean {
 }
 
 /** One request to the `sort` function. */
-export async function sortBatch(shortcodes: string[], signal: AbortSignal): Promise<SortReply> {
+export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { refile = false } = {}): Promise<SortReply> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SortError('Sign in again to index.', 401);
@@ -109,11 +136,11 @@ export async function sortBatch(shortcodes: string[], signal: AbortSignal): Prom
     res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
       method: 'POST',
       headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ shortcodes }),
+      body: JSON.stringify(refile ? { shortcodes, refile } : { shortcodes }),
       signal,
     });
   } catch (e) {
-    if (signal.aborted) throw e;
+    if (signal?.aborted) throw e;
     throw new SortError('Could not reach the server.', 0);
   }
   const body = (await res.json().catch(() => ({}))) as Partial<SortReply> & { error?: string };

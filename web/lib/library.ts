@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 /** The columns the library shows. Everything else on the row stays in the database. */
 const POST_COLUMNS =
   'shortcode, permalink, handle, caption, hashtags, thumbnail_url, thumbnail_stored, is_video, ' +
-  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank, categorized_at';
+  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank, categorized_at, model_used';
 
 export interface Post {
   shortcode: string;
@@ -26,6 +26,8 @@ export interface Post {
   collections: string[];
   saved_rank: number | null;
   categorized_at: string | null;
+  /** Who filed it: a model, 'rules', or 'you' for a category the user chose. */
+  model_used: string | null;
 }
 
 /** What the sidebar is showing. `needs-look` is every post without a confident category. */
@@ -231,13 +233,35 @@ export interface PostDetails {
   /** Why the last indexing attempt failed, and how many have, while it is not indexed. */
   indexError: string | null;
   indexAttempts: number;
+  /** A reel's video on file, and when it was transcribed: what indexing it would involve. */
+  videoUrl: string | null;
+  transcribedAt: string | null;
 }
 
 export async function fetchDetails(shortcode: string): Promise<PostDetails> {
   const { data } = await supabase
     .from('posts')
-    .select('transcript, index_error, index_attempts')
+    .select('transcript, index_error, index_attempts, video_url, transcribed_at')
     .eq('shortcode', shortcode)
-    .maybeSingle<{ transcript: string | null; index_error: string | null; index_attempts: number | null }>();
-  return { transcript: data?.transcript || null, indexError: data?.index_error ?? null, indexAttempts: data?.index_attempts ?? 0 };
+    .maybeSingle<{
+      transcript: string | null;
+      index_error: string | null;
+      index_attempts: number | null;
+      video_url: string | null;
+      transcribed_at: string | null;
+    }>();
+  return {
+    transcript: data?.transcript || null,
+    indexError: data?.index_error ?? null,
+    indexAttempts: data?.index_attempts ?? 0,
+    videoUrl: data?.video_url ?? null,
+    transcribedAt: data?.transcribed_at ?? null,
+  };
+}
+
+/** One post as the grid shows it, read again after it changed on the server. */
+export async function fetchPost(shortcode: string): Promise<Post | null> {
+  const { data, error } = await supabase.from('posts').select(POST_COLUMNS).eq('shortcode', shortcode).maybeSingle<Post>();
+  if (error) throw new Error(error.message);
+  return data ?? null;
 }

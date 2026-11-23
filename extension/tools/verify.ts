@@ -837,12 +837,24 @@ console.log('\nserver sorting');
   const v = verdictRow(textual, { category: 'Travel', subcategory: null, tags: [], summary: 'x' }, 'm', new Date());
   check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(signature(post)));
 
-  check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).join() === 'A,B');
+  check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).shortcodes.join() === 'A,B');
+  check('a sort request does not refile unless asked', parseSortRequest({ shortcodes: ['A'] }).refile === false);
   let refused = 0;
-  for (const bad of [{}, { shortcodes: [] }, { shortcodes: ['a/b'] }, { shortcodes: Array(MAX_SORT_POSTS + 1).fill('A') }]) {
+  const bads = [{}, { shortcodes: [] }, { shortcodes: ['a/b'] }, { shortcodes: Array(MAX_SORT_POSTS + 1).fill('A') },
+    { shortcodes: ['A', 'B'], refile: true }, { shortcodes: ['A'], refile: 'yes' }];
+  for (const bad of bads) {
     try { parseSortRequest(bad); } catch { refused++; }
   }
-  check('a malformed sort request is refused', refused === 4);
+  check('a malformed sort request is refused, and Index again takes one post', refused === bads.length);
+
+  // Index again: one post the user asked for by hand goes to the model, whatever it holds.
+  const again = planSort([ruled, done], { refile: true });
+  check('Index again sends a filed post to the model, not the keyword rules',
+    again.ruled.length === 0 && again.text.map((r) => r.shortcode).join() === 'R,D' && again.embedOnly.length === 0, again);
+  const givenUpRow = row({ shortcode: 'G', caption: textual.caption, index_attempts: MAX_ATTEMPTS });
+  check('Index again tries a post that was given up on', planSort([givenUpRow], { refile: true }).text.length === 1);
+  check('Index again transcribes a given-up reel',
+    pickTranscribe([row({ is_video: true, video_url: 'https://a.cdninstagram.com/1.mp4', index_attempts: MAX_ATTEMPTS })], { refile: true }).length === 1);
 
   const verdict = (shortcode: string, at: number, modelUsed = 'm') => ({
     shortcode, category: 'Travel', subcategory: null, tags: [], summary: 's', modelUsed, categorizedAt: at,

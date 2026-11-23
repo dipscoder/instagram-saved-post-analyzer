@@ -232,7 +232,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                287 regression checks across the critical flows
+  verify.ts                291 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -251,7 +251,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 287 pure-function regression checks |
+| `npm run verify` | run 291 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why
