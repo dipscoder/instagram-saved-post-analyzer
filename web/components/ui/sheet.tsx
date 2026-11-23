@@ -11,6 +11,10 @@ export const SheetDescription = Dialog.Description;
 
 /** A panel that slides in from the right, over a dimmed page. */
 export function SheetContent({ className, children, ...props }: ComponentProps<typeof Dialog.Content> & { children: ReactNode }) {
+  // Pressing Undo on a toast is not a click outside the panel: the panel stays open.
+  const keepOpenFor = (e: { target: EventTarget | null; preventDefault: () => void }) => {
+    if (e.target instanceof Element && e.target.closest('[data-toast]')) e.preventDefault();
+  };
   return (
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
@@ -20,10 +24,12 @@ export function SheetContent({ className, children, ...props }: ComponentProps<t
           'data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right',
           className,
         )}
+        onPointerDownOutside={keepOpenFor}
+        onInteractOutside={keepOpenFor}
         {...props}
       >
         {children}
-        <Dialog.Close className="absolute right-3 top-3 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+        <Dialog.Close className="absolute right-3 top-3 rounded-md bg-background/80 p-1.5 text-muted-foreground backdrop-blur hover:bg-accent hover:text-foreground">
           <X className="size-4" />
           <span className="sr-only">Close</span>
         </Dialog.Close>

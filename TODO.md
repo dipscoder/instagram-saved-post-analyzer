@@ -407,6 +407,15 @@ before being acted on.
 - [x] Checked by loading the old build into a browser profile, then the new one: posts and
       verdicts survive, the key and the queue are gone
 
+## Phase 43 — Polish pass for the beta
+- [x] Every enabled button and link shows a pointer (Tailwind v4 had dropped it)
+- [x] Search has a clear button; icons have real tooltips; How it works is linked from the
+      Index bar and the empty library
+- [x] Change category is a visible button with a menu; a toast confirms the move and can undo it
+- [x] ← and → step through posts in the panel
+- [x] Plain words: To review (was Needs a look), "ready to index", "reels to listen to"
+- [ ] Edit a post's tags (needs a verdict write; goes with the categories work)
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

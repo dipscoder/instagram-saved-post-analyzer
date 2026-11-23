@@ -212,7 +212,7 @@ function steps(stats: PipelineStats | null): StepDef[] {
         <>
           Up to {PIPELINE.batchSize} posts go together. For each one the model picks one of {PIPELINE.categories} categories,
           or Unknown, and says how likely it is. Below {Math.round(PIPELINE.minProbability * 100)}% the post is filed as Unknown
-          instead: a wrong category hides a post where you would never look, while Unknown keeps it in Needs a look.
+          instead: a wrong category hides a post where you would never look, while Unknown keeps it in To review.
           {stats && stats.unsure > 0 && ` ${n(stats.unsure)} of your posts are there now.`}
         </>
       ),

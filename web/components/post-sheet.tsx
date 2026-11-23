@@ -1,9 +1,10 @@
 'use client';
 
-import { ExternalLink } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { CategoryFix } from '@/components/category-fix';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { fetchDetails, handleOf, INDEX_ERRORS, instagramUrl, profileUrl, type Post, type PostDetails } from '@/lib/library';
 
@@ -12,15 +13,33 @@ export function PostSheet({
   thumb,
   onClose,
   onFixed,
+  onStep,
 }: {
   post: Post | null;
   thumb?: string;
   onClose: () => void;
   /** The user moved the post to another category. */
   onFixed: (post: Post, category: string | null) => void;
+  /** Moves to the previous or next post in the grid; absent at either end. */
+  onStep: { prev?: () => void; next?: () => void };
 }) {
   const details = useDetails(post);
   const transcript = details?.transcript;
+
+  // ← and → step through the grid without closing the panel. Not while a menu is open or a
+  // field has focus, where the arrows already mean something.
+  useEffect(() => {
+    if (!post) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t?.closest('input, textarea, [role="menu"]')) return;
+      if (e.key === 'ArrowLeft') onStep.prev?.();
+      if (e.key === 'ArrowRight') onStep.next?.();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [post, onStep]);
   return (
     <Sheet open={post !== null} onOpenChange={(open) => !open && onClose()}>
       {post && (
@@ -45,7 +64,7 @@ export function PostSheet({
                     'Unknown account'
                   )}
                 </SheetDescription>
-                <div className="mt-2">
+                <div className="mt-3">
                   <CategoryFix key={post.shortcode} post={post} onFixed={(category) => onFixed(post, category)} />
                 </div>
               </div>
@@ -81,12 +100,22 @@ export function PostSheet({
               )}
             </div>
           </div>
-          <div className="border-t p-4">
-            <Button asChild className="w-full">
+          <div className="flex gap-2 border-t p-4">
+            <Tooltip label="Previous post" shortcut="←" side="top">
+              <Button variant="outline" size="icon" className="size-9" disabled={!onStep.prev} onClick={onStep.prev} aria-label="Previous post">
+                <ChevronLeft />
+              </Button>
+            </Tooltip>
+            <Button asChild className="flex-1">
               <a href={instagramUrl(post)} target="_blank" rel="noopener noreferrer">
                 Open on Instagram <ExternalLink />
               </a>
             </Button>
+            <Tooltip label="Next post" shortcut="→" side="top">
+              <Button variant="outline" size="icon" className="size-9" disabled={!onStep.next} onClick={onStep.next} aria-label="Next post">
+                <ChevronRight />
+              </Button>
+            </Tooltip>
           </div>
         </SheetContent>
       )}

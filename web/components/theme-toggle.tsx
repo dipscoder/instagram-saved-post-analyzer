@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 
 export function ThemeToggle() {
   function toggle() {
@@ -13,9 +14,11 @@ export function ThemeToggle() {
     }
   }
   return (
-    <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle dark mode">
-      <Sun className="hidden dark:block" />
-      <Moon className="dark:hidden" />
-    </Button>
+    <Tooltip label="Light or dark">
+      <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle dark mode">
+        <Sun className="hidden dark:block" />
+        <Moon className="dark:hidden" />
+      </Button>
+    </Tooltip>
   );
 }
