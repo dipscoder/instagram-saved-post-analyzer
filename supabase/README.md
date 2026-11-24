@@ -100,6 +100,13 @@ transcript, one over ten minutes is skipped unbilled, and one whose address had 
 is tried again when a sync brings a fresh address. A reel already filed before
 transcripts existed is transcribed and re-embedded, never filed again.
 
+**One post by hand.** The post panel sends a single shortcode. A post never indexed is
+filed as above. `refile: true` is **Index again** (or Try again on a post given up on):
+the function files that one post with the model even if it was filed before, replacing
+the answer, the user's own choice included, and skipping the keyword rules, which would
+only give the same answer back. It is refused for more than one post, so no request can
+re-bill a library. The web app shows the price and asks before it sends one.
+
 **Failures are recorded on the post.** A post `sort` could not index gets a reason
 (`nothing_to_read`, `no_answer`, `openai_error`, `transcribe_failed`) and an attempt count.
 After three failed attempts Index leaves it out, so a post that keeps failing is not

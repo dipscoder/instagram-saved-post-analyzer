@@ -63,12 +63,25 @@ export class BadSortRequest extends Error {}
 
 const SHORTCODE = /^[A-Za-z0-9_-]{1,64}$/;
 
-export function parseSortRequest(body: unknown): string[] {
-  const raw = (body as { shortcodes?: unknown } | null)?.shortcodes;
+export interface SortRequest {
+  shortcodes: string[];
+  /**
+   * The user asked for this one post by hand, from its panel: file it with the model even
+   * if it is filed already (replacing that answer, theirs included) or was given up on.
+   * One post at a time, so a re-index can never re-bill a library in one request.
+   */
+  refile: boolean;
+}
+
+export function parseSortRequest(body: unknown): SortRequest {
+  const { shortcodes: raw, refile = false } = (body ?? {}) as { shortcodes?: unknown; refile?: unknown };
   if (!Array.isArray(raw) || raw.length === 0) throw new BadSortRequest('No posts to sort.');
   if (raw.length > MAX_SORT_POSTS) throw new BadSortRequest(`At most ${MAX_SORT_POSTS} posts per request.`);
   if (!raw.every((s) => typeof s === 'string' && SHORTCODE.test(s))) throw new BadSortRequest('A post id is not valid.');
-  return [...new Set(raw as string[])];
+  if (typeof refile !== 'boolean') throw new BadSortRequest('refile is true or false.');
+  const shortcodes = [...new Set(raw as string[])];
+  if (refile && shortcodes.length !== 1) throw new BadSortRequest('Index again takes one post at a time.');
+  return { shortcodes, refile };
 }
 
 export function toInput(row: SortRow): FilingInput {
@@ -89,8 +102,8 @@ export function toInput(row: SortRow): FilingInput {
  * transcribed. A reel is worth waiting for, since what is said in it is usually the best
  * signal of what it is about.
  */
-export function pickTranscribe(rows: SortRow[]): SortRow[] {
-  return rows.filter((r) => needsTranscript(r) && !givenUp(r)).slice(0, MAX_TRANSCRIBE_POSTS);
+export function pickTranscribe(rows: SortRow[], { refile = false } = {}): SortRow[] {
+  return rows.filter((r) => needsTranscript(r) && (refile || !givenUp(r))).slice(0, MAX_TRANSCRIBE_POSTS);
 }
 
 /** Failed often enough that only a change to the post, or the user, brings it back. */
@@ -125,11 +138,15 @@ export interface SortPlan {
  * Splits a request's posts by how they will be filed. A post already sorted is only
  * embedded if it is not searchable by meaning yet, never filed again,
  * so a request sent twice bills nothing the second time.
+ *
+ * `refile` is the one exception, a single post the user asked for by hand: it goes to the
+ * model whatever it holds. Not to the keyword rules, which would give back the very
+ * answer the user is asking to replace.
  */
-export function planSort(rows: SortRow[]): SortPlan {
+export function planSort(rows: SortRow[], { refile = false } = {}): SortPlan {
   const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [], skipped: [] };
   for (const row of rows) {
-    if (givenUp(row) && !row.categorized_at) {
+    if (!refile && givenUp(row) && !row.categorized_at) {
       plan.skipped.push(row);
       continue;
     }
@@ -137,12 +154,12 @@ export function planSort(rows: SortRow[]): SortPlan {
       plan.waiting.push(row);
       continue;
     }
-    if (row.categorized_at) {
+    if (!refile && row.categorized_at) {
       if (!row.embedded_at) plan.embedOnly.push(row);
       continue;
     }
     const input = toInput(row);
-    const hit = classifyByRules(input);
+    const hit = refile ? null : classifyByRules(input);
     if (hit) plan.ruled.push({ row, filed: filedByRules(input, hit) });
     else if (needsPicture(input) && row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
     else if (hasTextSignal(input)) plan.text.push(row);

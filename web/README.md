@@ -38,7 +38,10 @@ the `sort` Edge Function in batches (25 with text, 4 that need their picture, 4 
 transcribe), newest saved first, with Stop. See `lib/sorting.ts` and `supabase/README.md`.
 
 **In the post panel.** Change category files the post by hand (free, and it sticks), with
-a toast that can undo it; ← and → step through the grid. Every icon has a tooltip, from
+a toast that can undo it; ← and → step through the grid. A post not indexed yet has
+**Index this post**, priced on the spot (one press: a post is a fraction of a cent); a
+filed one has **Index again**, which asks first because it replaces an answer already paid
+for. See `components/index-post.tsx`. Every icon has a tooltip, from
 `components/ui/tooltip.tsx`; toasts come from `components/ui/toast.tsx`.
 
 **Not yet.** Deployment to Vercel.

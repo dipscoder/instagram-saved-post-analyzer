@@ -310,7 +310,13 @@ export function Library({ session }: { session: Session }) {
         onClose={() => setOpen(null)}
         onFixed={(post, category) => {
           // An undo can land after the panel closed or moved on; only the post it is about changes.
-          setOpen((o) => (o?.shortcode === post.shortcode ? { ...o, category, subcategory: null, categorized_at: new Date().toISOString() } : o));
+          setOpen((o) =>
+            o?.shortcode === post.shortcode ? { ...o, category, subcategory: null, categorized_at: new Date().toISOString(), model_used: 'you' } : o,
+          );
+          refresh();
+        }}
+        onIndexed={(post) => {
+          setOpen((o) => (o?.shortcode === post.shortcode ? post : o));
           refresh();
         }}
         onStep={step}
