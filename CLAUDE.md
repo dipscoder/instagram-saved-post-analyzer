@@ -17,7 +17,7 @@ version plus the things that are easy to break without noticing.
 npm run app          # install, build the extension, start the web app (localhost:3000)
 npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 294 pure-function checks, no browser needed — run this
+npm run verify       # 298 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -131,7 +131,7 @@ daily cap, frame-accurate video controls, a light theme with a dark toggle, the 
 product, hybrid search by meaning, reels transcribed with `gpt-transcribe`, category
 corrections, an extension that only collects (Phase 42), a polish pass (43), and indexing
 one post from its panel (44). `npm run verify` currently
-contains 294 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 298 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

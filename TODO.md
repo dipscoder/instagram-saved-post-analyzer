@@ -441,6 +441,17 @@ before being acted on.
 - [x] Search says which category it searched, with Search all; the category menu is
       alphabetical like the sidebar; the post panel shows the summary and tags first
 
+## Phase 46 — A way in from zero (user test, 2026-11-25)
+- [x] An empty library is a three-step welcome (account, collect, organise) that turns into
+      the library on its own when the first posts sync
+- [x] A ? Help menu in the header: adding saves, search, fixing a category, cost, and How it
+      works as "Under the hood"
+- [x] The extension opens the web app on first install
+- [x] The pill sits bottom centre, clear of Instagram's Messages dock; a finished sweep says
+      "no new saves" or "N new posts" and its link becomes "Organise them"
+- [x] Open library brings an open library tab forward instead of opening another (host
+      permission for the web app's own origin; `verify` pins it to `WEB_APP_URL`)
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

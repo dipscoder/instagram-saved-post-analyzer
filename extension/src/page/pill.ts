@@ -16,7 +16,7 @@ import { startHarvest, type HarvestHandle } from '../capture/bridge';
 import { isFullSavedFeed, type SavedCollection } from '../routes';
 import { WEB_APP_URL } from '../config';
 import type { Settings, Theme } from '../types';
-import { pillButton, pillStatus, type PillState } from './flow';
+import { pillButton, pillLink, pillStatus, type PillState } from './flow';
 import { styles } from './pill.css';
 
 const state: PillState & {
@@ -28,14 +28,18 @@ const state: PillState & {
    * collection into a census of the whole library (invariant 3).
    */
   sweepWasFullFeed: boolean;
+  /** How many posts this browser held when the sweep began, to say what it added. */
+  sweepFrom: number;
 } = {
   finding: false,
   total: 0,
   strays: 0,
   confirming: false,
   message: null,
+  lastFound: null,
   sweepStartedAt: 0,
   sweepWasFullFeed: false,
+  sweepFrom: 0,
 };
 
 let host: HTMLDivElement | null = null;
@@ -43,6 +47,7 @@ let collection: SavedCollection = { id: 'all-posts', name: 'All posts' };
 let elName: HTMLElement | null = null;
 let elStatus: HTMLElement | null = null;
 let elAction: HTMLButtonElement | null = null;
+let elOpen: HTMLAnchorElement | null = null;
 let unsubscribe: (() => void) | null = null;
 let harvest: HarvestHandle | null = null;
 
@@ -53,8 +58,10 @@ export function mountPill(where: SavedCollection): void {
   host = document.createElement('div');
   host.setAttribute('data-saved-index', 'pill');
   Object.assign(host.style, {
+    // Bottom centre: Instagram's Messages dock owns the bottom-right corner.
     position: 'fixed',
-    right: '24px',
+    left: '50%',
+    transform: 'translateX(-50%)',
     bottom: '24px',
     zIndex: '2147482000',
   } satisfies Partial<CSSStyleDeclaration>);
@@ -80,11 +87,12 @@ export function unmountPill(): void {
   state.strays = 0;
   state.confirming = false;
   state.message = null;
+  state.lastFound = null;
   unsubscribe?.();
   unsubscribe = null;
   host?.remove();
   host = null;
-  elName = elStatus = elAction = null;
+  elName = elStatus = elAction = elOpen = null;
 }
 
 export function isPillMounted(): boolean {
@@ -103,18 +111,25 @@ function build(): HTMLElement {
   elAction = h('button', 'dock-action');
   elAction.addEventListener('click', () => void onAction());
 
-  const open = h('a', 'dock-open', 'Open library ↗');
-  open.href = WEB_APP_URL;
-  open.target = '_blank';
-  open.rel = 'noopener';
+  // The worker brings an open library tab forward rather than opening another; the plain
+  // link is the fallback if the worker is not there to ask.
+  elOpen = h('a', 'dock-open');
+  elOpen.href = WEB_APP_URL;
+  elOpen.target = '_blank';
+  elOpen.rel = 'noopener';
+  elOpen.addEventListener('click', (e) => {
+    e.preventDefault();
+    void send({ type: 'app:open' }).catch(() => window.open(WEB_APP_URL, '_blank', 'noopener'));
+  });
 
-  pill.append(h('span', 'brand-mark'), h('span', 'dock-text', [elName, elStatus]), elAction, open);
+  pill.append(h('span', 'brand-mark'), h('span', 'dock-text', [elName, elStatus]), elAction, elOpen);
   return pill;
 }
 
 function render(): void {
-  if (!elName || !elStatus || !elAction) return;
+  if (!elName || !elStatus || !elAction || !elOpen) return;
   elName.textContent = collection.name;
+  elOpen.textContent = pillLink(state);
   elStatus.textContent = pillStatus(state);
   const button = pillButton(state);
   elAction.textContent = button.label;
@@ -174,6 +189,8 @@ function startFinding(): void {
   state.message = null;
   state.strays = 0;
   state.confirming = false;
+  state.lastFound = null;
+  state.sweepFrom = state.total;
   state.sweepStartedAt = Date.now();
   state.sweepWasFullFeed = isFullSavedFeed();
   const current = startHarvest();
@@ -191,7 +208,12 @@ function startFinding(): void {
     // the whole feed, or everything outside one collection would look unsaved.
     if (result.reason === 'complete' && state.sweepWasFullFeed) void countStrays();
     void send({ type: 'harvest:finished', reason: result.reason }).catch(() => {});
-    void refresh();
+    void refresh().then(() => {
+      // Only a sweep that ran its course can say how many saves were new.
+      if (result.reason !== 'complete' || harvest) return;
+      state.lastFound = Math.max(0, state.total - state.sweepFrom);
+      render();
+    });
   });
   render();
 }

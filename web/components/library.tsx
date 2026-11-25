@@ -1,9 +1,9 @@
 'use client';
 
 import type { Session } from '@supabase/supabase-js';
-import { Search, Settings, Workflow, X } from 'lucide-react';
-import Link from 'next/link';
+import { Search, Settings, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HelpMenu } from '@/components/help-menu';
 import { Mark } from '@/components/logo';
 import { PostCard } from '@/components/post-card';
 import { PostSheet } from '@/components/post-sheet';
@@ -11,6 +11,7 @@ import { FilterChips, Sidebar } from '@/components/sidebar';
 import { SettingsSheet } from '@/components/settings-sheet';
 import { SortPanel } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Welcome } from '@/components/welcome';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
@@ -86,7 +87,7 @@ export function Library({ session }: { session: Session }) {
   const current = useRef(key);
   current.current = key;
 
-  // Bumped when the library changes underneath the cache, e.g. after sorting.
+  // Bumped when the library changes underneath the cache, e.g. after organising.
   const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
@@ -98,6 +99,15 @@ export function Library({ session }: { session: Session }) {
     entries.current.clear();
     setGeneration((g) => g + 1);
   }, []);
+
+  // A new account's library is empty until the extension's first sync. Look again every few
+  // seconds meanwhile, so the welcome turns into the library as soon as posts arrive.
+  const empty = facets?.total === 0;
+  useEffect(() => {
+    if (!empty) return;
+    const t = setInterval(() => fetchFacets().then((f) => f.total > 0 && refresh(), () => undefined), 5_000);
+    return () => clearInterval(t);
+  }, [empty, refresh]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query), 200);
@@ -227,13 +237,7 @@ export function Library({ session }: { session: Session }) {
           )}
         </label>
         <div className="ml-auto flex items-center gap-1">
-          <Tooltip label="How indexing works">
-            <Button variant="ghost" size="icon" asChild>
-              <Link href="/how-it-works" aria-label="How indexing works">
-                <Workflow />
-              </Link>
-            </Button>
-          </Tooltip>
+          <HelpMenu />
           <ThemeToggle />
           <Tooltip label="Settings">
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings">
@@ -250,71 +254,72 @@ export function Library({ session }: { session: Session }) {
 
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-            <FilterChips facets={facets} view={view} onView={setView} />
-            <div className="mb-5 flex items-baseline gap-3">
-              <h1 className="text-xl font-semibold tracking-tight">{debounced ? `Results for “${debounced}”` : title(view, facets)}</h1>
-              <span className="text-[13px] tabular-nums text-muted-foreground">
-                {count.toLocaleString()} {count === 1 ? 'post' : 'posts'}
-              </span>
-              {scope && (
-                <span className="text-[13px] text-muted-foreground">
-                  in {scope} ·{' '}
-                  <button type="button" onClick={() => setView({ kind: 'all' })} className="font-medium text-foreground underline underline-offset-2">
-                    Search all
-                  </button>
+            {empty ? (
+              <Welcome email={session.user.email ?? ''} />
+            ) : (
+              <>
+              <FilterChips facets={facets} view={view} onView={setView} />
+              <div className="mb-5 flex items-baseline gap-3">
+                <h1 className="text-xl font-semibold tracking-tight">{debounced ? `Results for “${debounced}”` : title(view, facets)}</h1>
+                <span className="text-[13px] tabular-nums text-muted-foreground">
+                  {count.toLocaleString()} {count === 1 ? 'post' : 'posts'}
                 </span>
-              )}
-            </div>
-
-            {/* Organising is offered wherever there is something to do, not only in Needs a category. */}
-            {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
-              <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} />
-            )}
-
-            {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
-
-            {settled && !entry.error && posts.length === 0 && (
-              <div className="rounded-lg border border-dashed px-6 py-16 text-center">
-                <p className="font-medium">{debounced ? `Nothing matches that${scope ? ` in ${scope}` : ''}` : 'Nothing here yet'}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {debounced
-                    ? scope
-                      ? 'It may be in another category.'
-                      : 'Try fewer or different words, or describe it another way.'
-                    : 'Open your saved posts on Instagram and press Find new posts in the Saved Index extension. Posts appear here as they sync.'}
-                </p>
                 {scope && (
-                  <Button variant="outline" size="sm" className="mt-4" onClick={() => setView({ kind: 'all' })}>
-                    Search all your saves
-                  </Button>
-                )}
-                {!debounced && (
-                  <Link href="/how-it-works" className="mt-4 inline-block text-sm font-medium underline underline-offset-4">
-                    See how it works
-                  </Link>
+                  <span className="text-[13px] text-muted-foreground">
+                    in {scope} ·{' '}
+                    <button type="button" onClick={() => setView({ kind: 'all' })} className="font-medium text-foreground underline underline-offset-2">
+                      Search all
+                    </button>
+                  </span>
                 )}
               </div>
-            )}
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {posts.map((p, i) => (
-                <PostCard key={p.shortcode} post={p} thumb={knownThumbnail(p)} eager={i < 10} onOpen={() => setOpen(p)} />
-              ))}
-              {entry?.loading !== false &&
-                Array.from({ length: Math.max(0, Math.min(posts.length === 0 ? (known ?? 10) : 5, 10)) }, (_, i) => (
-                  <div key={`s${i}`}>
-                    <div className="aspect-[4/5] animate-pulse rounded-lg bg-muted" />
-                    <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted" />
-                  </div>
+              {/* Organising is offered wherever there is something to do, not only in Needs a category. */}
+              {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
+                <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} />
+              )}
+
+              {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
+
+              {settled && !entry.error && posts.length === 0 && (
+                <div className="rounded-lg border border-dashed px-6 py-16 text-center">
+                  <p className="font-medium">{debounced ? `Nothing matches that${scope ? ` in ${scope}` : ''}` : 'Nothing here yet'}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {debounced
+                      ? scope
+                        ? 'It may be in another category.'
+                        : 'Try fewer or different words, or describe it another way.'
+                      : 'Nothing is filed here yet.'}
+                  </p>
+                  {scope && (
+                    <Button variant="outline" size="sm" className="mt-4" onClick={() => setView({ kind: 'all' })}>
+                      Search all your saves
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {posts.map((p, i) => (
+                  <PostCard key={p.shortcode} post={p} thumb={knownThumbnail(p)} eager={i < 10} onOpen={() => setOpen(p)} />
                 ))}
-            </div>
-
-            {settled && entry.more && (
-              <div className="mt-8 flex justify-center">
-                <Button variant="outline" onClick={() => void load(view, debounced, entry.pages)}>
-                  Show more
-                </Button>
+                {entry?.loading !== false &&
+                  Array.from({ length: Math.max(0, Math.min(posts.length === 0 ? (known ?? 10) : 5, 10)) }, (_, i) => (
+                    <div key={`s${i}`}>
+                      <div className="aspect-[4/5] animate-pulse rounded-lg bg-muted" />
+                      <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted" />
+                    </div>
+                  ))}
               </div>
+
+              {settled && entry.more && (
+                <div className="mt-8 flex justify-center">
+                  <Button variant="outline" onClick={() => void load(view, debounced, entry.pages)}>
+                    Show more
+                  </Button>
+                </div>
+              )}
+              </>
             )}
           </div>
         </main>

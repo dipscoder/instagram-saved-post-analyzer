@@ -41,10 +41,13 @@ changes up.
 
 ## First run
 
+Installing the extension opens the web app, whose empty library walks through these steps.
+
 1. Click the extension icon and **Create Account** or **Sign In**.
 2. Press **Find new posts**. It opens your saved posts on Instagram if they are not open
    already, and scrolls them for you. Posts sync to your account as they are found.
-3. Press **Open your library** to go to the web app.
+3. Press **Open your library** to go to the web app. It brings the library forward if it
+   is already open in a tab.
 4. In the web app, press **Organise N posts**. It shows the most it can cost first and asks
    you to confirm. Posts the free keyword rules can file cost nothing.
 
@@ -237,7 +240,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                294 regression checks across the critical flows
+  verify.ts                298 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -256,7 +259,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 294 pure-function regression checks |
+| `npm run verify` | run 298 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why

@@ -55,6 +55,8 @@ export type Request =
   | { type: 'harvest:finished'; reason: 'complete' | 'stopped' | 'rate-limited' }
   /** Where the popup's Find goes when no saved feed is open: the one last seen capturing. */
   | { type: 'library:url' }
+  /** Show the web app: the tab it is already open in, or a new one. */
+  | { type: 'app:open' }
   | { type: 'settings:get' }
   | { type: 'theme:set'; theme: Settings['theme'] }
   /** Account requests are accepted from extension pages only, never a content script. */

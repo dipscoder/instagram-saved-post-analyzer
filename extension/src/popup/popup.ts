@@ -58,6 +58,11 @@ function wire(): void {
     applyTheme(next);
     void send({ type: 'theme:set', theme: next }).catch(() => {});
   });
+  // The library comes forward in the tab it is already open in; the link is the fallback.
+  $('openWeb').addEventListener('click', (e) => {
+    e.preventDefault();
+    void send({ type: 'app:open' }).then(() => window.close(), () => window.open(WEB_APP_URL, '_blank', 'noopener'));
+  });
   $('modeUp').addEventListener('click', () => setAccountMode('sign-up'));
   $('modeIn').addEventListener('click', () => setAccountMode('sign-in'));
   $<HTMLFormElement>('signedOut').addEventListener('submit', (e) => {
