@@ -17,7 +17,7 @@ version plus the things that are easy to break without noticing.
 npm run app          # install, build the extension, start the web app (localhost:3000)
 npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 298 pure-function checks, no browser needed — run this
+npm run verify       # 302 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -119,7 +119,9 @@ The code is heavily commented and several oddities are deliberate. Read the comm
 - The harvester's scroll delay is *randomised* (800–2000 ms) because a metronomic cadence is
   itself a signal.
 - Low model confidence deliberately files a post as Uncategorized rather than guessing — a
-  wrong category buries a post somewhere you will never look.
+  wrong category buries a post somewhere you will never look. Instead it keeps the AI's
+  likeliest categories in `posts.suggestions`, and the user confirms one with a press
+  (Needs a category → Sort them one by one). Don't turn suggestions into filings.
 - `SCHEMA_VERSION` (record shape) and `DB_VERSION` (store shape) are separate on purpose and
   no longer move together.
 
@@ -131,7 +133,7 @@ daily cap, frame-accurate video controls, a light theme with a dark toggle, the 
 product, hybrid search by meaning, reels transcribed with `gpt-transcribe`, category
 corrections, an extension that only collects (Phase 42), a polish pass (43), and indexing
 one post from its panel (44). `npm run verify` currently
-contains 298 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+contains 302 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

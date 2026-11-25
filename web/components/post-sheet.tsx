@@ -94,6 +94,7 @@ export function PostSheet({
                     key={`fix-${post.shortcode}`}
                     post={post}
                     onFixed={(filing) => onFixed(post, filing)}
+                    suggestions={details?.suggestions}
                   />
                 </div>
               </div>
@@ -144,10 +145,14 @@ export function PostSheet({
   );
 }
 
-/** What the panel reads when it opens: a reel's transcript, or why a post was not indexed. */
+/**
+ * What the panel reads when it opens: a reel's transcript, why a post was not organised, or
+ * where the AI thinks a post it wasn't sure about might go.
+ */
 function useDetails(post: Post | null, readCount: number): PostDetails | null {
   const [loaded, setLoaded] = useState<{ shortcode: string; details: PostDetails } | null>(null);
-  const shortcode = post && (post.is_video || post.categorized_at === null) ? post.shortcode : null;
+  const unsure = post !== null && post.categorized_at !== null && (!post.category || post.category === 'Uncategorized');
+  const shortcode = post && (post.is_video || post.categorized_at === null || unsure) ? post.shortcode : null;
   useEffect(() => {
     if (!shortcode) return;
     let live = true;

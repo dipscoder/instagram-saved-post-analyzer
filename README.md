@@ -79,6 +79,10 @@ is never paid for twice. Bringing older posts up to date (search by meaning, a r
 words) is a separate, optional offer under the main button, so the number you are asked to
 pay for only counts posts never organised.
 
+**Needs a category.** When the AI isn't sure, it doesn't guess: the post waits in Needs a
+category with the categories it most likely belongs in. **Sort them one by one** shows one
+post at a time; press 1, 2 or 3 to file it, or S to skip.
+
 **Change category** in a post's panel is free and sticks. Its **Undo** puts the post back
 exactly as it was, subcategory included, and drops the correction.
 
@@ -240,7 +244,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                298 regression checks across the critical flows
+  verify.ts                302 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -259,7 +263,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 298 pure-function regression checks |
+| `npm run verify` | run 302 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why

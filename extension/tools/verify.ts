@@ -87,6 +87,7 @@ import {
   parseSortRequest,
   pickTranscribe,
   planSort,
+  planSuggest,
   verdictRow,
   type SortRow,
 } from '../../supabase/functions/sort/plan';
@@ -706,6 +707,14 @@ console.log('\nserver analysis');
   check('a confident decision keeps its category', decisions.get(0)?.category === 'Food & Recipes');
   check('an unsure decision files as Uncategorized', decisions.get(1)?.category === null);
   check('a refusal is simply absent', readDecisions({ answers: [{ type: 'refusal', name: 'post_0' }] }).size === 0);
+  const split = readDecisions({ answers: [{ type: 'choice', name: 'post_0', choice: 'Food & Recipes', probabilities: [
+    { value: 'Travel', probability: 0.38 }, { value: 'Food & Recipes', probability: 0.45 }, { value: 'unknown', probability: 0.1 },
+    { value: 'Not a category', probability: 0.3 }, { value: 'Humor & Misc', probability: 0.05 },
+  ] }] }).get(0);
+  check('a split vote files nothing but suggests the likeliest real categories, best first',
+    split?.category === null && split.ranked.join() === 'Food & Recipes,Travel', split);
+  check('a food place in a city guide is steered to Food & Recipes',
+    JSON.stringify(decisionsBody(req)).includes('A place to eat or drink'));
 
   const summaries = readSummaries({ output_text: JSON.stringify({ results: [
     { id: 0, category: 'Travel', subcategory: 'Recipe', tags: ['pasta'], summary: 'Pasta.', confidence: 'high' },
@@ -857,9 +866,25 @@ console.log('\nserver sorting');
 
   check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).shortcodes.join() === 'A,B');
   check('a sort request does not refile unless asked', parseSortRequest({ shortcodes: ['A'] }).refile === false);
+  check('a sort request does not ask for suggestions unless asked', parseSortRequest({ shortcodes: ['A'] }).suggest === false);
+
+  // Suggestions: only for posts filed as not sure, never asked, and not placed there by the user.
+  const unsure = (over: Partial<SortRow>) => row({ caption: textual.caption, categorized_at: '2026-11-19T10:00:00Z', category: null, model_used: 'm', suggestions: null, ...over });
+  const asked = planSuggest([
+    unsure({ shortcode: 'U' }),
+    unsure({ shortcode: 'A', suggestions: [] }),
+    unsure({ shortcode: 'Y', model_used: 'you' }),
+    unsure({ shortcode: 'F', category: 'Travel' }),
+    row({ shortcode: 'N', caption: textual.caption }),
+    unsure({ shortcode: 'P', caption: '', thumbnail_stored: true }),
+    unsure({ shortcode: 'E', caption: '' }),
+  ]);
+  check('suggestions are asked only for unsure posts never asked, and not the user\'s own choice',
+    asked.text.map((r) => r.shortcode).join() === 'U' && asked.vision.map((r) => r.shortcode).join() === 'P' && asked.unreadable.map((r) => r.shortcode).join() === 'E', asked);
   let refused = 0;
   const bads = [{}, { shortcodes: [] }, { shortcodes: ['a/b'] }, { shortcodes: Array(MAX_SORT_POSTS + 1).fill('A') },
-    { shortcodes: ['A', 'B'], refile: true }, { shortcodes: ['A'], refile: 'yes' }];
+    { shortcodes: ['A', 'B'], refile: true }, { shortcodes: ['A'], refile: 'yes' }, { shortcodes: ['A'], refile: true, suggest: true },
+    { shortcodes: ['A'], suggest: 1 }];
   for (const bad of bads) {
     try { parseSortRequest(bad); } catch { refused++; }
   }

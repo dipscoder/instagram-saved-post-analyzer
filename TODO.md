@@ -452,6 +452,18 @@ before being acted on.
 - [x] Open library brings an open library tab forward instead of opening another (host
       permission for the web app's own origin; `verify` pins it to `WEB_APP_URL`)
 
+## Phase 47 — Suggest, don't guess (user test, 2026-11-25)
+- [x] Unsure posts keep the AI's likeliest categories (`posts.suggestions`, from the
+      Decisions API probabilities the filing call already paid for); still filed as no
+      category, so a wrong guess never hides a post
+- [x] Needs a category → Sort them one by one: one post at a time, keys 1/2/3 and S, free,
+      each with Undo; the post panel shows the same suggestions
+- [x] `sort` with `suggest: true` asks for suggestions for posts filed before this, category
+      decisions only, quoted and confirmed, each post asked at most once
+- [x] The category question steers food places in city guides to Food & Recipes (why
+      "9 late-night eateries" split between Food and Travel and was left unfiled)
+- [ ] A Places category: deferred; adding a category changes TAXONOMY_HASH
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

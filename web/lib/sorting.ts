@@ -1,4 +1,4 @@
-import { needsPicture, SERVER_QUOTE_USD_PER_POST } from '@saved-index/shared/filing';
+import { needsPicture, SERVER_QUOTE_USD_PER_POST, SUGGEST_QUOTE_USD_PER_POST } from '@saved-index/shared/filing';
 import { SUPABASE_PUBLISHABLE_KEY, SUPABASE_URL } from '@saved-index/shared/config';
 import { EMBED_QUOTE_USD_PER_POST } from '@saved-index/shared/embedding';
 import { MAX_TRANSCRIBE_POSTS, needsTranscript, transcribeQuoteUsd } from '@saved-index/shared/transcript';
@@ -44,7 +44,7 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
  * date (search by meaning, a reel's words): optional, and offered apart so the main button
  * only ever counts posts the user has not had organised.
  */
-export type RunKind = 'new' | 'upgrade';
+export type RunKind = 'new' | 'upgrade' | 'suggest';
 
 export function runKind(p: Pick<Unsorted, 'categorized_at'>): RunKind {
   return p.categorized_at === null ? 'new' : 'upgrade';
@@ -109,6 +109,8 @@ export function sortBatches(posts: Unsorted[]): string[][] {
 
 export interface SortReply {
   sorted: number;
+  /** Posts given suggested categories, in a suggestions request. */
+  suggested: number;
   embedded: number;
   transcribed: number;
   unreadable: string[];
@@ -125,6 +127,30 @@ export class SortError extends Error {
   }
 }
 
+/**
+ * Posts filed as not sure before suggestions existed, newest saved first, with what decides
+ * how they are batched. Asking about them is category decisions only.
+ */
+export async function fetchUnsuggested(): Promise<Unsorted[]> {
+  const { data, error } = await supabase
+    .from('posts')
+    .select('shortcode, caption, hashtags, alt_text, categorized_at, embedded_at, is_video, video_url, transcribed_at, duration_sec')
+    .not('categorized_at', 'is', null)
+    .or(`category.is.null,category.eq.Uncategorized`)
+    .is('suggestions', null)
+    .neq('model_used', 'you')
+    .order('saved_rank', { ascending: false, nullsFirst: false })
+    .limit(2000)
+    .returns<Unsorted[]>();
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** The most asking for suggestions for this many posts can cost. */
+export function suggestQuoteUsd(count: number): number {
+  return count * SUGGEST_QUOTE_USD_PER_POST;
+}
+
 /** Puts every post that failed three times back into the next run. Spends nothing. */
 export async function retryFailed(): Promise<void> {
   const { error } = await supabase.rpc('retry_index_failures');
@@ -138,7 +164,7 @@ export function isTransient(e: unknown): boolean {
 }
 
 /** One request to the `sort` function. */
-export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { refile = false } = {}): Promise<SortReply> {
+export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { refile = false, suggest = false } = {}): Promise<SortReply> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SortError('Sign in again to index.', 401);
@@ -147,7 +173,7 @@ export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { re
     res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
       method: 'POST',
       headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(refile ? { shortcodes, refile } : { shortcodes }),
+      body: JSON.stringify(refile ? { shortcodes, refile } : suggest ? { shortcodes, suggest } : { shortcodes }),
       signal,
     });
   } catch (e) {
@@ -160,5 +186,5 @@ export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { re
       res.status === 404 ? 'Indexing is not set up on the server yet. Deploy the sort function.' : (body.error ?? `Indexing failed (${res.status}).`);
     throw new SortError(message, res.status);
   }
-  return { sorted: body.sorted ?? 0, embedded: body.embedded ?? 0, transcribed: body.transcribed ?? 0, unreadable: body.unreadable ?? [], failed: body.failed ?? [], usd: body.usd ?? 0 };
+  return { sorted: body.sorted ?? 0, suggested: body.suggested ?? 0, embedded: body.embedded ?? 0, transcribed: body.transcribed ?? 0, unreadable: body.unreadable ?? [], failed: body.failed ?? [], usd: body.usd ?? 0 };
 }

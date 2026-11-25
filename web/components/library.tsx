@@ -11,6 +11,7 @@ import { FilterChips, Sidebar } from '@/components/sidebar';
 import { SettingsSheet } from '@/components/settings-sheet';
 import { SortPanel } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Triage } from '@/components/triage';
 import { Welcome } from '@/components/welcome';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -81,6 +82,7 @@ export function Library({ session }: { session: Session }) {
   const [, setVersion] = useState(0);
   const [open, setOpen] = useState<Post | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [triageOpen, setTriageOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const userId = session.user.id;
   const key = viewKey(view, debounced);
@@ -276,7 +278,7 @@ export function Library({ session }: { session: Session }) {
 
               {/* Organising is offered wherever there is something to do, not only in Needs a category. */}
               {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
-                <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} />
+                <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} onTriage={() => setTriageOpen(true)} />
               )}
 
               {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
@@ -325,6 +327,15 @@ export function Library({ session }: { session: Session }) {
         </main>
       </div>
 
+      <Triage
+        open={triageOpen}
+        userId={userId}
+        onOpenChange={(o) => {
+          setTriageOpen(o);
+          // What was filed there moved out of Needs a category.
+          if (!o) refresh();
+        }}
+      />
       <SettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} session={session} facets={facets} onCleared={refresh} />
       <PostSheet
         post={open}

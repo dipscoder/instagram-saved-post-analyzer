@@ -67,6 +67,8 @@ export interface Facets {
   untranscribed: number;
   /** Never indexed, and failed three times: left out of Index until retried. */
   failed: number;
+  /** Filed as not sure before suggestions existed: no categories suggested yet. */
+  unsuggested: number;
   categories: Facet[];
   collections: Facet[];
 }
@@ -133,7 +135,7 @@ export async function fetchFacets(): Promise<Facets> {
   type FacetRow = { kind: string; key: string; count: number };
   const rows: FacetRow[] = rpc.error ? await facetRowsByScan() : ((rpc.data ?? []) as FacetRow[]);
 
-  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, unembedded: 0, untranscribed: 0, failed: 0, categories: [], collections: [] };
+  const facets: Facets = { total: 0, needsLook: 0, unsorted: 0, unembedded: 0, untranscribed: 0, failed: 0, unsuggested: 0, categories: [], collections: [] };
   for (const row of rows) {
     const count = Number(row.count);
     if (row.kind === 'total') facets.total = count;
@@ -141,6 +143,7 @@ export async function fetchFacets(): Promise<Facets> {
     else if (row.kind === 'unembedded') facets.unembedded = count;
     else if (row.kind === 'untranscribed') facets.untranscribed = count;
     else if (row.kind === 'failed') facets.failed = count;
+    else if (row.kind === 'unsuggested') facets.unsuggested = count;
     else if (row.kind === 'unsure') facets.needsLook += count;
     else if (row.kind === 'category') facets.categories.push({ key: row.key, label: row.key, count });
     else if (row.kind === 'collection') facets.collections.push({ key: row.key, label: nameOf.get(row.key) ?? 'Collection', count });
@@ -249,10 +252,12 @@ export interface PostDetails {
   /** A reel's video on file, and when it was transcribed: what indexing it would involve. */
   videoUrl: string | null;
   transcribedAt: string | null;
+  /** For a post the AI wasn't sure about: where it thinks the post might go, best first. */
+  suggestions: string[];
 }
 
 export async function fetchDetails(shortcode: string): Promise<PostDetails> {
-  const { data } = await supabase
+  const [{ data }, suggestions] = await Promise.all([supabase
     .from('posts')
     .select('transcript, index_error, index_attempts, video_url, transcribed_at')
     .eq('shortcode', shortcode)
@@ -262,14 +267,47 @@ export async function fetchDetails(shortcode: string): Promise<PostDetails> {
       index_attempts: number | null;
       video_url: string | null;
       transcribed_at: string | null;
-    }>();
+    }>(), fetchSuggestions(shortcode)]);
   return {
     transcript: data?.transcript || null,
     indexError: data?.index_error ?? null,
     indexAttempts: data?.index_attempts ?? 0,
     videoUrl: data?.video_url ?? null,
     transcribedAt: data?.transcribed_at ?? null,
+    suggestions,
   };
+}
+
+/** A post's suggested categories. Empty until the suggestions migration has run. */
+async function fetchSuggestions(shortcode: string): Promise<string[]> {
+  const { data } = await supabase.from('posts').select('suggestions').eq('shortcode', shortcode).maybeSingle<{ suggestions: string[] | null }>();
+  return data?.suggestions ?? [];
+}
+
+/** A post that needs a category, with where the AI thinks it might go. */
+export type Unsure = Post & { suggestions: string[] | null };
+
+/**
+ * Every post the AI filed as not sure, newest saved first, for sorting them one by one.
+ * Posts with suggestions come first: they take one press each.
+ */
+export async function fetchUnsure(): Promise<Unsure[]> {
+  const out: Unsure[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('posts')
+      .select(`${POST_COLUMNS}, suggestions`)
+      .not('categorized_at', 'is', null)
+      .or(`category.is.null,category.eq.${UNCATEGORIZED}`)
+      .order('saved_rank', { ascending: false, nullsFirst: false })
+      .order('shortcode')
+      .range(from, from + 999)
+      .returns<Unsure[]>();
+    if (error) throw new Error(error.message.includes('suggestions') ? 'Suggestions are not set up yet: run the suggestions migration.' : error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return out.sort((a, b) => Number((b.suggestions?.length ?? 0) > 0) - Number((a.suggestions?.length ?? 0) > 0));
 }
 
 /** One post as the grid shows it, read again after it changed on the server. */
