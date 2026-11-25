@@ -15,7 +15,7 @@
  *   `sync`     — what was last uploaded to the account, per post. See sync.ts.
  */
 
-import { SCHEMA_VERSION, type PostRecord } from '../types';
+import { SCHEMA_VERSION, type CaptureSource, type PostRecord } from '../types';
 
 const DB_NAME = 'saved-index';
 const DB_VERSION = 9;
@@ -236,6 +236,7 @@ function resident(): Promise<Map<string, PostRecord>> {
  */
 export async function putIfNew(
   records: PostRecord[],
+  source: CaptureSource = 'network',
 ): Promise<{ inserted: number; refreshed: number }> {
   if (!records.length) return { inserted: 0, refreshed: 0 };
   const db = await openDb();
@@ -256,7 +257,7 @@ export async function putIfNew(
           // Interception carries fields the DOM fallback cannot see, and a new saved-feed
           // capture also carries a current CDN URL. Preserve analysis while refreshing
           // mutable capture data.
-          const merged = mergeCaptured(existing, rec) ?? existing;
+          const merged = mergeCaptured(existing, rec, source) ?? existing;
           const next = { ...merged, seenInSavedFeed: rec.seenInSavedFeed };
           store.put(next);
           written.push(next);
@@ -284,7 +285,7 @@ export async function putIfNew(
 }
 
 /** Returns a merged record when a fresh capture improves it, else null. */
-export function mergeCaptured(existing: PostRecord, incoming: PostRecord): PostRecord | null {
+export function mergeCaptured(existing: PostRecord, incoming: PostRecord, source: CaptureSource = 'network'): PostRecord | null {
   const merged = { ...existing };
   let changed = false;
 
@@ -322,14 +323,20 @@ export function mergeCaptured(existing: PostRecord, incoming: PostRecord): PostR
   // library into a wall of broken images after a few days. A fresh saved-feed capture is
   // authoritative for these fields, while empty DOM-fallback values never erase richer
   // data already on file.
-  refresh('caption');
-  refresh('hashtags');
-  refresh('handle');
+  //
+  // A grid tile is not a fresh capture of the text: its alt text differs from Instagram's
+  // own description, and its hashtags are parsed out of that alt. Letting it refresh them
+  // flipped a post's words on every page load, which made the server re-embed it and grew
+  // the web app's "to update" count after scans that found nothing new. It only fills gaps.
+  const text: (key: keyof PostRecord) => void = source === 'grid' ? fill : refresh;
+  text('caption');
+  text('hashtags');
+  text('handle');
   refresh('thumbnailUrl');
-  refresh('videoUrl');
-  refresh('permalink');
-  refresh('altText');
-  refresh('audioTrackName');
+  text('videoUrl');
+  text('permalink');
+  text('altText');
+  text('audioTrackName');
   if (!existing.isVideo && incoming.isVideo) {
     merged.isVideo = true;
     changed = true;

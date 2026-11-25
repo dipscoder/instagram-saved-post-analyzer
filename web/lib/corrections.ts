@@ -11,6 +11,24 @@ export async function correctCategory(shortcode: string, category: string | null
   if (data !== true) throw new Error('That post is no longer in your library.');
 }
 
+/** How a post was filed: what Undo puts back after a move. */
+export type Filing = { category: string | null; subcategory: string | null; model_used: string | null };
+
+/**
+ * Takes a move back: the post is filed exactly as it was before, subcategory and all, and
+ * the correction goes, since a move the user undid was not a mistake by the AI.
+ */
+export async function undoCorrection(shortcode: string, before: Filing): Promise<void> {
+  const { data, error } = await supabase.rpc('undo_correction', {
+    p_shortcode: shortcode,
+    p_category: before.category,
+    p_subcategory: before.subcategory,
+    p_model_used: before.model_used ?? 'you',
+  });
+  if (error) throw new Error(error.message);
+  if (data !== true) throw new Error('Couldn’t undo: the post has changed since.');
+}
+
 export async function countCorrections(): Promise<number> {
   const { count, error } = await supabase.from('corrections').select('shortcode', { count: 'exact', head: true });
   if (error) throw new Error(error.message);

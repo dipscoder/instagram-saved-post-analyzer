@@ -133,6 +133,7 @@ async function handle(req: Request): Promise<unknown> {
       const renamed = collection ? await rememberCollection(collection) : false;
       const { inserted, refreshed } = await db.putIfNew(
         posts.map((p: CapturedPost, i) => toRecord(clamp(p), ranks[i] ?? null, collection?.id ?? null)),
+        req.source === 'grid' ? 'grid' : 'network',
       );
       // A refreshed record matters too: its Instagram CDN thumbnail may have just been
       // replaced with a fresh signed URL, which the thumbnail copy needs.

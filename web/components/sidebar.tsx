@@ -2,7 +2,7 @@
 
 import { Bookmark, CircleHelp, Folder } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { Facets, View } from '@/lib/library';
+import { NO_CATEGORY, type Facets, type View } from '@/lib/library';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -76,7 +76,7 @@ export function Sidebar({
   return (
     <nav className="p-3">
       {row({ kind: 'all' }, 'All saved', facets.total, <Bookmark />)}
-      {facets.needsLook > 0 && row({ kind: 'needs-look' }, 'To review', facets.needsLook, <CircleHelp />, undefined, 'Not indexed yet, or the AI wasn’t sure')}
+      {facets.needsLook > 0 && row({ kind: 'needs-look' }, NO_CATEGORY, facets.needsLook, <CircleHelp />, undefined, 'Not organised yet, or the AI wasn’t sure where it goes')}
       {facets.collections.length > 0 && (
         <Section title="Collections">
           {facets.collections.map((c) => row({ kind: 'collection', id: c.key }, c.label, c.count, <Folder />, c.key))}
@@ -96,7 +96,7 @@ export function FilterChips({ facets, view, onView }: { facets: Facets | null; v
   if (!facets) return null;
   const items: { v: View; label: string }[] = [
     { v: { kind: 'all' }, label: 'All' },
-    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `To review · ${facets.needsLook}` }] : []),
+    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `${NO_CATEGORY} · ${facets.needsLook}` }] : []),
     ...facets.collections.map((c) => ({ v: { kind: 'collection', id: c.key } as View, label: c.label })),
     ...facets.categories.map((c) => ({ v: { kind: 'category', name: c.key } as View, label: c.label })),
   ];

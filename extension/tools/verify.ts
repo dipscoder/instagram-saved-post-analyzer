@@ -566,6 +566,15 @@ console.log('\nfresh capture merge');
     merged?.category === old.category && merged.summary === old.summary && merged.modelUsed === old.modelUsed);
   check('the original save rank is stable', merged?.savedRank === old.savedRank);
   check('an identical capture causes no rewrite', mergeCaptured(fresh, fresh) === null);
+
+  // A grid tile's alt text is not Instagram's description, and its hashtags come from it.
+  const tile = { ...fresh, caption: '', hashtags: ['photoby'], altText: 'Photo by @x on May 1', thumbnailUrl: 'https://cdn/tile.jpg' };
+  const fromGrid = mergeCaptured(fresh, tile, 'grid');
+  check('a grid tile never overwrites network text',
+    fromGrid?.altText === fresh.altText && fromGrid.hashtags === fresh.hashtags && fromGrid.caption === fresh.caption);
+  check('a grid tile still refreshes the thumbnail URL', fromGrid?.thumbnailUrl === tile.thumbnailUrl);
+  check('a grid tile fills text that is missing',
+    mergeCaptured({ ...fresh, altText: null }, tile, 'grid')?.altText === tile.altText);
 }
 
 console.log('\naccount sync plan');

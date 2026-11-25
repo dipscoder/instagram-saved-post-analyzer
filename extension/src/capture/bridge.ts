@@ -10,7 +10,7 @@ import { extractPosts } from './extract';
 import { scrapeSavedGrid } from './dom-scrape';
 import { collectionFromPath, isSavedRoute } from '../routes';
 import { WIRE, send, type BridgeMessage, type MainWorldMessage } from '../messaging';
-import type { CapturedPost } from '../types';
+import type { CapturedPost, CaptureSource } from '../types';
 
 const SCROLL_MIN_MS = 800;
 const SCROLL_MAX_MS = 2000;
@@ -20,7 +20,11 @@ const IDLE_ROUNDS_BEFORE_STOP = 3;
 const SETTLE_MS = 5000;
 
 let rateLimited = false;
-const seen = new Set<string>();
+/**
+ * Posts already reported this page session, and from where. A grid tile only carries what
+ * its `<img alt>` says, so network data for the same post is still reported after it.
+ */
+const seen = new Map<string, CaptureSource>();
 
 /**
  * Identifies this page load to the worker. Posts arrive in feed order, which is save
@@ -37,7 +41,7 @@ export function startBridge(): void {
   announceReady();
 
   // Cover the case where the grid painted from memory with no network call at all.
-  setTimeout(() => void ingest(scrapeSavedGrid()), 1500);
+  setTimeout(() => void ingest(scrapeSavedGrid(), 'grid'), 1500);
 }
 
 function announceReady(): void {
@@ -75,10 +79,10 @@ function handleMessage(ev: MessageEvent): void {
   for (const payload of msg.payloads) {
     posts.push(...extractPosts(payload.json, payload.trusted ? 'any' : 'saved'));
   }
-  void ingest(posts);
+  void ingest(posts, 'network');
 }
 
-async function ingest(posts: CapturedPost[]): Promise<void> {
+async function ingest(posts: CapturedPost[], source: CaptureSource): Promise<void> {
   // Only the user's own collections, which have numeric ids. All posts and Audio are views
   // of everything, not folders the user filed anything in.
   const where = collectionFromPath();
@@ -91,12 +95,13 @@ async function ingest(posts: CapturedPost[]): Promise<void> {
   // The shortcode becomes a database key and part of a permalink, and it arrives from a
   // context the page can write to. Instagram's own codes are short base64url strings.
   const key = (p: CapturedPost) => `${collection?.id ?? ''}:${p.shortcode}`;
-  const fresh = posts.filter((p) => SHORTCODE.test(p.shortcode ?? '') && !seen.has(key(p)));
+  const known = (p: CapturedPost) => (source === 'grid' ? seen.has(key(p)) : seen.get(key(p)) === 'network');
+  const fresh = posts.filter((p) => SHORTCODE.test(p.shortcode ?? '') && !known(p));
   if (!fresh.length) return;
-  for (const p of fresh) seen.add(key(p));
+  for (const p of fresh) seen.set(key(p), source);
 
   try {
-    await send({ type: 'posts:captured', posts: fresh, pageId, collection });
+    await send({ type: 'posts:captured', posts: fresh, pageId, collection, source });
   } catch {
     // Service worker asleep or extension reloading; the tile will come round again.
     for (const p of fresh) seen.delete(key(p));
@@ -150,7 +155,7 @@ export function startHarvest(): HarvestHandle {
       await sleep(SCROLL_MIN_MS + Math.random() * (SCROLL_MAX_MS - SCROLL_MIN_MS));
 
       // Pick up any tiles that rendered without a network call.
-      void ingest(scrapeSavedGrid());
+      void ingest(scrapeSavedGrid(), 'grid');
 
       const grew = document.documentElement.scrollHeight > heightBefore;
       const foundMore = seen.size > countBefore;
@@ -161,7 +166,7 @@ export function startHarvest(): HarvestHandle {
         // the feed. Since 'complete' is what lets the census offer posts for deletion,
         // buy one long settle before believing it.
         await sleep(SETTLE_MS);
-        void ingest(scrapeSavedGrid());
+        void ingest(scrapeSavedGrid(), 'grid');
         if (
           document.documentElement.scrollHeight > heightBefore ||
           seen.size > countBefore

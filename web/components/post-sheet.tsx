@@ -7,7 +7,8 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
-import { fetchDetails, handleOf, INDEX_ERRORS, instagramUrl, profileUrl, type Post, type PostDetails } from '@/lib/library';
+import type { Filing } from '@/lib/corrections';
+import { categoryLabel, fetchDetails, handleOf, INDEX_ERRORS, instagramUrl, profileUrl, type Post, type PostDetails } from '@/lib/library';
 
 export function PostSheet({
   post,
@@ -20,8 +21,8 @@ export function PostSheet({
   post: Post | null;
   thumb?: string;
   onClose: () => void;
-  /** The user moved the post to another category. */
-  onFixed: (post: Post, category: string | null) => void;
+  /** The user moved the post to another category, or put it back. */
+  onFixed: (post: Post, filing: Filing) => void;
   /** The post was indexed from the panel; this is how the server now holds it. */
   onIndexed: (post: Post) => void;
   /** Moves to the previous or next post in the grid; absent at either end. */
@@ -53,12 +54,13 @@ export function PostSheet({
           <div className="flex-1 overflow-y-auto">
             {thumb && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={thumb} alt="" referrerPolicy="no-referrer" className="aspect-[4/5] w-full bg-muted object-cover" />
+              // Kept short, so what the AI made of the post is in view without scrolling.
+              <img src={thumb} alt="" referrerPolicy="no-referrer" className="h-[min(40vh,22rem)] w-full bg-muted object-contain" />
             )}
             <div className="space-y-5 p-5">
               <div>
                 <SheetTitle className="text-base font-semibold">
-                  {post.categorized_at === null ? 'Not indexed yet' : post.category && post.category !== 'Uncategorized' ? post.category : 'Unknown'}
+                  {categoryLabel(post)}
                   {post.subcategory && <span className="font-normal text-muted-foreground"> · {post.subcategory}</span>}
                 </SheetTitle>
                 <SheetDescription className="mt-0.5 text-[13px] text-muted-foreground">
@@ -70,7 +72,15 @@ export function PostSheet({
                     'Unknown account'
                   )}
                 </SheetDescription>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                {post.summary && <p className="mt-3 text-sm leading-relaxed">{post.summary}</p>}
+                {post.tags.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {post.tags.map((t) => (
+                      <span key={t} className="rounded-full border px-2.5 py-0.5 text-[12px] text-muted-foreground">{t}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <IndexPost
                     key={post.shortcode}
                     post={post}
@@ -83,23 +93,15 @@ export function PostSheet({
                   <CategoryFix
                     key={`fix-${post.shortcode}`}
                     post={post}
-                    onFixed={(category) => onFixed(post, category)}
+                    onFixed={(filing) => onFixed(post, filing)}
                   />
                 </div>
               </div>
               {post.categorized_at === null && details?.indexError && (
                 <p className="rounded-md border px-3 py-2 text-[13px] text-muted-foreground">
-                  Couldn’t index this post. {INDEX_ERRORS[details.indexError] ?? ''}{' '}
-                  {details.indexAttempts >= 3 ? 'Index leaves it out of runs until it changes.' : 'Index will try it again.'}
+                  Couldn’t organise this post. {INDEX_ERRORS[details.indexError] ?? ''}{' '}
+                  {details.indexAttempts >= 3 ? 'It is left out of Organise until it changes, or you try again.' : 'Organise will try it again.'}
                 </p>
-              )}
-              {post.summary && <p className="text-sm leading-relaxed">{post.summary}</p>}
-              {post.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {post.tags.map((t) => (
-                    <span key={t} className="rounded-full border px-2.5 py-0.5 text-[12px] text-muted-foreground">{t}</span>
-                  ))}
-                </div>
               )}
               {post.audio_track_name && <p className="text-[13px] text-muted-foreground">Audio · {post.audio_track_name}</p>}
               {post.is_video && post.duration_sec ? (

@@ -6,15 +6,16 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/toast';
-import { fetchPost, type Post, type PostDetails } from '@/lib/library';
+import { fetchPost, NO_CATEGORY, type Post, type PostDetails } from '@/lib/library';
 import { indexOne, oneQuoteUsd, priceLabel } from '@/lib/sorting';
 
 /**
- * Indexes one post from its panel, with its price in view.
+ * Organises one post from its panel, with its price in view.
  *
- * A post never indexed gets an Index this post button: one press, since one post costs a
- * fraction of a cent. A filed post gets Index again, beside Change category, which replaces
- * an answer already paid for (or the user's own choice), so it asks first.
+ * A post never organised gets an Organise this post button, priced on its face: one press,
+ * since one post costs a fraction of a cent. A filed post gets Organise again, beside
+ * Change category, which replaces an answer already paid for (or the user's own choice),
+ * so it asks first.
  *
  * Renders as items of the panel's button row: the note, the question and any error take
  * a full line of their own below it.
@@ -53,9 +54,9 @@ export function IndexPost({
       const fresh = await fetchPost(post.shortcode);
       if (fresh) onIndexed(fresh);
       setAsking(false);
-      if (!ok) setError('Couldn’t index this post this time.');
-      else if (fresh?.category && fresh.category !== 'Uncategorized') toast(`Indexed as ${fresh.category}`);
-      else toast('Indexed. The AI wasn’t sure, so it stays in To review.');
+      if (!ok) setError('Couldn’t organise this post this time.');
+      else if (fresh?.category && fresh.category !== 'Uncategorized') toast(`Filed under ${fresh.category}`);
+      else toast(`The AI wasn’t sure, so it stays in ${NO_CATEGORY}.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -71,19 +72,20 @@ export function IndexPost({
       <>
         <Button size="sm" onClick={() => void run()} disabled={!ready || running}>
           {spinner || <Sparkles />}
-          {running ? (listens ? 'Listening and indexing…' : 'Indexing…') : givenUp ? 'Try again' : 'Index this post'}
+          {running ? (listens ? 'Listening and organising…' : 'Organising…') : givenUp ? 'Try again' : 'Organise this post'}
+          {ready && !running && <span className="font-normal opacity-70">· {price}</span>}
         </Button>
-        {ready && !error && <p className="order-last basis-full text-[12px] text-muted-foreground">{note}</p>}
+        {ready && !error && listens && <p className="order-last basis-full text-[12px] text-muted-foreground">{note}</p>}
         {errorLine}
       </>
     );
   }
 
   const again = (
-    <Tooltip label="Ask the AI to file it again">
+    <Tooltip label="Ask the AI to read it again">
       <Button variant="outline" size="sm" className="order-1" onClick={() => setAsking(true)} disabled={asking || running}>
         <Sparkles />
-        Index again
+        Organise again
       </Button>
     </Tooltip>
   );
@@ -97,7 +99,7 @@ export function IndexPost({
     <>
       {again}
       <div className="order-last basis-full rounded-lg border p-3 text-[13px]">
-        <p className="font-medium">Index this post again?</p>
+        <p className="font-medium">Organise this post again?</p>
         <p className="mt-0.5 text-muted-foreground">
           {post.model_used === 'you'
             ? 'The AI reads it afresh and replaces the category you chose, along with its summary and tags.'
@@ -107,7 +109,7 @@ export function IndexPost({
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={() => void run()} disabled={!ready || running}>
             {spinner}
-            {running ? 'Indexing…' : 'Yes, index again'}
+            {running ? 'Organising…' : 'Yes, organise again'}
           </Button>
           <Button size="sm" variant="ghost" onClick={close} disabled={running}>
             {error ? 'Close' : 'Cancel'}

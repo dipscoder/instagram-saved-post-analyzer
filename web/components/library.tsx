@@ -17,6 +17,7 @@ import {
   fetchFacets,
   fetchPosts,
   knownThumbnail,
+  NO_CATEGORY,
   PAGE_SIZE,
   signThumbnails,
   type Facets,
@@ -43,7 +44,7 @@ function title(view: View, facets: Facets | null): string {
     case 'all':
       return 'All saved';
     case 'needs-look':
-      return 'To review';
+      return NO_CATEGORY;
     case 'category':
       return view.name;
     case 'collection':
@@ -177,7 +178,9 @@ export function Library({ session }: { session: Session }) {
   const posts = entry?.posts ?? [];
   const settled = entry !== undefined && !entry.loading;
   const known = debounced ? null : expected(view, facets);
-  const count = settled ? posts.length : (known ?? posts.length);
+  // A plain view shows the sidebar's count, not how many pages have loaded so far.
+  const count = known ?? posts.length;
+  const scope = debounced && view.kind !== 'all' ? title(view, facets) : null;
 
   // The open post's neighbours in the grid, for ← and → in the panel.
   const at = open ? posts.findIndex((p) => p.shortcode === open.shortcode) : -1;
@@ -251,26 +254,40 @@ export function Library({ session }: { session: Session }) {
             <div className="mb-5 flex items-baseline gap-3">
               <h1 className="text-xl font-semibold tracking-tight">{debounced ? `Results for “${debounced}”` : title(view, facets)}</h1>
               <span className="text-[13px] tabular-nums text-muted-foreground">
-                {count.toLocaleString()}
-                {settled && entry.more ? '+' : ''} {count === 1 ? 'post' : 'posts'}
+                {count.toLocaleString()} {count === 1 ? 'post' : 'posts'}
               </span>
+              {scope && (
+                <span className="text-[13px] text-muted-foreground">
+                  in {scope} ·{' '}
+                  <button type="button" onClick={() => setView({ kind: 'all' })} className="font-medium text-foreground underline underline-offset-2">
+                    Search all
+                  </button>
+                </span>
+              )}
             </div>
 
-            {/* Indexing is offered wherever there is something to index, not only in To review. */}
+            {/* Organising is offered wherever there is something to do, not only in Needs a category. */}
             {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
-              <SortPanel facets={facets} onSorted={refresh} />
+              <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} />
             )}
 
             {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
 
             {settled && !entry.error && posts.length === 0 && (
               <div className="rounded-lg border border-dashed px-6 py-16 text-center">
-                <p className="font-medium">{debounced ? 'Nothing matches that search' : 'Nothing here yet'}</p>
+                <p className="font-medium">{debounced ? `Nothing matches that${scope ? ` in ${scope}` : ''}` : 'Nothing here yet'}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {debounced
-                    ? 'Try fewer or different words.'
+                    ? scope
+                      ? 'It may be in another category.'
+                      : 'Try fewer or different words, or describe it another way.'
                     : 'Open your saved posts on Instagram and press Find new posts in the Saved Index extension. Posts appear here as they sync.'}
                 </p>
+                {scope && (
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => setView({ kind: 'all' })}>
+                    Search all your saves
+                  </Button>
+                )}
                 {!debounced && (
                   <Link href="/how-it-works" className="mt-4 inline-block text-sm font-medium underline underline-offset-4">
                     See how it works
@@ -308,11 +325,9 @@ export function Library({ session }: { session: Session }) {
         post={open}
         thumb={open ? knownThumbnail(open) : undefined}
         onClose={() => setOpen(null)}
-        onFixed={(post, category) => {
+        onFixed={(post, filing) => {
           // An undo can land after the panel closed or moved on; only the post it is about changes.
-          setOpen((o) =>
-            o?.shortcode === post.shortcode ? { ...o, category, subcategory: null, categorized_at: new Date().toISOString(), model_used: 'you' } : o,
-          );
+          setOpen((o) => (o?.shortcode === post.shortcode ? { ...o, ...filing, categorized_at: new Date().toISOString() } : o));
           refresh();
         }}
         onIndexed={(post) => {

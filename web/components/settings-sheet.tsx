@@ -46,7 +46,8 @@ export function SettingsSheet({
   }, [open]);
 
   const total = facets?.total ?? 0;
-  const indexed = facets ? facets.total - facets.unsorted : 0;
+  // Posts the AI has read: filed, or filed as not sure. Not those never tried or given up on.
+  const organised = facets ? facets.total - facets.unsorted - facets.failed : 0;
 
   async function clear() {
     setClearing(true);
@@ -81,7 +82,7 @@ export function SettingsSheet({
 
           <Section title="Library">
             <Row label="Posts" value={total.toLocaleString()} />
-            <Row label="Indexed" value={indexed.toLocaleString()} />
+            <Row label="Organised by the AI" value={organised.toLocaleString()} />
             <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
               New posts come from the Saved Index extension. Open your saved posts on Instagram and press Find new posts.
             </p>
@@ -93,43 +94,30 @@ export function SettingsSheet({
             ) : (
               <>
                 <Row label="This month" value={spend ? usd(spend.monthUsd) : '…'} />
-                <Row label="All time" value={spend ? `${usd(spend.usd)} · ${spend.posts.toLocaleString()} posts` : '…'} />
+                <Row label="All time" value={spend ? usd(spend.usd) : '…'} />
+                <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
+                  {spend ? `Over ${spend.posts.toLocaleString()} AI runs. ` : ''}A post can take more than one: organising it, then
+                  improving its search or listening to a reel later.
+                </p>
               </>
             )}
-          </Section>
-
-          <Section title="Corrections">
-            <Row label="Categories you fixed" value={corrections === null ? '…' : corrections.toLocaleString()} />
-            <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
-              Each fix is a real mistake to measure filing against. Download them to run the accuracy eval on your own posts.
-            </p>
-            <div className="pt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!corrections}
-                onClick={() => downloadCorrections().catch((e: Error) => setCorrectionsError(e.message))}
-              >
-                Download corrections
-              </Button>
-            </div>
-            {correctionsError && <p className="pt-2 text-[13px] text-destructive">{correctionsError}</p>}
           </Section>
 
           <Section title="Clear library">
             <p className="text-[13px] leading-relaxed text-muted-foreground">
               Erases every post, picture, collection, AI summary and correction in your account, and in each browser running the
-              extension the next time it syncs. You can then find and index from scratch. Indexing is paid again, and
+              extension the next time it syncs. You can then find and organise from scratch. Organising is paid again, and
               your spend record is kept.
             </p>
             <div className="flex flex-wrap items-center gap-2 pt-3">
               {confirming ? (
+                // Cancel lands where Clear library was, so a double-click erases nothing.
                 <>
-                  <Button variant="destructive" size="sm" disabled={clearing} onClick={() => void clear()}>
-                    {clearing ? 'Clearing…' : `Erase ${total.toLocaleString()} posts and ${indexed.toLocaleString()} summaries`}
-                  </Button>
                   <Button variant="ghost" size="sm" disabled={clearing} onClick={() => setConfirming(false)}>
                     Cancel
+                  </Button>
+                  <Button variant="destructive" size="sm" disabled={clearing} onClick={() => void clear()}>
+                    {clearing ? 'Clearing…' : `Erase ${total.toLocaleString()} posts and ${organised.toLocaleString()} summaries`}
                   </Button>
                 </>
               ) : (
@@ -141,6 +129,27 @@ export function SettingsSheet({
             {cleared && <p className="pt-2 text-[13px]">Library cleared.</p>}
             {clearError && <p className="pt-2 text-[13px] text-destructive">{clearError}</p>}
           </Section>
+
+          <details className="mt-6 border-t pt-5">
+            <summary className="cursor-pointer text-[13px] font-semibold text-muted-foreground hover:text-foreground">For developers</summary>
+            <div className="pt-3">
+              <Row label="Categories you fixed" value={corrections === null ? '…' : corrections.toLocaleString()} />
+              <p className="pt-2 text-[13px] leading-relaxed text-muted-foreground">
+                Each fix is a real mistake to measure the AI against. Download them to run the accuracy eval on your own posts.
+              </p>
+              <div className="pt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!corrections}
+                  onClick={() => downloadCorrections().catch((e: Error) => setCorrectionsError(e.message))}
+                >
+                  Download corrections
+                </Button>
+              </div>
+              {correctionsError && <p className="pt-2 text-[13px] text-destructive">{correctionsError}</p>}
+            </div>
+          </details>
         </div>
       </SheetContent>
     </Sheet>
