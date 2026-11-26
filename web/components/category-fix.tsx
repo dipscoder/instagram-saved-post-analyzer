@@ -3,7 +3,7 @@
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { CORRECTION_TARGETS } from '@saved-index/shared/corrections';
 import { Check, ChevronDown, Pencil } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { correctCategory, undoCorrection, type Filing } from '@/lib/corrections';
@@ -16,8 +16,21 @@ const TARGETS = [...CORRECTION_TARGETS.filter((c): c is string => c !== null).so
  * Change category, in the post panel: a real button that opens every category plus
  * "Needs a category". Free, and it sticks: nothing re-files a post over the user's own
  * choice. A toast confirms the move, and its Undo puts the post back exactly as it was.
+ *
+ * A post the AI wasn't sure about also shows where it thinks the post might go, one press
+ * each, and with `shortcuts` the keys 1, 2 and 3 pick them.
  */
-export function CategoryFix({ post, onFixed }: { post: Post; onFixed: (filing: Filing) => void }) {
+export function CategoryFix({
+  post,
+  onFixed,
+  suggestions = [],
+  shortcuts = false,
+}: {
+  post: Post;
+  onFixed: (filing: Filing) => void;
+  suggestions?: string[];
+  shortcuts?: boolean;
+}) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
@@ -38,6 +51,24 @@ export function CategoryFix({ post, onFixed }: { post: Post; onFixed: (filing: F
     }
   }
 
+  const picks = suggestions.filter((c) => TARGETS.includes(c)).slice(0, 3);
+  const pick = useRef<(i: number) => void>(() => undefined);
+  pick.current = (i) => {
+    const c = picks[i];
+    if (c && !saving) move(c);
+  };
+  useEffect(() => {
+    if (!shortcuts) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target instanceof HTMLElement ? e.target : null;
+      if (t?.closest('input, textarea, [role="menu"]')) return;
+      if (/^[1-3]$/.test(e.key)) pick.current(Number(e.key) - 1);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [shortcuts]);
+
   function move(to: string | null) {
     const before: Filing = { category: post.category, subcategory: post.subcategory, model_used: post.model_used };
     void save(
@@ -49,13 +80,28 @@ export function CategoryFix({ post, onFixed }: { post: Post; onFixed: (filing: F
     );
   }
 
+  // Renders as items of the caller's flex row: the suggestions take a line above it, an
+  // error a line below.
   return (
-    <div>
+    <div className="contents">
+      {picks.length > 0 && (
+        <div className="order-first mb-1 basis-full">
+          <p className="mb-1.5 text-[12px] text-muted-foreground">Looks like</p>
+          <div className="flex flex-wrap gap-2">
+            {picks.map((c, i) => (
+              <Button key={c} size="sm" variant={i === 0 ? 'default' : 'outline'} disabled={saving} onClick={() => move(c)}>
+                {c}
+                {shortcuts && <kbd className="font-mono text-[10px] opacity-60">{i + 1}</kbd>}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       <Menu.Root>
         <Menu.Trigger asChild>
           <Button variant="outline" size="sm" disabled={saving}>
             <Pencil />
-            {saving ? 'Saving…' : filed ? 'Change category' : 'Choose a category'}
+            {saving ? 'Saving…' : picks.length ? 'Something else' : filed ? 'Change category' : 'Choose a category'}
             <ChevronDown className="opacity-50" />
           </Button>
         </Menu.Trigger>
@@ -83,7 +129,7 @@ export function CategoryFix({ post, onFixed }: { post: Post; onFixed: (filing: F
           </Menu.Content>
         </Menu.Portal>
       </Menu.Root>
-      {error && <p className="mt-2 text-[12px] text-destructive">{error}</p>}
+      {error && <p className="order-last basis-full text-[12px] text-destructive">{error}</p>}
     </div>
   );
 }

@@ -218,3 +218,9 @@ function text(value: unknown): string {
  * batch of 25 costs a fraction of that, and keyword rules cost nothing.
  */
 export const SERVER_QUOTE_USD_PER_POST = 0.0012;
+
+/**
+ * The most asking for one post's suggested categories can cost, rounded up: a category
+ * decision only (input tokens, no summary), with a small picture for a thin post.
+ */
+export const SUGGEST_QUOTE_USD_PER_POST = 0.0002;

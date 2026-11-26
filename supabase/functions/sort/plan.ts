@@ -35,6 +35,12 @@ export const SORT_COLUMNS =
   'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
   'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at,index_attempts';
 
+/**
+ * What a suggestions request also reads. Kept out of SORT_COLUMNS, so filing keeps working
+ * on a database where the suggestions migration has not run yet.
+ */
+export const SUGGEST_COLUMNS = `${SORT_COLUMNS},model_used,suggestions`;
+
 export interface SortRow {
   shortcode: string;
   handle: string;
@@ -57,6 +63,10 @@ export interface SortRow {
   transcribed_at: string | null;
   /** Failed indexing attempts since the post last changed; at MAX_ATTEMPTS it is left out. */
   index_attempts: number;
+  /** Read only for a suggestions request (SUGGEST_COLUMNS). */
+  model_used?: string | null;
+  /** The categories the AI would suggest; null when it has not been asked. */
+  suggestions?: string[] | null;
 }
 
 export class BadSortRequest extends Error {}
@@ -71,17 +81,24 @@ export interface SortRequest {
    * One post at a time, so a re-index can never re-bill a library in one request.
    */
   refile: boolean;
+  /**
+   * Ask only which categories the AI would suggest for posts it filed as not sure, and
+   * never asked about before. Category decisions only: no summary is rewritten.
+   */
+  suggest: boolean;
 }
 
 export function parseSortRequest(body: unknown): SortRequest {
-  const { shortcodes: raw, refile = false } = (body ?? {}) as { shortcodes?: unknown; refile?: unknown };
+  const { shortcodes: raw, refile = false, suggest = false } = (body ?? {}) as { shortcodes?: unknown; refile?: unknown; suggest?: unknown };
   if (!Array.isArray(raw) || raw.length === 0) throw new BadSortRequest('No posts to sort.');
   if (raw.length > MAX_SORT_POSTS) throw new BadSortRequest(`At most ${MAX_SORT_POSTS} posts per request.`);
   if (!raw.every((s) => typeof s === 'string' && SHORTCODE.test(s))) throw new BadSortRequest('A post id is not valid.');
   if (typeof refile !== 'boolean') throw new BadSortRequest('refile is true or false.');
+  if (typeof suggest !== 'boolean') throw new BadSortRequest('suggest is true or false.');
+  if (refile && suggest) throw new BadSortRequest('Ask for suggestions or refile, not both.');
   const shortcodes = [...new Set(raw as string[])];
   if (refile && shortcodes.length !== 1) throw new BadSortRequest('Index again takes one post at a time.');
-  return { shortcodes, refile };
+  return { shortcodes, refile, suggest };
 }
 
 export function toInput(row: SortRow): FilingInput {
@@ -163,6 +180,36 @@ export function planSort(rows: SortRow[], { refile = false } = {}): SortPlan {
     if (hit) plan.ruled.push({ row, filed: filedByRules(input, hit) });
     else if (needsPicture(input) && row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
     else if (hasTextSignal(input)) plan.text.push(row);
+    else plan.unreadable.push(row);
+  }
+  return plan;
+}
+
+/** Filed, but the AI was not sure where: the posts that need a category from the user. */
+export function isUnsure(row: Pick<SortRow, 'categorized_at' | 'category'>): boolean {
+  return row.categorized_at !== null && (row.category === null || row.category === 'Uncategorized');
+}
+
+export interface SuggestPlan {
+  text: SortRow[];
+  /** Too little text: asked about with their stored thumbnail, one call each. */
+  vision: SortRow[];
+  /** Nothing to ask from: recorded as asked, with no suggestions, and never billed. */
+  unreadable: SortRow[];
+}
+
+/**
+ * The posts in a suggestions request worth asking about: not sure, never asked, and not
+ * placed in Needs a category by the user's own hand. A request sent twice bills nothing
+ * the second time, because the first one recorded an answer for every post it asked about.
+ */
+export function planSuggest(rows: SortRow[]): SuggestPlan {
+  const plan: SuggestPlan = { text: [], vision: [], unreadable: [] };
+  for (const row of rows) {
+    if (!isUnsure(row) || row.model_used === 'you' || Array.isArray(row.suggestions)) continue;
+    const input = toInput(row);
+    if (needsPicture(input) && row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
+    else if (hasAnyText(row)) plan.text.push(row);
     else plan.unreadable.push(row);
   }
   return plan;

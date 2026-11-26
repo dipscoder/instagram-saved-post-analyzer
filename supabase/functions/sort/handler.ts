@@ -14,6 +14,10 @@
  * `refile: true` is Index again, from a post's panel: one post, filed by the model even if
  * it was filed before or given up on. The web app quotes it and asks first.
  *
+ * A post filed as not sure keeps the categories the AI found likeliest as suggestions.
+ * `suggest: true` asks for them for posts filed before suggestions existed: category
+ * decisions only, a fraction of the cost of filing, and each post is asked at most once.
+ *
  *   200 { sorted, embedded, transcribed, unreadable, failed, usd }
  *   400 bad request · 401 not signed in · 402 daily limit reached
  *   429 OpenAI is rate limiting (retry) · 502 OpenAI or the database failed · 500 not configured
@@ -43,7 +47,9 @@ import {
   parseSortRequest,
   pickTranscribe,
   planSort,
+  planSuggest,
   SORT_COLUMNS,
+  SUGGEST_COLUMNS,
   thumbnailPath,
   verdictRow,
   type SortRequest,
@@ -87,6 +93,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   if (spent === null) return error(502, 'Could not read today’s usage. Try again shortly.');
   if (spent >= env.capUsd) return error(402, capReached(env.capUsd));
 
+  if (request.suggest) return suggest(env, caller, userId, request.shortcodes);
+
   const { refile } = request;
   const rows = await readPosts(env.supabaseUrl, caller, request.shortcodes);
   if (!rows) return error(502, 'Could not read your posts. Try again shortly.');
@@ -101,6 +109,8 @@ async function route(req: Request, env: Env): Promise<Response> {
   const toEmbed: { row: SortRow; filed?: Filed }[] = [...plan.ruled, ...plan.embedOnly.map((row) => ({ row }))];
   // Recorded on the posts, so a post that cannot be indexed says why and is not retried forever.
   const failures: Failure[] = [...reels.failures];
+  // What the AI would suggest for each post it filed as not sure.
+  const suggestions: Suggestion[] = [];
   let usd = reels.usd;
   let rateLimited = reels.rateLimited;
   const billed = reels.count + plan.text.length + plan.vision.length;
@@ -115,9 +125,8 @@ async function route(req: Request, env: Env): Promise<Response> {
     usd += costUsd(usageOf(decisions.reply), usageOf(summaries.reply));
     const busy = decisions.status === 429 || summaries.status === 429;
     if (busy) rateLimited = true;
-    const results = new Map<number, ModelResult>(
-      combine(body, readDecisions(decisions.reply), readSummaries(summaries.reply)).map((r) => [r.id, r]),
-    );
+    const decided = readDecisions(decisions.reply);
+    const results = new Map<number, ModelResult>(combine(body, decided, readSummaries(summaries.reply)).map((r) => [r.id, r]));
     const reason = decisions.reply === null && summaries.reply === null ? 'openai_error' : 'no_answer';
     batch.forEach((row, id) => {
       const result = results.get(id);
@@ -126,6 +135,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       const filed = filedFrom(row, result);
       verdicts.push(verdictRow(row, filed, MODEL_LABEL, at));
       toEmbed.push({ row, filed });
+      if (filed.category === null) suggestions.push({ shortcode: row.shortcode, suggestions: decided.get(id)?.ranked ?? [] });
     });
   };
 
@@ -162,6 +172,8 @@ async function route(req: Request, env: Env): Promise<Response> {
     return error(429, 'OpenAI is busy. Retrying shortly.');
   }
 
+  await saveSuggestions(env.supabaseUrl, caller, suggestions);
+
   // After the verdicts are saved, never before: saving a verdict clears the post's old
   // embedding, so an embedding written first would be wiped straight away. A failure here
   // is not fatal; the posts are filed, and the next run embeds them.
@@ -177,6 +189,70 @@ async function route(req: Request, env: Env): Promise<Response> {
     failed,
     usd,
   });
+}
+
+interface Suggestion {
+  shortcode: string;
+  suggestions: string[];
+}
+
+/**
+ * Asks the Decisions API alone which categories fit posts filed as not sure. Text posts go
+ * in one call, thin ones one at a time with their picture. Every post asked about gets an
+ * answer recorded, an empty one included, so it is never billed for again.
+ *
+ *   200 { suggested, usd }
+ */
+async function suggest(env: Env, caller: Caller, userId: string, shortcodes: string[]): Promise<Response> {
+  const rows = await readPosts(env.supabaseUrl, caller, shortcodes, SUGGEST_COLUMNS);
+  if (!rows) return error(502, 'Could not read your posts. Try again shortly.');
+  const plan = planSuggest(rows);
+  const out: Suggestion[] = plan.unreadable.map((row) => ({ shortcode: row.shortcode, suggestions: [] }));
+  let usd = 0;
+  let rateLimited = false;
+
+  const ask = async (batch: SortRow[], image?: string): Promise<void> => {
+    const body: AnalyzeRequest = { posts: batch.map((row, id) => ({ id, text: modelText(row) })), image };
+    const { reply, status } = await openai('decisions', decisionsBody(body), env.openaiKey);
+    usd += costUsd(usageOf(reply), { inputTokens: 0, outputTokens: 0 });
+    if (status === 429) rateLimited = true;
+    const decided = readDecisions(reply);
+    // A post the API did not answer is left unasked, for the next run.
+    batch.forEach((row, id) => {
+      const d = decided.get(id);
+      if (d) out.push({ shortcode: row.shortcode, suggestions: d.category ? [d.category] : d.ranked });
+    });
+  };
+
+  const text = [...plan.text];
+  const pictures = await Promise.all(plan.vision.map((row) => thumbnail(env.supabaseUrl, caller, thumbnailPath(userId, row))));
+  const jobs: Promise<void>[] = [];
+  plan.vision.forEach((row, i) => {
+    const image = pictures[i];
+    if (image) jobs.push(ask([row], image));
+    else text.push(row);
+  });
+  if (text.length) jobs.push(ask(text));
+  await Promise.all(jobs);
+
+  const billed = plan.text.length + plan.vision.length;
+  if (usd > 0) await recordUsage(env.supabaseUrl, caller, usd, billed);
+  if (!out.length && rateLimited) return error(429, 'OpenAI is busy. Retrying shortly.');
+  if (!(await saveSuggestions(env.supabaseUrl, caller, out))) return error(502, 'Could not save the suggestions. Try again shortly.');
+  return Response.json({ suggested: out.filter((s) => s.suggestions.length > 0).length, usd });
+}
+
+/** Saves suggestions on the posts. True when there was nothing to save or it was saved. */
+async function saveSuggestions(url: string, caller: Caller, rows: Suggestion[]): Promise<boolean> {
+  if (!rows.length) return true;
+  const res = await fetch(`${url}/rest/v1/rpc/set_suggestions`, {
+    method: 'POST',
+    headers: { ...caller, 'content-type': 'application/json' },
+    body: JSON.stringify({ p_rows: rows }),
+  });
+  // Before the migration runs this fails; filing goes on, and the posts are asked later.
+  if (!res.ok) console.error(`set_suggestions ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return res.ok;
 }
 
 /**
@@ -287,9 +363,9 @@ async function embed(env: Env, caller: Caller, items: { row: SortRow; filed?: Fi
   return { count: rows.length, usd };
 }
 
-async function readPosts(url: string, caller: Caller, shortcodes: string[]): Promise<SortRow[] | null> {
+async function readPosts(url: string, caller: Caller, shortcodes: string[], columns = SORT_COLUMNS): Promise<SortRow[] | null> {
   const list = shortcodes.map((s) => `"${s}"`).join(',');
-  const res = await fetch(`${url}/rest/v1/posts?select=${SORT_COLUMNS}&shortcode=in.(${list})`, { headers: caller });
+  const res = await fetch(`${url}/rest/v1/posts?select=${columns}&shortcode=in.(${list})`, { headers: caller });
   if (!res.ok) return null;
   return (await res.json()) as SortRow[];
 }

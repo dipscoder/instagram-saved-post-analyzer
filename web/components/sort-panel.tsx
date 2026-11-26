@@ -4,7 +4,21 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { NO_CATEGORY, type Facets } from '@/lib/library';
-import { fetchUnsorted, isTransient, quoteUsd, retryFailed, runKind, sortBatch, sortBatches, SortError, type RunKind, type Unsorted } from '@/lib/sorting';
+import {
+  fetchUnsorted,
+  fetchUnsuggested,
+  isTransient,
+  priceLabel,
+  quoteUsd,
+  retryFailed,
+  runKind,
+  sortBatch,
+  sortBatches,
+  SortError,
+  suggestQuoteUsd,
+  type RunKind,
+  type Unsorted,
+} from '@/lib/sorting';
 import { useArmed } from '@/lib/use-armed';
 
 type Phase =
@@ -34,7 +48,12 @@ function posts(n: number): string {
 const VERB: Record<RunKind, { button: string; running: string; done: string }> = {
   new: { button: 'Organise', running: 'Organising', done: 'Organised' },
   upgrade: { button: 'Improve search for', running: 'Improving search for', done: 'Improved search for' },
+  suggest: { button: 'Get suggestions for', running: 'Getting suggestions for', done: 'Got suggestions for' },
 };
+
+function priceOf(run: RunKind, list: Unsorted[]): number {
+  return run === 'suggest' ? suggestQuoteUsd(list.length) : quoteUsd(list);
+}
 
 /**
  * Organises posts on the server. The main button only ever counts posts never organised;
@@ -44,7 +63,18 @@ const VERB: Record<RunKind, { button: string; running: string; done: string }> =
  * and cannot be hit by a double-click. A run goes in small batches, newest saved first,
  * and Stop ends it after the batch in flight.
  */
-export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; showUnsure: boolean; onSorted: () => void }) {
+export function SortPanel({
+  facets,
+  showUnsure,
+  onSorted,
+  onTriage,
+}: {
+  facets: Facets;
+  showUnsure: boolean;
+  onSorted: () => void;
+  /** Opens the one-post-at-a-time view for posts that need a category. */
+  onTriage: () => void;
+}) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const stop = useRef<AbortController | null>(null);
@@ -56,7 +86,7 @@ export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; sh
   async function quote(run: RunKind) {
     setError(null);
     try {
-      const list = (await fetchUnsorted()).filter((p) => runKind(p) === run);
+      const list = run === 'suggest' ? await fetchUnsuggested() : (await fetchUnsorted()).filter((p) => runKind(p) === run);
       if (list.length === 0) return setPhase({ kind: 'finished', run, done: 0, unreadable: 0, failed: 0, usd: 0, stopped: null });
       setPhase({ kind: 'confirm', run, posts: list });
     } catch (e) {
@@ -81,8 +111,8 @@ export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; sh
         break;
       }
       try {
-        const reply = await sendWithRetry(batch, controller.signal);
-        finished += Math.max(reply.sorted, reply.embedded, reply.transcribed);
+        const reply = await sendWithRetry(batch, controller.signal, run === 'suggest');
+        finished += run === 'suggest' ? reply.suggested : Math.max(reply.sorted, reply.embedded, reply.transcribed);
         unreadable += reply.unreadable.length;
         failed += reply.failed.filter((s) => !reply.unreadable.includes(s)).length;
         spent += reply.usd;
@@ -147,9 +177,23 @@ export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; sh
             </p>
           )}
           {showUnsure && unsure > 0 && (
-            <p>
-              <span className="font-medium text-foreground">{posts(unsure)} the AI wasn’t sure about.</span> Rather than guess, it left
-              them for you: open one and choose a category.
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p>
+                <span className="font-medium text-foreground">{posts(unsure)} need a category.</span> The AI wasn’t sure enough to file
+                them, so it suggests where each might go and you choose.
+              </p>
+              <Button size="sm" variant="outline" onClick={onTriage}>
+                Sort them one by one
+              </Button>
+            </div>
+          )}
+          {showUnsure && facets.unsuggested > 0 && (
+            <p className="text-[12px]">
+              {posts(facets.unsuggested)} were organised before suggestions existed.{' '}
+              <button type="button" onClick={() => void quote('suggest')} className="underline underline-offset-2 hover:text-foreground">
+                Get suggestions for them
+              </button>
+              , {priceLabel(suggestQuoteUsd(facets.unsuggested))}.
             </p>
           )}
           {upgrades > 0 && (
@@ -213,13 +257,15 @@ export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; sh
  */
 function Confirm({ phase, onCancel, onStart }: { phase: Extract<Phase, { kind: 'confirm' }>; onCancel: () => void; onStart: () => void }) {
   const armed = useArmed();
-  const price = usd(quoteUsd(phase.posts));
+  const price = usd(priceOf(phase.run, phase.posts));
   return (
     <div className="space-y-3">
       <p>
-        {phase.run === 'new' ? 'Organising' : 'Improving search for'} {posts(phase.posts.length)} costs at most{' '}
-        <span className="font-medium text-foreground">{price}</span>, usually much less. Reels cost a little more, because the AI
-        listens to them.
+        {VERB[phase.run].running} {posts(phase.posts.length)} costs at most <span className="font-medium text-foreground">{price}</span>
+        , usually much less.
+        {phase.run === 'suggest'
+          ? ' The AI only picks likely categories; it rewrites nothing.'
+          : ' Reels cost a little more, because the AI listens to them.'}
       </p>
       <div className="flex gap-2">
         <Button size="sm" disabled={!armed} onClick={onStart}>
@@ -237,10 +283,10 @@ function Confirm({ phase, onCancel, onStart }: { phase: Extract<Phase, { kind: '
  * A rate limit or a server hiccup is temporary: wait and send the same batch again. A
  * rate limit gets a few tries; any other failure one, since the server may have billed it.
  */
-async function sendWithRetry(batch: string[], signal: AbortSignal) {
+async function sendWithRetry(batch: string[], signal: AbortSignal, suggest: boolean) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await sortBatch(batch, signal);
+      return await sortBatch(batch, signal, { suggest });
     } catch (e) {
       const limited = e instanceof SortError && e.status === 429;
       if (!isTransient(e) || attempt >= (limited ? 3 : 1)) throw e;
