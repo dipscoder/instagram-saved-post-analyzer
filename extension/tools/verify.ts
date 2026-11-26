@@ -15,6 +15,7 @@ import {
   normalizeCategory,
   normalizeSubcategory,
   RULES_HASH,
+  TAXONOMY,
   TAXONOMY_HASH,
 } from '@saved-index/shared/taxonomy';
 import { hashText } from '@saved-index/shared/hash';
@@ -442,13 +443,23 @@ console.log('\ntaxonomy hash');
   // invalidate stored verdicts and re-bill every affected post in every installed
   // library. Updating this line is how that decision gets made on purpose, in the diff,
   // rather than discovered on someone's invoice.
-  const COMMITTED = '28eade380b3dc684';
+  const COMMITTED = '030e329e372c7f1a';
   check('matches the committed taxonomy', TAXONOMY_HASH === COMMITTED, TAXONOMY_HASH);
+}
+
+console.log('\ncategory descriptions');
+{
+  // The model is told what each category holds; a bare list of subcategories left it
+  // unsure where perfume, watches or a gym split went, so it filed none of them.
+  check('every category says what belongs in it, in a sentence or two',
+    TAXONOMY.every((c) => c.description.length >= 40 && c.description.length <= 240), TAXONOMY.map((c) => [c.name, c.description.length]));
+  check('the categories the first library needed exist',
+    ['Relationships & Dating', 'Places & Events', 'Entertainment', 'Mindset & Self', 'Learning & Science'].every((c) => CATEGORY_NAMES.includes(c)));
 }
 
 console.log('\nrules hash');
 {
-  const COMMITTED = '5adfad21b4b2f3dd';
+  const COMMITTED = '318497479ffe7263';
   check('matches the committed rule behaviour', RULES_HASH === COMMITTED, RULES_HASH);
 }
 

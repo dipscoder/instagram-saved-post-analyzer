@@ -51,15 +51,36 @@
 
     { "id": "art-1", "handle": "petermckinnon", "caption": "Golden hour settings for portraits: f/1.8, 1/500, ISO 100, and where to put the sun.", "hashtags": ["photography"], "expected": "Art & Photography" },
     { "id": "art-2", "handle": "procreate", "caption": "Watercolour brushes that actually bleed. Timelapse of a 2 hour landscape painting.", "hashtags": ["digitalart", "illustration"], "expected": "Art & Photography" },
-    { "id": "art-3", "handle": "letterboxd", "caption": "Every Wong Kar-wai film ranked, with the shot from each that stays with you.", "hashtags": ["film"], "expected": "Art & Photography" },
-    { "id": "art-4", "handle": "tinydesk", "caption": "Live from the Tiny Desk: a 4-song set with a string quartet. Full concert on YouTube.", "hashtags": [], "expected": "Art & Photography" },
+    { "id": "art-3", "handle": "letterboxd", "caption": "Every Wong Kar-wai film ranked, with the shot from each that stays with you.", "hashtags": ["film"], "expected": "Entertainment" },
+    { "id": "art-4", "handle": "tinydesk", "caption": "Live from the Tiny Desk: a 4-song set with a string quartet. Full concert on YouTube.", "hashtags": [], "expected": "Entertainment" },
 
     { "id": "humor-1", "handle": "dudewithsign", "caption": "Protesting people who reply all", "hashtags": ["funny"], "expected": "Humor & Misc" },
     { "id": "humor-2", "handle": "dogsofinstagram", "caption": "He knows exactly what he did and he has no regrets 🐶", "hashtags": ["dogs", "dogsofinstagram"], "expected": "Humor & Misc" },
-    { "id": "humor-3", "handle": "historycoolkids", "caption": "Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid.", "hashtags": ["history", "funfacts"], "expected": "Humor & Misc" },
+    { "id": "humor-3", "handle": "historycoolkids", "caption": "Cleopatra lived closer in time to the Moon landing than to the building of the Great Pyramid.", "hashtags": ["history", "funfacts"], "expected": "Learning & Science" },
+
+    { "id": "dating-1", "handle": "thedatecoach", "caption": "Your opener is why she didn't reply. Three Hinge openers that turn a match into an actual date plan.", "hashtags": ["datingadvice", "hinge"], "expected": "Relationships & Dating" },
+    { "id": "dating-2", "handle": "sid.speaks", "caption": "Small things that make a partner feel cared for. Number 4 works for guys too.", "hashtags": [], "expected": "Relationships & Dating" },
+    { "id": "dating-3", "handle": "ruhi.writes", "caption": "Healing after a breakup is not linear. What I wish someone told me in month two.", "hashtags": [], "expected": "Relationships & Dating" },
+
+    { "id": "places-1", "handle": "citywalks.amd", "caption": "Meet five strangers over dinner every weekend, matched by a short personality quiz. First table this Saturday, link to sign up.", "hashtags": [], "expected": "Places & Events", "note": "a social event, not a restaurant" },
+    { "id": "places-2", "handle": "runclub.city", "caption": "Faces of our Sunday run club 🏃 Spot a friend? 6 AM at the riverfront, everyone welcome.", "hashtags": ["runclub"], "expected": "Places & Events" },
+
+    { "id": "ent-1", "handle": "docuwatch", "caption": "This documentary about a man-eating tiger is the best thing I've watched all year. Streaming now.", "hashtags": ["documentary", "whattowatch"], "expected": "Entertainment" },
+
+    { "id": "mind-1", "handle": "quietmornings", "caption": "You are not behind. You did not miss your chance. Send this to someone who needs it.", "hashtags": ["poetry"], "expected": "Mindset & Self" },
+    { "id": "mind-2", "handle": "astro.daily", "caption": "Where will you meet your spouse? Check which house your 7th lord sits in.", "hashtags": ["astrology", "kundli"], "expected": "Mindset & Self" },
+
+    { "id": "learn-1", "handle": "physicsinhindi", "caption": "Did one physicist quietly solve string theory? The 10 minute version, no maths.", "hashtags": [], "expected": "Learning & Science" },
+
+    { "id": "fashion-4", "handle": "scent.notes", "caption": "Your perfume doesn't project because of your body heat, not the bottle. How sillage actually works.", "hashtags": ["perfume", "fragrance"], "expected": "Fashion & Beauty", "note": "fragrance is Fashion & Beauty" },
+    { "id": "fashion-5", "handle": "wristwise", "caption": "Wrist in inches times 7.5 gives the largest lug-to-lug that will fit you, in mm.", "hashtags": [], "expected": "Fashion & Beauty", "note": "watches are Fashion & Beauty" },
+
+    { "id": "fitness-5", "handle": "naturallifter", "caption": "Only get to the gym 3 days a week? A simple split that still works.", "hashtags": [], "expected": "Fitness & Health" },
 
     { "id": "brand-1", "handle": "gymshark", "caption": "Post-leg-day lasagne that hits 60g protein a portion. Recipe below, serves 4.", "hashtags": [], "expected": "Food & Recipes", "note": "a gym brand posting a recipe is filed as food" },
+
     { "id": "promo-1", "handle": "skillshare", "caption": "Learn product photography with just your phone and a window. Free for 30 days with our link.", "hashtags": ["ad"], "expected": "Art & Photography", "note": "a promotion takes the category of what it promotes" },
+
     { "id": "lang-1", "handle": "cocinaconmama", "caption": "Tortilla de patatas como la de mi abuela: huevos, patatas, cebolla y paciencia. Receta completa abajo.", "hashtags": ["receta"], "expected": "Food & Recipes", "note": "Spanish caption" },
 
     { "id": "thin-1", "handle": "mariana.k", "caption": "obsessed 😍", "hashtags": [], "expected": null, "note": "too thin to place from text; vision may still place it" },
