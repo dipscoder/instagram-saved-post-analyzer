@@ -42,9 +42,40 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
 /**
  * What a run is for. `new` organises posts never filed. `upgrade` brings older posts up to
  * date (search by meaning, a reel's words): optional, and offered apart so the main button
- * only ever counts posts the user has not had organised.
+ * only ever counts posts the user has not had organised. `needs` and `everything` are
+ * Organise again: the AI files afresh every post in Needs a category, or every post, except
+ * categories the user chose by hand.
  */
-export type RunKind = 'new' | 'upgrade' | 'suggest';
+export type RunKind = 'new' | 'upgrade' | 'suggest' | 'needs' | 'everything';
+
+/** Runs that file posts already filed again, replacing answers already paid for. */
+export function isAgain(run: RunKind): run is 'needs' | 'everything' {
+  return run === 'needs' || run === 'everything';
+}
+
+/**
+ * The posts an Organise again run covers, newest saved first: every post, or every post in
+ * Needs a category, that the user did not file by hand. Posts given up on are included;
+ * the run puts them back first.
+ */
+export async function fetchAgain(scope: 'needs' | 'everything'): Promise<(Unsorted & { index_attempts: number })[]> {
+  const out: (Unsorted & { index_attempts: number })[] = [];
+  for (let from = 0; ; from += 1000) {
+    let q = supabase
+      .from('posts')
+      .select('shortcode, caption, hashtags, alt_text, categorized_at, embedded_at, is_video, video_url, transcribed_at, duration_sec, index_attempts')
+      .or('model_used.is.null,model_used.neq.you');
+    if (scope === 'needs') q = q.or('categorized_at.is.null,category.is.null,category.eq.Uncategorized');
+    const { data, error } = await q
+      .order('saved_rank', { ascending: false, nullsFirst: false })
+      .order('shortcode')
+      .range(from, from + 999)
+      .returns<(Unsorted & { index_attempts: number })[]>();
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) return out;
+  }
+}
 
 export function runKind(p: Pick<Unsorted, 'categorized_at'>): RunKind {
   return p.categorized_at === null ? 'new' : 'upgrade';
@@ -73,6 +104,11 @@ export type OnePost = Pick<Unsorted, 'is_video' | 'video_url' | 'transcribed_at'
  */
 export function oneQuoteUsd(p: OnePost): number {
   return quoteUsd([{ ...p, categorized_at: null, embedded_at: null }]);
+}
+
+/** The most an Organise again run over these posts can cost: each one filed afresh. */
+export function againQuoteUsd(posts: OnePost[]): number {
+  return posts.reduce((sum, p) => sum + oneQuoteUsd(p), 0);
 }
 
 /** A price small enough to read at a glance, rounded up. */
@@ -164,7 +200,11 @@ export function isTransient(e: unknown): boolean {
 }
 
 /** One request to the `sort` function. */
-export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { refile = false, suggest = false } = {}): Promise<SortReply> {
+export async function sortBatch(
+  shortcodes: string[],
+  signal?: AbortSignal,
+  { refile = false, suggest = false, againBefore = null as string | null } = {},
+): Promise<SortReply> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   if (!token) throw new SortError('Sign in again to index.', 401);
@@ -173,7 +213,7 @@ export async function sortBatch(shortcodes: string[], signal?: AbortSignal, { re
     res = await fetch(`${SUPABASE_URL}/functions/v1/sort`, {
       method: 'POST',
       headers: { apikey: SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(refile ? { shortcodes, refile } : suggest ? { shortcodes, suggest } : { shortcodes }),
+      body: JSON.stringify(refile ? { shortcodes, refile } : suggest ? { shortcodes, suggest } : againBefore ? { shortcodes, againBefore } : { shortcodes }),
       signal,
     });
   } catch (e) {

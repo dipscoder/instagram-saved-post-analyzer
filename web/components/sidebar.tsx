@@ -1,6 +1,7 @@
 'use client';
 
 import { Bookmark, CircleHelp, Folder } from 'lucide-react';
+import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
 import { NO_CATEGORY, type Facets, type View } from '@/lib/library';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -20,13 +21,15 @@ function Row({ active, onClick, onHover, icon, label, count, hint }: { active: b
       onMouseEnter={onHover}
       onFocus={onHover}
       className={cn(
-        'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors',
-        active ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+        'relative flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] transition-colors',
+        active ? 'font-medium text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
       )}
     >
-      {icon && <span className="[&_svg]:size-4">{icon}</span>}
-      <span className="flex-1 truncate">{label}</span>
-      <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{count.toLocaleString()}</span>
+      {/* One highlight that slides to the chosen row. */}
+      {active && <motion.span layoutId="sidebar-active" className="absolute inset-0 rounded-md bg-accent" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+      {icon && <span className="relative [&_svg]:size-4">{icon}</span>}
+      <span className="relative flex-1 truncate">{label}</span>
+      <span className="relative font-mono text-[11px] tabular-nums text-muted-foreground">{count.toLocaleString()}</span>
     </button>
   );
   return hint ? (

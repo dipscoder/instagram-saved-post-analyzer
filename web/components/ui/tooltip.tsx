@@ -19,7 +19,10 @@ export function TooltipProvider({ children }: { children: ReactNode }) {
 export function Tooltip({ label, shortcut, side = 'bottom', children }: { label: string; shortcut?: string; side?: 'top' | 'bottom' | 'left' | 'right'; children: ReactElement }) {
   return (
     <Radix.Root>
-      <Radix.Trigger asChild>{children}</Radix.Trigger>
+      {/* Focus from the keyboard shows the tip; focus a dialog or menu moves by itself does not. */}
+      <Radix.Trigger asChild onFocus={(e) => !e.currentTarget.matches(':focus-visible') && e.preventDefault()}>
+        {children}
+      </Radix.Trigger>
       <Radix.Portal>
         <Radix.Content
           side={side}

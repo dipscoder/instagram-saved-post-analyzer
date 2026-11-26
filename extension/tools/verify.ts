@@ -64,6 +64,7 @@ import {
   vectorLiteral,
 } from '@saved-index/shared/embedding';
 import { PIPELINE } from '../../web/lib/pipeline-facts';
+import { placeFrom, searchOf, type Place } from '../../web/lib/url-state';
 import { CORRECTION_TARGETS, evalCases, isCorrectionTarget } from '@saved-index/shared/corrections';
 import { filedFromResult, needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
 import {
@@ -84,6 +85,7 @@ import {
   hasAnyText,
   MAX_ATTEMPTS,
   MAX_SORT_POSTS,
+  fileAgain,
   parseSortRequest,
   pickTranscribe,
   planSort,
@@ -896,6 +898,24 @@ console.log('\nserver sorting');
     again.ruled.length === 0 && again.text.map((r) => r.shortcode).join() === 'R,D' && again.embedOnly.length === 0, again);
   const givenUpRow = row({ shortcode: 'G', caption: textual.caption, index_attempts: MAX_ATTEMPTS });
   check('Index again tries a post that was given up on', planSort([givenUpRow], { refile: true }).text.length === 1);
+  // Organise again, over many posts: filed before the run started, and never the user's own choice.
+  const start = '2026-11-26T12:00:00.000Z';
+  const old = row({ shortcode: 'O', caption: textual.caption, categorized_at: '2026-11-19T10:00:00+00:00', embedded_at: '2026-11-19T10:00:01Z' });
+  const mine = { ...old, shortcode: 'Y', model_used: 'you' };
+  const fresh = { ...old, shortcode: 'F', categorized_at: '2026-11-26T12:00:05+00:00' };
+  const rerun = planSort([old, mine, fresh, ruled], { againBefore: start });
+  check('Organise again sends posts filed before the run to the model, rules included',
+    rerun.text.map((r) => r.shortcode).join() === 'O' && rerun.ruled.map((r) => r.row.shortcode).join() === 'R', rerun);
+  check('Organise again never refiles a category the user chose, or a post the run already filed',
+    ![...rerun.text, ...rerun.vision].some((r) => r.shortcode === 'Y' || r.shortcode === 'F'));
+  check('Organise again stops at the time the user confirmed', !fileAgain(old, '2026-11-19T09:00:00Z') && fileAgain(old, start));
+  check('an Organise again request keeps its start time', parseSortRequest({ shortcodes: ['A'], againBefore: start }).againBefore === start);
+  let refusedAgain = 0;
+  for (const bad of [{ shortcodes: ['A'], againBefore: 'soon' }, { shortcodes: ['A'], againBefore: '2999-01-01T00:00:00Z' },
+    { shortcodes: ['A'], againBefore: start, refile: true }, { shortcodes: ['A'], againBefore: 5 }]) {
+    try { parseSortRequest(bad); } catch { refusedAgain++; }
+  }
+  check('an Organise again request with a bad or future time is refused', refusedAgain === 4);
   check('Index again transcribes a given-up reel',
     pickTranscribe([row({ is_video: true, video_url: 'https://a.cdninstagram.com/1.mp4', index_attempts: MAX_ATTEMPTS })], { refile: true }).length === 1);
 
@@ -1094,6 +1114,21 @@ console.log('\nfiling eval');
   check(`the keyword rules misfile none of the ${posts.length} labeled posts`, misfiled.length === 0, misfiled);
   check('every label is a real category or null',
     posts.every((p) => p.expected === null || CATEGORY_NAMES.includes(p.expected)), posts.filter((p) => p.expected && !CATEGORY_NAMES.includes(p.expected)));
+}
+
+console.log('\nweb app address');
+{
+  const places: Place[] = [
+    { view: { kind: 'all' }, query: '', post: null },
+    { view: { kind: 'needs-look' }, query: '', post: 'C1a_b-2' },
+    { view: { kind: 'category', name: 'Food & Recipes' }, query: 'pasta recipe', post: null },
+    { view: { kind: 'collection', id: '17912345678' }, query: 'tokyo & café?', post: 'XYZ' },
+  ];
+  check('every view, search and open post survives a reload',
+    places.every((p) => JSON.stringify(placeFrom(searchOf(p))) === JSON.stringify(p)), places.map(searchOf));
+  check('All saved with nothing open is the bare address', searchOf(places[0]!) === '');
+  const hostile = placeFrom('?post=../../x&category=' + 'a'.repeat(300));
+  check('a forged post id or an overlong name is ignored', hostile.post === null && hostile.view.kind === 'all', hostile);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} FAILED\n`);

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { categoryLabel, handleOf, profileUrl, type Post } from '@/lib/library';
 import { cn } from '@/lib/utils';
 
-export function PostCard({ post, thumb, eager, onOpen }: { post: Post; thumb?: string; eager?: boolean; onOpen: () => void }) {
+export function PostCard({ post, thumb, eager, active, onOpen }: { post: Post; thumb?: string; eager?: boolean; active?: boolean; onOpen: () => void }) {
   const unsorted = !post.category || post.category === 'Uncategorized';
   const label = categoryLabel(post);
   const handle = handleOf(post);
@@ -13,7 +13,13 @@ export function PostCard({ post, thumb, eager, onOpen }: { post: Post; thumb?: s
   return (
     <div className="group min-w-0">
       <button onClick={onOpen} className="block w-full text-left outline-none" aria-label={`Open post by ${handle || 'unknown'}`}>
-        <div className="relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-offset-2 ring-offset-background group-has-[button:focus-visible]:ring-2 group-has-[button:focus-visible]:ring-ring">
+        {/* The post open in the panel stays marked, so stepping with ← and → keeps your place. */}
+        <div
+          className={cn(
+            'relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-offset-2 ring-offset-background transition-shadow duration-200 group-has-[button:focus-visible]:ring-2 group-has-[button:focus-visible]:ring-ring',
+            active && 'ring-2 ring-foreground',
+          )}
+        >
           {thumb ? (
             // Signed storage URLs change every hour, so next/image's cache would only get in the way.
             // eslint-disable-next-line @next/next/no-img-element

@@ -33,13 +33,13 @@ export const MAX_ATTEMPTS = 3;
 /** The post columns the function reads. */
 export const SORT_COLUMNS =
   'shortcode,handle,caption,hashtags,alt_text,is_video,duration_sec,audio_track_name,categorized_at,thumbnail_stored,thumbnail_format,' +
-  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at,index_attempts';
+  'category,subcategory,tags,summary,embedded_at,video_url,transcript,transcribed_at,index_attempts,model_used';
 
 /**
  * What a suggestions request also reads. Kept out of SORT_COLUMNS, so filing keeps working
  * on a database where the suggestions migration has not run yet.
  */
-export const SUGGEST_COLUMNS = `${SORT_COLUMNS},model_used,suggestions`;
+export const SUGGEST_COLUMNS = `${SORT_COLUMNS},suggestions`;
 
 export interface SortRow {
   shortcode: string;
@@ -63,7 +63,7 @@ export interface SortRow {
   transcribed_at: string | null;
   /** Failed indexing attempts since the post last changed; at MAX_ATTEMPTS it is left out. */
   index_attempts: number;
-  /** Read only for a suggestions request (SUGGEST_COLUMNS). */
+  /** Who filed it: a model, 'rules', or 'you' for a category the user chose. */
   model_used?: string | null;
   /** The categories the AI would suggest; null when it has not been asked. */
   suggestions?: string[] | null;
@@ -86,19 +86,38 @@ export interface SortRequest {
    * never asked about before. Category decisions only: no summary is rewritten.
    */
   suggest: boolean;
+  /**
+   * Organise again, for many posts: the time the user confirmed the run. Each post filed
+   * before it is filed afresh by the model; one filed since (by this run) is left alone, so
+   * a batch sent twice bills once. Never a category the user chose by hand. Null otherwise.
+   */
+  againBefore: string | null;
 }
 
+/** How far ahead of the server's clock an Organise again run may say it started. */
+const CLOCK_SKEW_MS = 5 * 60_000;
+
 export function parseSortRequest(body: unknown): SortRequest {
-  const { shortcodes: raw, refile = false, suggest = false } = (body ?? {}) as { shortcodes?: unknown; refile?: unknown; suggest?: unknown };
+  const {
+    shortcodes: raw,
+    refile = false,
+    suggest = false,
+    againBefore = null,
+  } = (body ?? {}) as { shortcodes?: unknown; refile?: unknown; suggest?: unknown; againBefore?: unknown };
   if (!Array.isArray(raw) || raw.length === 0) throw new BadSortRequest('No posts to sort.');
   if (raw.length > MAX_SORT_POSTS) throw new BadSortRequest(`At most ${MAX_SORT_POSTS} posts per request.`);
   if (!raw.every((s) => typeof s === 'string' && SHORTCODE.test(s))) throw new BadSortRequest('A post id is not valid.');
   if (typeof refile !== 'boolean') throw new BadSortRequest('refile is true or false.');
   if (typeof suggest !== 'boolean') throw new BadSortRequest('suggest is true or false.');
-  if (refile && suggest) throw new BadSortRequest('Ask for suggestions or refile, not both.');
+  if (againBefore !== null && !(typeof againBefore === 'string' && Number.isFinite(Date.parse(againBefore)))) {
+    throw new BadSortRequest('againBefore is a time.');
+  }
+  if ([refile, suggest, againBefore !== null].filter(Boolean).length > 1) throw new BadSortRequest('Ask for one kind of run at a time.');
+  // A start time in the future would make every resend of a batch bill again.
+  if (againBefore !== null && Date.parse(againBefore) > Date.now() + CLOCK_SKEW_MS) throw new BadSortRequest('againBefore is in the future.');
   const shortcodes = [...new Set(raw as string[])];
   if (refile && shortcodes.length !== 1) throw new BadSortRequest('Index again takes one post at a time.');
-  return { shortcodes, refile, suggest };
+  return { shortcodes, refile, suggest, againBefore: againBefore === null ? null : new Date(againBefore).toISOString() };
 }
 
 export function toInput(row: SortRow): FilingInput {
@@ -158,11 +177,14 @@ export interface SortPlan {
  *
  * `refile` is the one exception, a single post the user asked for by hand: it goes to the
  * model whatever it holds. Not to the keyword rules, which would give back the very
- * answer the user is asking to replace.
+ * answer the user is asking to replace. `againBefore` does the same for a confirmed
+ * Organise again run, but only for posts filed before it started and never over the
+ * user's own choice, so sending a batch twice still bills once.
  */
-export function planSort(rows: SortRow[], { refile = false } = {}): SortPlan {
+export function planSort(rows: SortRow[], { refile = false, againBefore = null as string | null } = {}): SortPlan {
   const plan: SortPlan = { ruled: [], text: [], vision: [], embedOnly: [], unreadable: [], waiting: [], skipped: [] };
   for (const row of rows) {
+    const again = refile || fileAgain(row, againBefore);
     if (!refile && givenUp(row) && !row.categorized_at) {
       plan.skipped.push(row);
       continue;
@@ -171,18 +193,27 @@ export function planSort(rows: SortRow[], { refile = false } = {}): SortPlan {
       plan.waiting.push(row);
       continue;
     }
-    if (!refile && row.categorized_at) {
+    if (!again && row.categorized_at) {
       if (!row.embedded_at) plan.embedOnly.push(row);
       continue;
     }
     const input = toInput(row);
-    const hit = refile ? null : classifyByRules(input);
+    const hit = again ? null : classifyByRules(input);
     if (hit) plan.ruled.push({ row, filed: filedByRules(input, hit) });
     else if (needsPicture(input) && row.thumbnail_stored && plan.vision.length < MAX_VISION_POSTS) plan.vision.push(row);
     else if (hasTextSignal(input)) plan.text.push(row);
     else plan.unreadable.push(row);
   }
   return plan;
+}
+
+/**
+ * Whether an Organise again run files this post afresh: filed before the run started, and
+ * not by the user's own hand. A post never filed is organised the ordinary way.
+ */
+export function fileAgain(row: Pick<SortRow, 'categorized_at' | 'model_used'>, againBefore: string | null): boolean {
+  if (!againBefore || !row.categorized_at || row.model_used === 'you') return false;
+  return Date.parse(row.categorized_at) < Date.parse(againBefore);
 }
 
 /** Filed, but the AI was not sure where: the posts that need a category from the user. */
