@@ -482,6 +482,20 @@ before being acted on.
 - [x] The next page loads as the grid's end comes into view; a new view starts at the top;
       the tab title names the view; the open post stays outlined in the grid
 
+## Phase 49 — Categories that fit the library (audit, 2026-11-26)
+- [x] Audit of a real 293-post library: 62 posts sat in Needs a category although the AI's
+      summaries were right. About 47 had no category to go to (dating, local places and
+      events, mindset and astrology, film, explainers); about 14 fit an existing one but the
+      model only saw subcategory lists. A sample of 45 filed posts: about 36 right, 5 wrong
+      (forced into the nearest bucket), 4 dumped in Humor & Misc
+- [x] Five categories: Relationships & Dating, Places & Events, Entertainment, Mindset & Self,
+      Learning & Science. Film and music moved from Art & Photography to Entertainment;
+      Humor & Misc is for posts whose point is to be funny
+- [x] Every category has a description (what belongs, examples, edges) sent as the Decisions
+      API choice description and in the summary prompt
+- [x] Eval set relabelled for the new categories, with 12 new cases from the audit's misses
+- [ ] Re-run `npm run eval` with the key and tune MIN_PROBABILITY if Needs a category stays large
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

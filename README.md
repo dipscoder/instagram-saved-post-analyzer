@@ -200,7 +200,7 @@ tsconfig.base.json         compiler options every package extends
 
 shared/src/                pure code for the extension, backend and web app alike
   hash.ts                  short stable digest, for "is this the same input as before?"
-  taxonomy.ts              12 categories + the free rule-based pre-pass
+  taxonomy.ts              17 categories with descriptions + the free rule-based pre-pass
 
 web/                       the web app: library, search, Index, Settings
 supabase/                  database migrations + the analyze, sort and search functions
@@ -244,7 +244,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                310 regression checks across the critical flows
+  verify.ts                312 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -263,7 +263,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 310 pure-function regression checks |
+| `npm run verify` | run 312 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why
