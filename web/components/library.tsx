@@ -2,6 +2,7 @@
 
 import type { Session } from '@supabase/supabase-js';
 import { Search, Settings, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HelpMenu } from '@/components/help-menu';
 import { Mark } from '@/components/logo';
@@ -9,7 +10,8 @@ import { PostCard } from '@/components/post-card';
 import { PostSheet } from '@/components/post-sheet';
 import { FilterChips, Sidebar } from '@/components/sidebar';
 import { SettingsSheet } from '@/components/settings-sheet';
-import { SortPanel } from '@/components/sort-panel';
+import { OrganiseMenu } from '@/components/organise-menu';
+import { SortPanel, type SortPanelHandle } from '@/components/sort-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Triage } from '@/components/triage';
 import { Welcome } from '@/components/welcome';
@@ -17,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
   fetchFacets,
+  fetchPost,
   fetchPosts,
   knownThumbnail,
   NO_CATEGORY,
@@ -26,6 +29,7 @@ import {
   type Post,
   type View,
 } from '@/lib/library';
+import { placeFrom, searchOf, type Place } from '@/lib/url-state';
 
 /** One loaded view: what it shows and whether more pages exist. */
 interface Entry {
@@ -34,6 +38,8 @@ interface Entry {
   more: boolean;
   loading: boolean;
   error: string | null;
+  /** The library changed since this loaded: shown until the fresh copy arrives, then replaced. */
+  stale?: boolean;
 }
 
 function viewKey(view: View, query: string): string {
@@ -70,9 +76,11 @@ function expected(view: View, facets: Facets | null): number | null {
 }
 
 export function Library({ session }: { session: Session }) {
-  const [view, setView] = useState<View>({ kind: 'all' });
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
+  // Where the user was is in the address, so a reload or a shared link lands in the same place.
+  const [start] = useState<Place>(() => placeFrom(window.location.search));
+  const [view, setViewState] = useState<View>(start.view);
+  const [query, setQuery] = useState(start.query);
+  const [debounced, setDebounced] = useState(start.query);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [facetError, setFacetError] = useState<string | null>(null);
   // Every view visited this session stays loaded, so going back to one is instant. The
@@ -84,6 +92,8 @@ export function Library({ session }: { session: Session }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [triageOpen, setTriageOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const sortPanel = useRef<SortPanelHandle>(null);
   const userId = session.user.id;
   const key = viewKey(view, debounced);
   const current = useRef(key);
@@ -96,9 +106,11 @@ export function Library({ session }: { session: Session }) {
     fetchFacets().then(setFacets, (e: Error) => setFacetError(e.message));
   }, [generation]);
 
+  // Views already loaded keep showing while they are read again, so posts that moved glide
+  // out of the grid rather than the whole grid blinking to a skeleton.
   const refresh = useCallback(() => {
     for (const controller of inflight.current.values()) controller.abort();
-    entries.current.clear();
+    for (const [k, e] of entries.current) entries.current.set(k, { ...e, loading: false, stale: true });
     setGeneration((g) => g + 1);
   }, []);
 
@@ -115,6 +127,57 @@ export function Library({ session }: { session: Session }) {
     const t = setTimeout(() => setDebounced(query), 200);
     return () => clearTimeout(t);
   }, [query]);
+
+  // A new view starts at its top, the way a new page would.
+  const setView = useCallback((v: View) => {
+    setViewState(v);
+    mainRef.current?.scrollTo({ top: 0 });
+  }, []);
+
+  // The post named in the address opens once it is read, even when it is not on the first page.
+  useEffect(() => {
+    if (!start.post) return;
+    let live = true;
+    fetchPost(start.post).then(
+      async (p) => {
+        if (!p || !live) return;
+        await signThumbnails(userId, [p]);
+        if (live) setOpen((o) => o ?? p);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [start.post, userId]);
+
+  // The address follows the library. A new view is a step Back can undo; typing a search or
+  // opening a post replaces the address, so Back never walks through every keystroke.
+  const openShortcode = open?.shortcode ?? null;
+  const shownView = useRef(viewKey(view, ''));
+  useEffect(() => {
+    const next = searchOf({ view, query: debounced, post: openShortcode });
+    if (next === window.location.search) return;
+    const viewChanged = shownView.current !== viewKey(view, '');
+    shownView.current = viewKey(view, '');
+    const url = `${window.location.pathname}${next}`;
+    if (viewChanged) window.history.pushState(null, '', url);
+    else window.history.replaceState(null, '', url);
+  }, [view, debounced, openShortcode]);
+
+  // Back and Forward put the library where the address says.
+  useEffect(() => {
+    function onPop() {
+      const place = placeFrom(window.location.search);
+      shownView.current = viewKey(place.view, '');
+      setViewState(place.view);
+      setQuery(place.query);
+      setDebounced(place.query);
+      setOpen((o) => (place.post && o?.shortcode === place.post ? o : null));
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // ⌘K / Ctrl+K and "/" jump to search, the way every search-first app does.
   useEffect(() => {
@@ -138,7 +201,7 @@ export function Library({ session }: { session: Session }) {
       const k = viewKey(v, q);
       const prev = entries.current.get(k);
       if (prev?.loading) return;
-      if (page === 0 && prev && !prev.error) return;
+      if (page === 0 && prev && !prev.error && !prev.stale) return;
 
       const controller = new AbortController();
       inflight.current.get(k)?.abort();
@@ -149,6 +212,7 @@ export function Library({ session }: { session: Session }) {
         more: prev?.more ?? false,
         loading: true,
         error: null,
+        stale: prev?.stale,
       });
       setVersion((n) => n + 1);
 
@@ -193,6 +257,22 @@ export function Library({ session }: { session: Session }) {
   // A plain view shows the sidebar's count, not how many pages have loaded so far.
   const count = known ?? posts.length;
   const scope = debounced && view.kind !== 'all' ? title(view, facets) : null;
+  const heading = debounced ? `Results for “${debounced}”` : title(view, facets);
+
+  useEffect(() => {
+    document.title = heading === 'All saved' ? 'Saved Index' : `${heading} · Saved Index`;
+  }, [heading]);
+
+  // The next page loads as the end of the grid comes into view; Show more stays as a fallback.
+  const sentinel = useRef<HTMLDivElement>(null);
+  const loadMore = settled && entry.more && !entry.error ? () => void load(view, debounced, entry.pages) : null;
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !loadMore) return;
+    const io = new IntersectionObserver(([e]) => e?.isIntersecting && loadMore(), { root: mainRef.current, rootMargin: '800px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore]);
 
   // The open post's neighbours in the grid, for ← and → in the panel.
   const at = open ? posts.findIndex((p) => p.shortcode === open.shortcode) : -1;
@@ -254,15 +334,17 @@ export function Library({ session }: { session: Session }) {
           <Sidebar facets={facets} error={facetError} view={view} onView={setView} onPrefetch={prefetch} />
         </aside>
 
-        <main className="flex-1 overflow-y-auto">
+        <main ref={mainRef} className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
             {empty ? (
               <Welcome email={session.user.email ?? ''} />
             ) : (
               <>
               <FilterChips facets={facets} view={view} onView={setView} />
-              <div className="mb-5 flex items-baseline gap-3">
-                <h1 className="text-xl font-semibold tracking-tight">{debounced ? `Results for “${debounced}”` : title(view, facets)}</h1>
+              <div className="mb-5 flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2">
+                <motion.h1 key={heading} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="text-xl font-semibold tracking-tight">
+                  {heading}
+                </motion.h1>
                 <span className="text-[13px] tabular-nums text-muted-foreground">
                   {count.toLocaleString()} {count === 1 ? 'post' : 'posts'}
                 </span>
@@ -274,11 +356,23 @@ export function Library({ session }: { session: Session }) {
                     </button>
                   </span>
                 )}
+                {facets && facets.total > 0 && (
+                  <div className="ml-auto">
+                    <OrganiseMenu facets={facets} onPick={(run) => sortPanel.current?.quote(run)} />
+                  </div>
+                )}
               </div>
 
               {/* Organising is offered wherever there is something to do, not only in Needs a category. */}
-              {!debounced && facets && (facets.unsorted + facets.unembedded + facets.untranscribed + facets.failed > 0 || (view.kind === 'needs-look' && facets.needsLook > 0)) && (
-                <SortPanel facets={facets} showUnsure={view.kind === 'needs-look'} onSorted={refresh} onTriage={() => setTriageOpen(true)} />
+              {facets && (
+                <SortPanel
+                  ref={sortPanel}
+                  facets={facets}
+                  showUnsure={view.kind === 'needs-look'}
+                  quiet={debounced !== ''}
+                  onSorted={refresh}
+                  onTriage={() => setTriageOpen(true)}
+                />
               )}
 
               {entry?.error && <p className="mb-5 rounded-md border border-destructive/30 p-3 text-sm text-destructive">{entry.error}</p>}
@@ -301,22 +395,41 @@ export function Library({ session }: { session: Session }) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {posts.map((p, i) => (
-                  <PostCard key={p.shortcode} post={p} thumb={knownThumbnail(p)} eager={i < 10} onOpen={() => setOpen(p)} />
-                ))}
-                {entry?.loading !== false &&
+              {/* Each view fades in as a whole; within it, cards glide into place when posts move out. */}
+              <motion.div
+                key={key}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.18 }}
+                className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+              >
+                <AnimatePresence initial={false} mode="popLayout">
+                  {posts.map((p, i) => (
+                    <motion.div
+                      key={p.shortcode}
+                      layout={posts.length <= 300 ? 'position' : false}
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
+                    >
+                      <PostCard post={p} thumb={knownThumbnail(p)} eager={i < 10} active={p.shortcode === openShortcode} onOpen={() => setOpen(p)} />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {entry?.loading !== false && !entry?.stale &&
                   Array.from({ length: Math.max(0, Math.min(posts.length === 0 ? (known ?? 10) : 5, 10)) }, (_, i) => (
                     <div key={`s${i}`}>
                       <div className="aspect-[4/5] animate-pulse rounded-lg bg-muted" />
                       <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted" />
                     </div>
                   ))}
-              </div>
+              </motion.div>
 
-              {settled && entry.more && (
+              <div ref={sentinel} />
+              {loadMore && (
                 <div className="mt-8 flex justify-center">
-                  <Button variant="outline" onClick={() => void load(view, debounced, entry.pages)}>
+                  <Button variant="outline" onClick={loadMore}>
                     Show more
                   </Button>
                 </div>

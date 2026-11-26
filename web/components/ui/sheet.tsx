@@ -26,6 +26,12 @@ export function SheetContent({ className, children, ...props }: ComponentProps<t
         )}
         onPointerDownOutside={keepOpenFor}
         onInteractOutside={keepOpenFor}
+        // Focus the panel, not its first button: the arrow keys work at once, and nothing
+        // inside lights up or opens a tip before the user has touched it.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          (e.currentTarget as HTMLElement).focus({ preventScroll: true });
+        }}
         {...props}
       >
         {children}

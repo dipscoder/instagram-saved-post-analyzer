@@ -1,5 +1,5 @@
 /**
- * POST /functions/v1/sort { shortcodes, refile? }: sorts up to 25 of the caller's own posts on
+ * POST /functions/v1/sort { shortcodes, refile?, suggest?, againBefore? }: sorts up to 25 of the caller's own posts on
  * the server and saves the verdicts to the account, so the web app can sort without the
  * extension. Paid from the project's OpenAI key, under the same daily cap as `analyze`.
  *
@@ -13,6 +13,11 @@
  *
  * `refile: true` is Index again, from a post's panel: one post, filed by the model even if
  * it was filed before or given up on. The web app quotes it and asks first.
+ *
+ * `againBefore: <time>` is Organise again over many posts, 25 a request: each post filed
+ * before that time is filed afresh by the model, except a category the user chose. The
+ * web app sends the time the user confirmed the run, quoted beforehand, so a batch sent
+ * twice finds its posts already filed and bills nothing more.
  *
  * A post filed as not sure keeps the categories the AI found likeliest as suggestions.
  * `suggest: true` asks for them for posts filed before suggestions existed: category
@@ -95,13 +100,13 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   if (request.suggest) return suggest(env, caller, userId, request.shortcodes);
 
-  const { refile } = request;
+  const { refile, againBefore } = request;
   const rows = await readPosts(env.supabaseUrl, caller, request.shortcodes);
   if (!rows) return error(502, 'Could not read your posts. Try again shortly.');
 
   // Transcripts first: they change how a reel is filed, and what it is embedded from.
   const reels = await transcribeReels(env, caller, pickTranscribe(rows, { refile }));
-  const plan = planSort(rows, { refile });
+  const plan = planSort(rows, { refile, againBefore });
 
   const at = new Date();
   const verdicts = plan.ruled.map(({ row, filed }) => verdictRow(row, filed, 'rules', at));

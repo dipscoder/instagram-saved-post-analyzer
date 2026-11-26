@@ -1,6 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { motion } from 'motion/react';
 import { CategoryFix } from '@/components/category-fix';
 import { IndexPost } from '@/components/index-post';
 import { useEffect, useState } from 'react';
@@ -51,7 +52,14 @@ export function PostSheet({
     <Sheet open={post !== null} onOpenChange={(open) => !open && onClose()}>
       {post && (
         <SheetContent>
-          <div className="flex-1 overflow-y-auto">
+          {/* Stepping to the next post cross-fades the panel rather than snapping. */}
+          <motion.div
+            key={post.shortcode}
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
+            className="flex-1 overflow-y-auto"
+          >
             {thumb && (
               // eslint-disable-next-line @next/next/no-img-element
               // Kept short, so what the AI made of the post is in view without scrolling.
@@ -121,7 +129,7 @@ export function PostSheet({
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
           <div className="flex gap-2 border-t p-4">
             <Tooltip label="Previous post" shortcut="←" side="top">
               <Button variant="outline" size="icon" className="size-9" disabled={!onStep.prev} onClick={onStep.prev} aria-label="Previous post">

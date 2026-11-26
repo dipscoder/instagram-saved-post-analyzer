@@ -464,6 +464,24 @@ before being acted on.
       "9 late-night eateries" split between Food and Travel and was left unfiled)
 - [ ] A Places category: deferred; adding a category changes TAXONOMY_HASH
 
+## Phase 48 — The library as a place you can come back to (2026-11-26)
+- [x] The address holds the view, the search and the open post (`web/lib/url-state.ts`):
+      a reload, a bookmark or Back lands in the same place; a new view is a Back step,
+      typing and opening a post are not
+- [x] Opening the post panel focuses the panel, not its first button, and tooltips open on
+      keyboard focus only, so no tip pops up by itself
+- [x] An Organise menu beside the title: new posts, everything in Needs a category, and
+      Re-organise all. Needs a category also offers Ask the AI again beside Sort them one
+      by one. Every run is quoted and confirmed; categories the user chose are never touched
+- [x] `sort` takes `againBefore: <time the user confirmed>` for many posts: each post filed
+      before it goes to the model once, so a batch sent twice bills once
+- [x] Motion (`motion`): the sidebar highlight slides, the Organise panel opens and closes
+      smoothly, cards glide out when posts move, the post panel cross-fades when stepping,
+      and a refresh keeps the grid on screen instead of blinking to a skeleton. Reduced
+      motion is respected
+- [x] The next page loads as the grid's end comes into view; a new view starts at the top;
+      the tab title names the view; the open post stays outlined in the grid
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,
