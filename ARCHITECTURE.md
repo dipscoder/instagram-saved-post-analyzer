@@ -296,7 +296,9 @@ run queue; that path was removed in Phase 42.
 
 - **Two calls per batch, sent together.** The Decisions API (`gpt-6-luna`) picks each
   post's category from the fixed taxonomy plus `unknown`, with a probability; below 0.6 the
-  post is filed as Uncategorized. The filing prompt (`shared/src/filing.ts`) writes the summary, tags and subcategory with `gpt-5.6-luna`, and
+  post is filed as Uncategorized. A runner-up at 0.25 or more is kept as `also_category`
+  ("Also in"), so a post about two things shows up under both; and a close split (the top
+  two each at 0.3 or more, together 0.8 or more) is filed under both rather than neither. The filing prompt (`shared/src/filing.ts`) writes the summary, tags and subcategory with `gpt-5.6-luna`, and
   its subcategory is kept only when it belongs to the chosen category. A batch fails only
   if both calls fail; either one answering is a usable result.
 - **The caller's own session does the database work.** The function checks the caller with

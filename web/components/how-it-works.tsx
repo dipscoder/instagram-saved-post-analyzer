@@ -141,7 +141,7 @@ export function HowItWorks() {
           <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2">
             <Guard title="No category over a guess">
               Under {sure}% likely, a post goes to Needs a category with the AI’s best guesses as suggestions. A wrong category
-              hides a post where you would never look.
+              hides a post where you would never look. A close call between two goes under both.
             </Guard>
             <Guard title="Quote, then confirm">
               Every run shows its most possible cost and spends nothing until a second press. Stop ends it after the current
@@ -229,7 +229,7 @@ function Diagram({ stats }: { stats: PipelineStats | null }) {
         <Node title="Decide + Describe" note={`${PIPELINE.decisionsModel} picks a category; ${PIPELINE.summaryModel} writes a summary and tags`} cost="AI" />
         <Arrow />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <Node title={`Sure (≥ ${sure}%)`} note="Filed under one of the categories" stat={count(stats?.byModel, 'by the AI')} />
+          <Node title={`Sure (≥ ${sure}%)`} note="Filed under a category, and Also in a second when it fits" stat={count(stats?.byModel, 'by the AI')} />
           <Node title="Not sure" note="Needs a category, with suggestions for you to confirm" stat={count(stats?.unsure, 'waiting')} muted />
         </div>
         <Arrow />
@@ -250,6 +250,7 @@ function Diagram({ stats }: { stats: PipelineStats | null }) {
 /** The detail behind each stop, kept to a sentence or two. */
 function details(stats: PipelineStats | null): { title: string; body: ReactNode }[] {
   const sure = Math.round(PIPELINE.minProbability * 100);
+  const pct = (p: number) => `${Math.round(p * 100)}%`;
   return [
     {
       title: 'Collect',
@@ -279,10 +280,21 @@ function details(stats: PipelineStats | null): { title: string; body: ReactNode 
       ),
     },
     {
+      title: 'Also in',
+      body: (
+        <>
+          Plenty of posts are about two things, like a funny reel about a dating app. When a second category is at least{' '}
+          {pct(PIPELINE.alsoProbability)} likely, the post shows up there too. And when the AI is torn between two (each at
+          least {pct(PIPELINE.splitEach)}, together {pct(PIPELINE.splitTotal)} or more), it files the post under both rather
+          than neither, so you find it from either side.
+        </>
+      ),
+    },
+    {
       title: 'Not sure',
       body: (
         <>
-          Below {sure}%, the post gets no category but keeps the AI’s likeliest ones as suggestions.
+          Below {sure}%, and not split between two, the post gets no category but keeps the AI’s likeliest ones as suggestions.
           {stats && stats.unsure > 0 ? ` ${n(stats.unsure)} of yours are waiting in Needs a category.` : ''} Confirming one is a
           single press, and free.
         </>

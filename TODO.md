@@ -496,6 +496,21 @@ before being acted on.
 - [x] Eval set relabelled for the new categories, with 12 new cases from the audit's misses
 - [ ] Re-run `npm run eval` with the key and tune MIN_PROBABILITY if Needs a category stays large
 
+## Phase 50 — Also in, and a friendlier look (2026-11-26)
+- [x] A funny reel about a Hinge chat was filed under Humor & Misc only, so opening
+      Relationships & Dating never showed it. Posts now keep a second category
+      (`posts.also_category`) when the AI gives it 25% or more, and appear under both: the
+      sidebar count, the category view, search inside a category, and keyword search
+- [x] A close split between two categories (each 30%+, together 80%+) is filed under both
+      instead of left in Needs a category
+- [x] Changing a post's category by hand drops the AI's second one; Undo brings it back
+- [x] The eval counts a post as right when its second category is the expected one
+- [x] An emoji per category (web/lib/emoji.ts, outside the hashed taxonomy) in the sidebar,
+      chips, cards, panel, menus and toasts; warmer empty states and welcome copy
+- [x] Cards put the handle on its own line so long category names stop truncating
+- [ ] After Re-organise all, sample again: how many posts got an Also in, and whether any
+      split filings look wrong (raise SPLIT_MIN_EACH if so)
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

@@ -271,11 +271,15 @@ export function filedFrom(row: SortRow, result: ModelResult): Filed {
   return filedFromResult(toInput(row), result);
 }
 
-/** A row for `apply_verdicts`, which writes it to both `verdicts` and `posts`. */
-export function verdictRow(row: SortRow, filed: Filed, model: string, at: Date): Record<string, unknown> {
+/**
+ * A row for `apply_verdicts`, which writes it to both `verdicts` and `posts`. `also` is a
+ * second category for the post ("Also in"), kept only beside a real, different first one.
+ */
+export function verdictRow(row: SortRow, filed: Filed, model: string, at: Date, also: string | null = null): Record<string, unknown> {
   return {
     shortcode: row.shortcode,
     category: filed.category,
+    also_category: filed.category && also && also !== filed.category ? also : null,
     subcategory: filed.subcategory,
     tags: filed.tags,
     summary: filed.summary,

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { correctCategory, undoCorrection, type Filing } from '@/lib/corrections';
+import { emojiOf } from '@/lib/emoji';
 import { NO_CATEGORY, type Post } from '@/lib/library';
 
 /** Every category in the sidebar's order, then the way out. */
@@ -70,11 +71,11 @@ export function CategoryFix({
   }, [shortcuts]);
 
   function move(to: string | null) {
-    const before: Filing = { category: post.category, subcategory: post.subcategory, model_used: post.model_used };
+    const before: Filing = { category: post.category, also_category: post.also_category, subcategory: post.subcategory, model_used: post.model_used };
     void save(
       () => correctCategory(post.shortcode, to),
-      { category: to, subcategory: null, model_used: 'you' },
-      `Moved to ${to ?? NO_CATEGORY}`,
+      { category: to, also_category: null, subcategory: null, model_used: 'you' },
+      `Moved to ${emojiOf(to)} ${to ?? NO_CATEGORY}`,
       // A post never filed has no earlier answer to go back to.
       filed ? () => void save(() => undoCorrection(post.shortcode, before), before, `Back in ${current ?? NO_CATEGORY}`) : undefined,
     );
@@ -90,6 +91,7 @@ export function CategoryFix({
           <div className="flex flex-wrap gap-2">
             {picks.map((c, i) => (
               <Button key={c} size="sm" variant={i === 0 ? 'default' : 'outline'} disabled={saving} onClick={() => move(c)}>
+                <span aria-hidden>{emojiOf(c)}</span>
                 {c}
                 {shortcuts && <kbd className="font-mono text-[10px] opacity-60">{i + 1}</kbd>}
               </Button>
@@ -121,6 +123,7 @@ export function CategoryFix({
                   onSelect={() => move(c)}
                   className="flex h-8 items-center gap-2 rounded-md px-2 outline-none data-[disabled]:text-muted-foreground data-[highlighted]:bg-accent"
                 >
+                  <span aria-hidden className="w-5 text-center">{emojiOf(c)}</span>
                   <span className="flex-1">{c ?? NO_CATEGORY}</span>
                   {selected && <Check className="size-4" />}
                 </Menu.Item>

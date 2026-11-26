@@ -68,10 +68,12 @@ for (let i = 0; i < forModel.length; i += MAX_POSTS) {
   const req: AnalyzeRequest = { posts: batch.map((p, id) => ({ id, text: signature(input(p)) })) };
   const [decisions, summaries] = await Promise.all([call('decisions', decisionsBody(req)), call('responses', summaryBody(req))]);
   usd += costUsd(usageOf(decisions), usageOf(summaries));
-  const results = new Map<number, ModelResult>(combine(req, readDecisions(decisions), readSummaries(summaries)).map((r) => [r.id, r]));
+  const decided = readDecisions(decisions);
+  const results = new Map<number, ModelResult>(combine(req, decided, readSummaries(summaries)).map((r) => [r.id, r]));
   batch.forEach((p, id) => {
     const r = results.get(id);
-    outcomes.push({ id: p.id, expected: p.expected, got: r ? asCategory(filedFromResult(input(p), r).category) : null, byRules: false });
+    const got = r ? asCategory(filedFromResult(input(p), r).category) : null;
+    outcomes.push({ id: p.id, expected: p.expected, got, also: got ? decided.get(id)?.also ?? null : null, byRules: false });
   });
 }
 

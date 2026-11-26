@@ -29,6 +29,7 @@ import {
   type Post,
   type View,
 } from '@/lib/library';
+import { emojiOf } from '@/lib/emoji';
 import { placeFrom, searchOf, type Place } from '@/lib/url-state';
 
 /** One loaded view: what it shows and whether more pages exist. */
@@ -343,6 +344,9 @@ export function Library({ session }: { session: Session }) {
               <FilterChips facets={facets} view={view} onView={setView} />
               <div className="mb-5 flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2">
                 <motion.h1 key={heading} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="text-xl font-semibold tracking-tight">
+                  {!debounced && (view.kind === 'category' || view.kind === 'needs-look') && (
+                    <span aria-hidden className="mr-2">{emojiOf(view.kind === 'category' ? view.name : null)}</span>
+                  )}
                   {heading}
                 </motion.h1>
                 <span className="text-[13px] tabular-nums text-muted-foreground">
@@ -379,13 +383,22 @@ export function Library({ session }: { session: Session }) {
 
               {settled && !entry.error && posts.length === 0 && (
                 <div className="rounded-lg border border-dashed px-6 py-16 text-center">
-                  <p className="font-medium">{debounced ? `Nothing matches that${scope ? ` in ${scope}` : ''}` : 'Nothing here yet'}</p>
+                  <p className="text-2xl" aria-hidden>{debounced ? '👀' : view.kind === 'needs-look' ? '🎉' : '🌱'}</p>
+                  <p className="mt-2 font-medium">
+                    {debounced
+                      ? `Nothing matches that${scope ? ` in ${scope}` : ''}`
+                      : view.kind === 'needs-look'
+                        ? 'All sorted'
+                        : 'Nothing here yet'}
+                  </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {debounced
                       ? scope
-                        ? 'It may be in another category.'
-                        : 'Try fewer or different words, or describe it another way.'
-                      : 'Nothing is filed here yet.'}
+                        ? 'It might be in another category.'
+                        : 'Try fewer words, or describe it the way you remember it.'
+                      : view.kind === 'needs-look'
+                        ? 'Every post has a home.'
+                        : 'Posts land here once they’re organised.'}
                   </p>
                   {scope && (
                     <Button variant="outline" size="sm" className="mt-4" onClick={() => setView({ kind: 'all' })}>

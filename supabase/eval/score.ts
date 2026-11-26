@@ -2,7 +2,8 @@
  * Scoring for the filing eval. Pure, so `npm run verify` checks it.
  *
  * Three outcomes matter, and they are not equally bad:
- *   right    the post is under the category a person would look in
+ *   right    the post is under the category a person would look in (as its first
+ *            category, or "Also in" it)
  *   unknown  the post is under Unknown: findable by search, never misleading
  *   wrong    the post is under another category, where nobody will look for it
  * A wrong answer is the expensive mistake, so it is reported on its own rather than folded
@@ -23,6 +24,8 @@ export interface Outcome {
   id: string;
   expected: string | null;
   got: string | null;
+  /** The second category it was also filed under, if any. */
+  also?: string | null;
   /** Filed by the free keyword rules rather than the model. */
   byRules: boolean;
 }
@@ -41,7 +44,7 @@ export interface Score {
 }
 
 export function verdictOf(o: Outcome): 'right' | 'unknown' | 'wrong' {
-  if (o.got === o.expected) return 'right';
+  if (o.got === o.expected || (o.got !== null && o.also === o.expected)) return 'right';
   if (o.got === null) return 'unknown';
   return 'wrong';
 }
@@ -56,7 +59,7 @@ export function score(outcomes: Outcome[]): Score {
   }
   s.accuracy = s.total ? s.right / s.total : 0;
   const placed = outcomes.filter((o) => o.got !== null);
-  s.precision = placed.length ? placed.filter((o) => o.got === o.expected).length / placed.length : 0;
+  s.precision = placed.length ? placed.filter((o) => verdictOf(o) === 'right').length / placed.length : 0;
   return s;
 }
 
