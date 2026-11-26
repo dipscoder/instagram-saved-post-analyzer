@@ -3,7 +3,7 @@
  *   MAIN world  --window.postMessage-->  ISOLATED  --chrome.runtime-->  service worker
  */
 
-import type { CapturedPost, Settings } from './types';
+import type { CapturedPost, CaptureSource, Settings } from './types';
 
 /** Namespace tag on window.postMessage traffic — instagram.com posts plenty of its own. */
 export const WIRE = 'saved-index';
@@ -40,6 +40,8 @@ export type Request =
       pageId: string;
       /** The user's own collection on screen, if any. Page-influenced: validated in the worker. */
       collection?: SavedCollectionRef | null;
+      /** 'grid' when scraped from the tiles: it may fill gaps, never replace network data. */
+      source?: CaptureSource;
     }
   /** How many posts this browser has found. */
   | { type: 'posts:count' }

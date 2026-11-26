@@ -45,7 +45,7 @@ changes up.
 2. Press **Find new posts**. It opens your saved posts on Instagram if they are not open
    already, and scrolls them for you. Posts sync to your account as they are found.
 3. Press **Open your library** to go to the web app.
-4. In the web app, press **Index N posts**. It shows the most it can cost first and asks
+4. In the web app, press **Organise N posts**. It shows the most it can cost first and asks
    you to confirm. Posts the free keyword rules can file cost nothing.
 
 ---
@@ -68,11 +68,16 @@ names as the saved feed, and only scrapes inside the saved grid. All three matte
 posts** and let it run to the end. A completed sweep of the full feed sees everything still
 saved, so the pill offers to remove anything it didn't find, after a second press.
 
-**2 — Index (the web app, the part that costs).** Hashtag and keyword rules label
+**2 — Organise (the web app, the part that costs).** Hashtag and keyword rules label
 whatever they can for nothing. Everything else goes to the model on the server in small
 batches, newest saved first, and **Stop** ends a run after the batch in flight. Every
 summary is kept in a ledger keyed by the exact text the model was shown, so the same post
-is never paid for twice.
+is never paid for twice. Bringing older posts up to date (search by meaning, a reel's
+words) is a separate, optional offer under the main button, so the number you are asked to
+pay for only counts posts never organised.
+
+**Change category** in a post's panel is free and sticks. Its **Undo** puts the post back
+exactly as it was, subcategory included, and drops the correction.
 
 **Clear library** (web app → Settings) erases every post, picture, collection and summary
 in your account. Each browser running the extension empties its own copy on its next
@@ -232,7 +237,7 @@ extension/public/
 
 extension/tools/
   make-icons.mjs           regenerates the icons (npm run icons -w extension)
-  verify.ts                291 regression checks across the critical flows
+  verify.ts                294 regression checks across the critical flows
 
 design/                    the source design docs this was built from
 
@@ -251,7 +256,7 @@ CLAUDE.md                  compact coding-agent orientation
 | `npm run build` | production bundle into `extension/dist/` |
 | `npm run watch` | rebuild on save |
 | `npm run typecheck` | `tsc` across every workspace |
-| `npm run verify` | run 291 pure-function regression checks |
+| `npm run verify` | run 294 pure-function regression checks |
 | `npm run icons -w extension` | regenerate `extension/public/icons/*.png` |
 
 ## Permissions, and why
@@ -276,7 +281,7 @@ errors from `capture-main.js`. If Instagram has moved its saved-feed endpoints, 
 patterns are one list at the top of `extension/src/capture/main-world.ts` — widen `URL_PATTERNS` and
 rebuild. The extractor downstream is shape-driven and won't need touching.
 
-**A post couldn't be indexed.** The web app says so on the post and in Index, and keeps the
+**A post couldn't be organised.** The web app says so on the post and in the Organise bar, and keeps the
 reason. Press Try again; the real error text is in Supabase → Edge Functions → `sort` → Logs.
 
 **Reels keep muting themselves when I pause.** Fixed — but the fix only applies to the mute

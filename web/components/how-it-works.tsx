@@ -85,7 +85,7 @@ export function HowItWorks() {
             <div className="h-48 animate-pulse rounded-lg bg-muted" />
           ) : example === null ? (
             <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-              Index a few posts and one of them appears here.
+              Organise a few posts and one of them appears here.
             </p>
           ) : (
             <WalkthroughView w={example} />
@@ -118,12 +118,12 @@ export function HowItWorks() {
               Every answer is kept with a fingerprint of what the model read. The same post is never paid for twice, even
               across browsers.
             </Guard>
-            <Guard title="Unknown over a guess">
+            <Guard title="No category over a guess">
               A category under {Math.round(PIPELINE.minProbability * 100)}% likely is not used. You decide those, from Needs a
               look.
             </Guard>
             <Guard title="Quote, then confirm">
-              Index shows the most a run can cost and spends nothing until the second press. Stop ends it after the current
+              Organise shows the most a run can cost and spends nothing until the second press. Stop ends it after the current
               batch.
             </Guard>
             <Guard title="A daily cap">
@@ -211,8 +211,8 @@ function steps(stats: PipelineStats | null): StepDef[] {
       body: (
         <>
           Up to {PIPELINE.batchSize} posts go together. For each one the model picks one of {PIPELINE.categories} categories,
-          or Unknown, and says how likely it is. Below {Math.round(PIPELINE.minProbability * 100)}% the post is filed as Unknown
-          instead: a wrong category hides a post where you would never look, while Unknown keeps it in To review.
+          or none, and says how likely it is. Below {Math.round(PIPELINE.minProbability * 100)}% the post is left without one
+          instead: a wrong category hides a post where you would never look, while no category keeps it in Needs a category.
           {stats && stats.unsure > 0 && ` ${n(stats.unsure)} of your posts are there now.`}
         </>
       ),
@@ -340,7 +340,7 @@ function WalkthroughView({ w }: { w: Walkthrough }) {
         <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 text-[13px]">
           <dt className="text-muted-foreground">Category</dt>
           <dd className="font-medium">
-            {w.category ?? 'Unknown'}
+            {w.category ?? 'No category'}
             {w.subcategory && <span className="font-normal text-muted-foreground"> · {w.subcategory}</span>}
           </dd>
           <dt className="text-muted-foreground">Summary</dt>
@@ -365,7 +365,7 @@ function WalkthroughView({ w }: { w: Walkthrough }) {
         <p className="mt-2 text-[12px] text-muted-foreground">
           {w.isEmbedded
             ? `Turned into ${PIPELINE.embeddingDimensions} numbers and stored with the post.`
-            : 'Not embedded yet: the next Index run adds it, for a fraction of a cent.'}
+            : 'Not embedded yet: the next search improvement adds it, for a fraction of a cent.'}
         </p>
       </Panel>
     </div>

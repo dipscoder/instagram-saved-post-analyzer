@@ -96,6 +96,12 @@ export type CapturedPost = Pick<
   | 'postedAt'
 >;
 
+/**
+ * Where a capture came from. `network` is Instagram's own data for the post; `grid` is the
+ * DOM fallback, which only has the tile's alt text, so it fills gaps but never overwrites.
+ */
+export type CaptureSource = 'network' | 'grid';
+
 export function toRecord(
   p: CapturedPost,
   savedRank: number | null = null,

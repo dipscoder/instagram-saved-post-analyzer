@@ -2,12 +2,12 @@
 
 import { Play } from 'lucide-react';
 import { useState } from 'react';
-import { handleOf, profileUrl, type Post } from '@/lib/library';
+import { categoryLabel, handleOf, profileUrl, type Post } from '@/lib/library';
 import { cn } from '@/lib/utils';
 
 export function PostCard({ post, thumb, eager, onOpen }: { post: Post; thumb?: string; eager?: boolean; onOpen: () => void }) {
   const unsorted = !post.category || post.category === 'Uncategorized';
-  const label = post.categorized_at === null ? 'Not indexed' : unsorted ? 'Unknown' : post.category;
+  const label = categoryLabel(post);
   const handle = handleOf(post);
   const [loaded, setLoaded] = useState(false);
   return (

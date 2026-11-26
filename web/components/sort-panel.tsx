@@ -3,20 +3,21 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { Facets } from '@/lib/library';
-import { fetchUnsorted, isTransient, quoteUsd, retryFailed, sortBatch, sortBatches, SortError, type Unsorted } from '@/lib/sorting';
+import { NO_CATEGORY, type Facets } from '@/lib/library';
+import { fetchUnsorted, isTransient, quoteUsd, retryFailed, runKind, sortBatch, sortBatches, SortError, type RunKind, type Unsorted } from '@/lib/sorting';
+import { useArmed } from '@/lib/use-armed';
 
 type Phase =
   | { kind: 'idle' }
-  | { kind: 'confirm'; posts: Unsorted[] }
-  | { kind: 'running'; done: number; total: number }
+  | { kind: 'confirm'; run: RunKind; posts: Unsorted[] }
+  | { kind: 'running'; run: RunKind; done: number; total: number }
   | {
       kind: 'finished';
-      sorted: number;
-      embedded: number;
-      transcribed: number;
+      run: RunKind;
+      /** Posts the run did something for: filed, made searchable or listened to. */
+      done: number;
       unreadable: number;
-      /** Posts the server tried and could not index; recorded on each post with the reason. */
+      /** Posts the server tried and could not organise; recorded on each post with the reason. */
       failed: number;
       usd: number;
       stopped: string | null;
@@ -30,56 +31,58 @@ function posts(n: number): string {
   return `${n.toLocaleString()} post${n === 1 ? '' : 's'}`;
 }
 
+const VERB: Record<RunKind, { button: string; running: string; done: string }> = {
+  new: { button: 'Organise', running: 'Organising', done: 'Organised' },
+  upgrade: { button: 'Improve search for', running: 'Improving search for', done: 'Improved search for' },
+};
+
 /**
- * Indexes every post never indexed, on the server. Nothing is spent until the second press:
- * the first shows the most it can cost. The run goes in small batches, newest saved
- * first, and Stop ends it after the batch in flight.
+ * Organises posts on the server. The main button only ever counts posts never organised;
+ * bringing older posts up to date (search by meaning, a reel's words) is a separate,
+ * optional offer, so the number a user is asked to pay for does not grow when nothing new
+ * was saved. Nothing is spent until the second press, which shows the most it can cost
+ * and cannot be hit by a double-click. A run goes in small batches, newest saved first,
+ * and Stop ends it after the batch in flight.
  */
-export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () => void }) {
+export function SortPanel({ facets, showUnsure, onSorted }: { facets: Facets; showUnsure: boolean; onSorted: () => void }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const stop = useRef<AbortController | null>(null);
   const unsure = facets.needsLook - facets.unsorted - facets.failed;
-  // Never indexed, plus indexed before search by meaning or reel transcripts existed.
-  const todo = facets.unsorted + facets.unembedded + facets.untranscribed;
+  const upgrades = facets.unembedded + facets.untranscribed;
 
   useEffect(() => () => stop.current?.abort(), []);
 
-  async function quote() {
+  async function quote(run: RunKind) {
     setError(null);
     try {
-      const list = await fetchUnsorted();
-      if (list.length === 0) return setPhase({ kind: 'finished', sorted: 0, embedded: 0, transcribed: 0, unreadable: 0, failed: 0, usd: 0, stopped: null });
-      setPhase({ kind: 'confirm', posts: list });
+      const list = (await fetchUnsorted()).filter((p) => runKind(p) === run);
+      if (list.length === 0) return setPhase({ kind: 'finished', run, done: 0, unreadable: 0, failed: 0, usd: 0, stopped: null });
+      setPhase({ kind: 'confirm', run, posts: list });
     } catch (e) {
       setError((e as Error).message);
     }
   }
 
-  async function run(list: Unsorted[]) {
+  async function start(run: RunKind, list: Unsorted[]) {
     const controller = new AbortController();
     stop.current = controller;
-    const batches = sortBatches(list);
     let done = 0;
-    let sorted = 0;
-    let embedded = 0;
-    let transcribed = 0;
+    let finished = 0;
     let unreadable = 0;
     let failed = 0;
     let spent = 0;
     let stopped: string | null = null;
-    setPhase({ kind: 'running', done, total: list.length });
+    setPhase({ kind: 'running', run, done, total: list.length });
 
-    for (const batch of batches) {
+    for (const batch of sortBatches(list)) {
       if (controller.signal.aborted) {
         stopped = 'Stopped.';
         break;
       }
       try {
         const reply = await sendWithRetry(batch, controller.signal);
-        sorted += reply.sorted;
-        embedded += reply.embedded;
-        transcribed += reply.transcribed;
+        finished += Math.max(reply.sorted, reply.embedded, reply.transcribed);
         unreadable += reply.unreadable.length;
         failed += reply.failed.filter((s) => !reply.unreadable.includes(s)).length;
         spent += reply.usd;
@@ -97,12 +100,12 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         failed += batch.length;
       }
       done += batch.length;
-      setPhase({ kind: 'running', done, total: list.length });
+      setPhase({ kind: 'running', run, done, total: list.length });
     }
     stop.current = null;
-    setPhase({ kind: 'finished', sorted, embedded, transcribed, unreadable, failed, usd: spent, stopped });
-    // Failures are recorded on the posts too, so the counts change even when nothing was indexed.
-    if (sorted > 0 || embedded > 0 || transcribed > 0 || failed > 0 || unreadable > 0) onSorted();
+    setPhase({ kind: 'finished', run, done: finished, unreadable, failed, usd: spent, stopped });
+    // Failures are recorded on the posts too, so the counts change even when nothing was done.
+    if (finished > 0 || failed > 0 || unreadable > 0) onSorted();
   }
 
   async function retry() {
@@ -118,77 +121,57 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
   return (
     <div className="mb-6 rounded-lg border bg-muted/40 px-4 py-3 text-[13px] leading-relaxed text-muted-foreground">
       {phase.kind === 'idle' && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="space-y-1">
-            {todo > 0 && (
+        <div className="space-y-2">
+          {facets.unsorted > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <p>
-                <span className="font-medium text-foreground">{posts(todo)} ready to index.</span> Indexing files each post under a
+                <span className="font-medium text-foreground">{posts(facets.unsorted)} to organise.</span> The AI files each one under a
                 topic with a short summary, so you can find it by searching.{' '}
                 <Link href="/how-it-works" className="underline underline-offset-2 hover:text-foreground">
-                  How does this work?
+                  How it works
                 </Link>
               </p>
-            )}
-            {todo > 0 && (facets.untranscribed > 0 || facets.unembedded > 0) && (
-              <p className="text-[12px]">
-                {[
-                  facets.unsorted > 0 && `${posts(facets.unsorted)} new`,
-                  facets.untranscribed > 0 && `${facets.untranscribed.toLocaleString()} ${facets.untranscribed === 1 ? 'reel' : 'reels'} to listen to`,
-                  facets.unembedded > 0 && `${posts(facets.unembedded)} to update for better search`,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-            )}
-            {facets.failed > 0 && (
-              <p>
-                <span className="font-medium text-foreground">{posts(facets.failed)} couldn’t be indexed.</span> Open one to see
-                why, or{' '}
-                <button type="button" onClick={() => void retry()} className="font-medium text-foreground underline underline-offset-2">
-                  try again
-                </button>
-                .
-              </p>
-            )}
-            {unsure > 0 && (
-              <p>
-                <span className="font-medium text-foreground">{posts(unsure)} the AI wasn’t sure about.</span> Rather than guess,
-                it left them for you: open one and choose a category.
-              </p>
-            )}
-          </div>
-          {todo > 0 && (
-            <Button size="sm" onClick={() => void quote()}>
-              Index {posts(todo)}
-            </Button>
+              <Button size="sm" onClick={() => void quote('new')}>
+                Organise {posts(facets.unsorted)}
+              </Button>
+            </div>
+          )}
+          {facets.failed > 0 && (
+            <p>
+              <span className="font-medium text-foreground">{posts(facets.failed)} couldn’t be organised.</span> Open one to see why,
+              or{' '}
+              <button type="button" onClick={() => void retry()} className="font-medium text-foreground underline underline-offset-2">
+                try again
+              </button>
+              .
+            </p>
+          )}
+          {showUnsure && unsure > 0 && (
+            <p>
+              <span className="font-medium text-foreground">{posts(unsure)} the AI wasn’t sure about.</span> Rather than guess, it left
+              them for you: open one and choose a category.
+            </p>
+          )}
+          {upgrades > 0 && (
+            <p className="text-[12px]">
+              Optional:{' '}
+              <button type="button" onClick={() => void quote('upgrade')} className="underline underline-offset-2 hover:text-foreground">
+                improve search for {posts(upgrades)} you already have
+              </button>
+              , so they can be found by meaning{facets.untranscribed > 0 ? ' and by what is said in reels' : ''}.
+            </p>
           )}
         </div>
       )}
 
-      {phase.kind === 'confirm' && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p>
-            Indexing {posts(phase.posts.length)} costs at most{' '}
-            <span className="font-medium text-foreground">{usd(quoteUsd(phase.posts))}</span>, usually much less. Reels cost a
-            little more, because the AI listens to them.
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={() => void run(phase.posts)}>
-              Index for up to {usd(quoteUsd(phase.posts))}
-            </Button>
-          </div>
-        </div>
-      )}
+      {phase.kind === 'confirm' && <Confirm phase={phase} onCancel={() => setPhase({ kind: 'idle' })} onStart={() => void start(phase.run, phase.posts)} />}
 
       {phase.kind === 'running' && (
         <div>
           <div className="flex items-center justify-between gap-3">
             <p>
               <span className="font-medium text-foreground">
-                Indexing {phase.done.toLocaleString()} of {posts(phase.total)}
+                {VERB[phase.run].running} {phase.done.toLocaleString()} of {posts(phase.total)}
               </span>{' '}
               · newest saved first
             </p>
@@ -206,13 +189,12 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p>
             <span className="font-medium text-foreground">
-              {phase.sorted > 0 || phase.embedded > 0 || phase.transcribed > 0
-                ? `Indexed ${posts(Math.max(phase.sorted, phase.embedded, phase.transcribed))} for ${usd(phase.usd)}.`
-                : 'Nothing was indexed.'}
+              {phase.done > 0 ? `${VERB[phase.run].done} ${posts(phase.done)} for ${usd(phase.usd)}.` : 'Nothing needed doing.'}
             </span>
             {phase.unreadable > 0 && ` ${posts(phase.unreadable)} had no caption or picture to go on.`}
-            {phase.failed > 0 && ` ${posts(phase.failed)} couldn’t be indexed this time and will be tried again.`}
+            {phase.failed > 0 && ` ${posts(phase.failed)} couldn’t be done this time and will be tried again.`}
             {phase.stopped && ` ${phase.stopped}`}
+            {phase.run === 'new' && phase.done > 0 && unsure > 0 && ` Anything the AI wasn’t sure about is in ${NO_CATEGORY}.`}
           </p>
           <Button size="sm" variant="ghost" onClick={() => setPhase({ kind: 'idle' })}>
             Done
@@ -221,6 +203,32 @@ export function SortPanel({ facets, onSorted }: { facets: Facets; onSorted: () =
       )}
 
       {error && <p className="mt-2 text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The price, and the button that spends it. The spending button sits on the left, away from
+ * where the asking button was, and only arms after a moment, so a double-click never pays.
+ */
+function Confirm({ phase, onCancel, onStart }: { phase: Extract<Phase, { kind: 'confirm' }>; onCancel: () => void; onStart: () => void }) {
+  const armed = useArmed();
+  const price = usd(quoteUsd(phase.posts));
+  return (
+    <div className="space-y-3">
+      <p>
+        {phase.run === 'new' ? 'Organising' : 'Improving search for'} {posts(phase.posts.length)} costs at most{' '}
+        <span className="font-medium text-foreground">{price}</span>, usually much less. Reels cost a little more, because the AI
+        listens to them.
+      </p>
+      <div className="flex gap-2">
+        <Button size="sm" disabled={!armed} onClick={onStart}>
+          {VERB[phase.run].button} {posts(phase.posts.length)} for up to {price}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

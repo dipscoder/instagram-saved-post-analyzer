@@ -40,6 +40,17 @@ export async function fetchUnsorted(): Promise<Unsorted[]> {
 }
 
 /**
+ * What a run is for. `new` organises posts never filed. `upgrade` brings older posts up to
+ * date (search by meaning, a reel's words): optional, and offered apart so the main button
+ * only ever counts posts the user has not had organised.
+ */
+export type RunKind = 'new' | 'upgrade';
+
+export function runKind(p: Pick<Unsorted, 'categorized_at'>): RunKind {
+  return p.categorized_at === null ? 'new' : 'upgrade';
+}
+
+/**
  * The most a run over these posts can cost. A post only being embedded costs almost
  * nothing; a reel adds its transcription, by its length.
  */

@@ -424,6 +424,23 @@ before being acted on.
 - [x] `sort` takes `refile: true` for one post only: the model files it whatever it holds,
       never the keyword rules
 
+## Phase 45 — Fixes from the first user test (2026-11-25)
+- [x] One word per idea: **Organise** (was Index) and **Needs a category** (was Unknown, To
+      review and "the AI wasn't sure")
+- [x] The Organise bar counts only posts never organised; improving search for older posts
+      is a separate, optional line
+- [x] Root cause of counts that grew after a scan found nothing new: a grid tile's alt text
+      and alt-parsed hashtags overwrote Instagram's own data on every page load, so the
+      server re-embedded those posts. Grid captures now only fill gaps
+- [x] Undo after Change category restores the full previous verdict and drops the
+      correction (`undo_correction`, migration 20261125090000)
+- [x] Confirm buttons that spend or erase never land under the cursor, and arm after 0.5 s;
+      Organise this post shows its price on the button
+- [x] The header shows the real count; Settings counts organised posts correctly and calls
+      spend "AI runs"; the eval tools sit under For developers
+- [x] Search says which category it searched, with Search all; the category menu is
+      alphabetical like the sidebar; the post panel shows the summary and tags first
+
 ## Not done — needs the user
 
 - [ ] **Revoke the committed OpenAI key.** A real key exists in repository history,

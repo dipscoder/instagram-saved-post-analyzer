@@ -30,6 +30,19 @@ export interface Post {
   model_used: string | null;
 }
 
+/**
+ * One name each for the two states a post can be in without a category, used everywhere
+ * the app shows them: cards, the panel, the sidebar and the menu.
+ */
+export const NO_CATEGORY = 'Needs a category';
+export const NOT_ORGANISED = 'Not organised yet';
+
+/** The category a post is shown under. */
+export function categoryLabel(post: Pick<Post, 'category' | 'categorized_at'>): string {
+  if (post.categorized_at === null) return NOT_ORGANISED;
+  return post.category && post.category !== UNCATEGORIZED ? post.category : NO_CATEGORY;
+}
+
 /** What the sidebar is showing. `needs-look` is every post without a confident category. */
 export type View =
   | { kind: 'all' }
