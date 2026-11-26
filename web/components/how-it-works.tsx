@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Mark } from '@/components/logo';
@@ -24,8 +24,9 @@ function usd(value: number): string {
 }
 
 /**
- * "How indexing works": the pipeline a saved post goes through, with the user's own
- * library counted at each stage and one of their posts taken apart step by step.
+ * How organising works: the path a saved post takes from Instagram to the search box, drawn
+ * as one diagram with the user's own library counted at each stop, then what organising
+ * again does, one of their posts taken apart, the prices and the guardrails.
  */
 export function HowItWorks() {
   const [stats, setStats] = useState<PipelineStats | null>(null);
@@ -37,7 +38,8 @@ export function HowItWorks() {
     fetchWalkthrough().then(setExample, () => setExample(null));
   }, []);
 
-  const indexed = stats ? stats.total - stats.notIndexed : null;
+  const organised = stats ? stats.total - stats.notIndexed : null;
+  const sure = Math.round(PIPELINE.minProbability * 100);
 
   return (
     <div className="min-h-dvh">
@@ -51,36 +53,61 @@ export function HowItWorks() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-24 pt-10 sm:px-6">
+      <main className="mx-auto max-w-4xl px-4 pb-24 pt-10 sm:px-6">
         <Link href="/" className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" /> Library
         </Link>
         <p className="mt-8 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">Under the hood</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">How indexing works</h1>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">How organising works</h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
-          What happens to a saved post between Instagram and your search box. Every number here is your own library, counted
-          just now.
+          The extension collects your saves. When you press Organise, the server files each one under a topic, writes a short
+          summary and makes it searchable by meaning. The numbers are your own library, counted just now.
         </p>
         {error && <p className="mt-4 text-sm text-destructive">Couldn’t count your library: {error}</p>}
 
         <dl className="mt-8 grid grid-cols-2 overflow-hidden rounded-lg border sm:grid-cols-4">
           <Stat label="Saved posts" value={n(stats?.total)} />
-          <Stat label="Indexed" value={n(indexed)} />
+          <Stat label="Organised" value={n(organised)} />
           <Stat label="Searchable by meaning" value={n(stats?.searchable)} />
           <Stat label="Spent, all time" value={stats ? usd(stats.spentUsd) : '—'} />
         </dl>
 
-        <Section title="The pipeline" lead="The steps a post meets, in order. Only the model steps cost anything.">
-          <ol className="relative">
-            {steps(stats).map((step, i, all) => (
-              <Step key={step.title} n={i + 1} title={step.title} where={step.where} stat={step.stat} last={i === all.length - 1}>
-                {step.body}
-              </Step>
-            ))}
-          </ol>
+        <Section title="The path of a post" lead="Three places, top to bottom. Only the steps marked AI or with a price cost anything.">
+          <Diagram stats={stats} />
         </Section>
 
-        <Section title="Follow one of your posts" lead="Your most recently saved post the model filed, taken apart.">
+        <Section title="Each step, in a sentence or two" lead="What the diagram leaves out.">
+          <dl className="divide-y overflow-hidden rounded-lg border text-[14px]">
+            {details(stats).map((d) => (
+              <div key={d.title} className="grid gap-1 px-4 py-3 sm:grid-cols-[10rem_1fr] sm:gap-4">
+                <dt className="font-medium">{d.title}</dt>
+                <dd className="leading-relaxed text-muted-foreground">{d.body}</dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+
+        <Section title="Organising again" lead="Every choice lives in the Organise menu beside the page title, and shows its price first.">
+          <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2">
+            <Guard title="Organise new posts">Only posts never organised. The everyday button.</Guard>
+            <Guard title="Ask the AI again">
+              Every post in Needs a category is read afresh; the ones it is now sure of move to a category. Posts you put
+              there yourself stay.
+            </Guard>
+            <Guard title="Re-organise all">
+              Every post is read afresh and gets a new category, summary and tags. Categories you chose by hand are kept.
+            </Guard>
+            <Guard title="One post">
+              Open a post and press Organise again. Useful after you notice a single wrong answer.
+            </Guard>
+          </div>
+          <p className="mt-3 text-[13px] text-muted-foreground">
+            Or don’t spend at all: Change category in a post is free, and Sort them one by one goes through Needs a category with
+            the AI’s suggestions, one press each.
+          </p>
+        </Section>
+
+        <Section title="Follow one of your posts" lead="Your most recently saved post the AI filed, taken apart.">
           {example === undefined ? (
             <div className="h-48 animate-pulse rounded-lg bg-muted" />
           ) : example === null ? (
@@ -94,51 +121,44 @@ export function HowItWorks() {
 
         <Section title="What it costs" lead="List prices, paid from the app’s OpenAI account. Nothing is spent until you confirm the quote.">
           <div className="overflow-hidden rounded-lg border text-[13px]">
-            <PriceRow what={stats?.byYou != null ? 'Keyword rules, search, fixing a category' : 'Keyword rules and search'} price="Free" />
+            <PriceRow what="Keyword rules, search, Change category, Sort one by one" price="Free" />
             <PriceRow what={`Choosing a category (${PIPELINE.decisionsModel})`} price={`${rate(P.decisionsInput)} per million tokens read`} />
             <PriceRow
               what={`Summary and tags (${PIPELINE.summaryModel})`}
               price={`${rate(P.summaryInput)} read · ${rate(P.summaryOutput)} written, per million tokens`}
             />
             <PriceRow what={`Search by meaning (${PIPELINE.embeddingModel})`} price={`${rate(P.embeddings)} per million tokens`} />
-            {stats?.transcribed != null && (
-              <PriceRow what={`Reel transcripts (${PIPELINE.transcribeModel})`} price={`$${P.transcribePerMinute} per minute of audio`} />
-            )}
+            <PriceRow what={`Reel transcripts (${PIPELINE.transcribeModel})`} price={`$${P.transcribePerMinute} per minute of audio`} />
             <PriceRow what="A typical post, all steps" price="about $0.0002" strong />
           </div>
           <p className="mt-3 text-[13px] text-muted-foreground">
-            A token is roughly ¾ of a word. A batch of 25 shares one set of instructions, which is why batching
-            is cheap.
+            A token is roughly ¾ of a word. Posts go {PIPELINE.batchSize} at a time and share one set of instructions, which
+            is why it is cheap. Quotes show the most a run can cost, so the real bill is usually lower.
           </p>
         </Section>
 
-        <Section title="Guardrails" lead="The rules that keep it accurate and keep the bill honest.">
+        <Section title="Guardrails" lead="What keeps it accurate, and the bill honest.">
           <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-2">
-            <Guard title="Paid once">
-              Every answer is kept with a fingerprint of what the model read. The same post is never paid for twice, even
-              across browsers.
-            </Guard>
             <Guard title="No category over a guess">
-              A category under {Math.round(PIPELINE.minProbability * 100)}% likely is not used. You decide those, from Needs a
-              look.
+              Under {sure}% likely, a post goes to Needs a category with the AI’s best guesses as suggestions. A wrong category
+              hides a post where you would never look.
             </Guard>
             <Guard title="Quote, then confirm">
-              Organise shows the most a run can cost and spends nothing until the second press. Stop ends it after the current
+              Every run shows its most possible cost and spends nothing until a second press. Stop ends it after the current
               batch.
+            </Guard>
+            <Guard title="Paid once">
+              An organised post is never sent again unless you ask. A batch sent twice by a flaky connection is billed once.
+            </Guard>
+            <Guard title="Your choices stick">
+              A category you pick by hand beats every AI answer, and no bulk run replaces it.
             </Guard>
             <Guard title="A daily cap">
               The server refuses new work once the day’s spend reaches the cap, and the run stops with a clear message.
             </Guard>
-            {stats?.byYou != null && (
-              <Guard title="Your fixes stick">
-                A category you choose by hand beats every model answer, and nothing files the post over it again.
-              </Guard>
-            )}
-            {stats?.failed != null && (
-              <Guard title="Failures are counted">
-                A post that cannot be indexed records why. After three tries it waits for you instead of being billed again.
-              </Guard>
-            )}
+            <Guard title="Failures are counted">
+              A post that can’t be organised records why. After three tries it waits for you instead of being billed again.
+            </Guard>
           </div>
         </Section>
       </main>
@@ -146,112 +166,137 @@ export function HowItWorks() {
   );
 }
 
-interface StepDef {
-  title: string;
-  where: string;
-  stat?: [string, string];
-  body: ReactNode;
+/** One stop on the diagram. */
+function Node({ title, note, stat, cost, muted }: { title: string; note: string; stat?: string; cost?: string; muted?: boolean }) {
+  return (
+    <div className={cn('min-w-0 flex-1 rounded-lg border bg-background px-3 py-2.5', muted && 'border-dashed')}>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[13px] font-medium">{title}</p>
+        {cost && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{cost}</span>}
+      </div>
+      <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{note}</p>
+      {stat && <p className="mt-1.5 font-mono text-[11px] tabular-nums text-foreground">{stat}</p>}
+    </div>
+  );
 }
 
-/** The pipeline as this account's database runs it: a step whose migration has not run is left out. */
-function steps(stats: PipelineStats | null): StepDef[] {
-  const reels = stats?.transcribed != null;
-  const list: (StepDef | false)[] = [
+/** The arrow between stops: across on a wide screen, down on a phone. */
+function Arrow() {
+  return (
+    <span aria-hidden className="flex shrink-0 items-center justify-center text-muted-foreground/60 max-md:h-4 md:w-4">
+      <ChevronRight className="size-4 max-md:rotate-90" />
+    </span>
+  );
+}
+
+function Lane({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border bg-muted/30 p-3">
+      <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">{label}</p>
+      <div className="flex gap-1 max-md:flex-col md:items-center">{children}</div>
+    </div>
+  );
+}
+
+/** The lanes stack, joined by a short line, so the eye reads them as one path. */
+function Join() {
+  return <span aria-hidden className="mx-auto block h-4 w-px bg-border" />;
+}
+
+/**
+ * The whole path as one picture: collect in the browser, organise on the server, search in
+ * the database. The decision splits in two, because where a post ends up depends on how
+ * sure the AI is.
+ */
+function Diagram({ stats }: { stats: PipelineStats | null }) {
+  const sure = Math.round(PIPELINE.minProbability * 100);
+  const count = (v: number | null | undefined, what: string) => (stats && v != null ? `${n(v)} ${what}` : undefined);
+  return (
+    <figure aria-label="How a saved post is organised">
+      <Lane label="In your browser · when you press Find new posts">
+        <Node title="Instagram" note="Your saved feed, scrolled in a visible tab" />
+        <Arrow />
+        <Node title="Extension" note="Reads what Instagram already sends: caption, hashtags, alt text, reel or not" cost="free" />
+        <Arrow />
+        <Node title="Your account" note="Each post and a small picture of it" stat={count(stats?.total, 'posts')} />
+      </Lane>
+      <Join />
+      <Lane label="On the server · when you press Organise">
+        <Node title="Keyword rules" note="Files a post when one category clearly wins" cost="free" stat={count(stats?.byRules, 'filed')} />
+        <Arrow />
+        <Node title="Listen" note="A reel’s words, written down once" cost={`$${P.transcribePerMinute}/min`} stat={count(stats?.transcribed, 'reels')} />
+        <Arrow />
+        <Node title="Decide + Describe" note={`${PIPELINE.decisionsModel} picks a category; ${PIPELINE.summaryModel} writes a summary and tags`} cost="AI" />
+        <Arrow />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <Node title={`Sure (≥ ${sure}%)`} note="Filed under one of the categories" stat={count(stats?.byModel, 'by the AI')} />
+          <Node title="Not sure" note="Needs a category, with suggestions for you to confirm" stat={count(stats?.unsure, 'waiting')} muted />
+        </div>
+        <Arrow />
+        <Node title="Embed" note={`${PIPELINE.embeddingDimensions} numbers that place it on a map of meaning`} cost="AI" stat={count(stats?.searchable, 'searchable')} />
+      </Lane>
+      <Join />
+      <Lane label="When you search">
+        <Node title="By words" note="Handle, caption, summary and tags" cost="free" />
+        <span aria-hidden className="flex shrink-0 items-center justify-center font-mono text-[13px] text-muted-foreground/60 max-md:h-4 md:w-4">+</span>
+        <Node title="By meaning" note="“quick dinner” also finds “sheet-pan chicken”" cost="free" />
+        <Arrow />
+        <Node title="One list" note="Both rankings merged, best match first" />
+      </Lane>
+    </figure>
+  );
+}
+
+/** The detail behind each stop, kept to a sentence or two. */
+function details(stats: PipelineStats | null): { title: string; body: ReactNode }[] {
+  const sure = Math.round(PIPELINE.minProbability * 100);
+  return [
     {
       title: 'Collect',
-      where: 'Extension · your browser',
-      stat: [n(stats?.total), 'posts collected'],
-      body: (
-        <>
-          When you press Find new posts, the extension scrolls your saved feed in a visible tab and reads the answers
-          Instagram is already sending your browser: handle, caption, hashtags, alt text, whether it is a reel. It never calls
-          Instagram itself, and nothing goes to a model. Each post and a small picture of it sync to your account.
-        </>
-      ),
+      body: 'The extension only reads responses Instagram already sends your browser. It never calls Instagram itself and never talks to a model.',
     },
     {
       title: 'Keyword rules',
-      where: 'Free · instant',
-      stat: [n(stats?.byRules), 'filed by rules'],
       body: (
         <>
-          Every category has its own hashtags and keywords, such as <Code>#recipe</Code> or <Code>#hypertrophy</Code>. A post
-          is filed for nothing only when one category wins clearly, well ahead of every other; anything closer goes on to the
-          model. Who posted it is ignored, so a food account’s travel post is not filed as food.
+          Each category has its own hashtags and words, like <Code>#recipe</Code>. A post is filed free only when one category
+          is well ahead of every other; anything closer goes to the AI.
         </>
       ),
     },
-    reels && {
+    {
       title: 'Listen',
-      where: `${PIPELINE.transcribeModel} · $${P.transcribePerMinute} a minute`,
-      stat: [n(stats?.transcribed), `of ${n(stats?.reels)} reels transcribed`],
+      body: 'For a reel, what is said is usually the best clue. The server fetches its smallest version from Instagram’s servers and transcribes it once. Reels over ten minutes are skipped.',
+    },
+    {
+      title: 'Decide + Describe',
       body: (
         <>
-          For a reel, what is said in it is usually the best clue. The server downloads the reel’s smallest version from
-          Instagram’s own servers and writes down the words, once. Reels over ten minutes are skipped.
+          Up to {PIPELINE.batchSize} posts go together, as a few short lines each. A post with almost no words also sends its
+          picture. One model picks one of {PIPELINE.categories} categories and how likely it is; another, at the same moment,
+          writes the summary and tags.
         </>
       ),
     },
     {
-      title: 'Read',
-      where: 'What the model sees',
-      stat: [n(stats?.withPicture), 'with a picture stored'],
+      title: 'Not sure',
       body: (
         <>
-          Each post becomes a few short lines: the handle, the first 400 characters of the caption, up to twelve hashtags and
-          the alt text{reels ? ', and for a reel the opening of its transcript' : ''}. A post with fewer than six words and no
-          alt text also sends its picture, because there is nothing else to go on.
-        </>
-      ),
-    },
-    {
-      title: 'Decide',
-      where: `${PIPELINE.decisionsModel} · Decisions API`,
-      stat: [n(stats?.byModel), 'filed by the model'],
-      body: (
-        <>
-          Up to {PIPELINE.batchSize} posts go together. For each one the model picks one of {PIPELINE.categories} categories,
-          or none, and says how likely it is. Below {Math.round(PIPELINE.minProbability * 100)}% the post is left without one
-          instead: a wrong category hides a post where you would never look, while no category keeps it in Needs a category.
-          {stats && stats.unsure > 0 && ` ${n(stats.unsure)} of your posts are there now.`}
-        </>
-      ),
-    },
-    {
-      title: 'Describe',
-      where: `${PIPELINE.summaryModel} · at the same time`,
-      body: (
-        <>
-          A second model, sent the same posts at the same moment, writes a one-line summary, up to four tags and a
-          subcategory. The subcategory is kept only if it belongs to the category the first model chose.
+          Below {sure}%, the post gets no category but keeps the AI’s likeliest ones as suggestions.
+          {stats && stats.unsure > 0 ? ` ${n(stats.unsure)} of yours are waiting in Needs a category.` : ''} Confirming one is a
+          single press, and free.
         </>
       ),
     },
     {
       title: 'Embed',
-      where: `${PIPELINE.embeddingModel} · ${PIPELINE.embeddingDimensions} numbers`,
-      stat: [n(stats?.searchable), 'searchable by meaning'],
-      body: (
-        <>
-          The summary, category and tags come first, then the post’s own words. All of it is turned into{' '}
-          {PIPELINE.embeddingDimensions} numbers that place the post on a map of meaning, near posts about the same thing even
-          when they share no words.
-        </>
-      ),
+      body: 'The summary, category and tags, then the post’s own words, become a list of numbers. Posts about the same thing sit close together even when they share no words.',
     },
     {
       title: 'Search',
-      where: 'Free · in your database',
-      body: (
-        <>
-          Your search runs two ways at once: by words, weighted toward the summary and tags, and by meaning, comparing your
-          query’s numbers with every post’s. The two rankings are merged, so an exact handle still comes first and “quick
-          dinner” also finds “sheet-pan harissa chicken”.
-        </>
-      ),
+      body: 'Your query runs by words and by meaning at once, and the two rankings are merged, so an exact handle still comes first.',
     },
   ];
-  return list.filter((s): s is StepDef => s !== false);
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -270,45 +315,6 @@ function Section({ title, lead, children }: { title: string; lead: string; child
       <p className="mt-1 text-[13px] text-muted-foreground">{lead}</p>
       <div className="mt-6">{children}</div>
     </section>
-  );
-}
-
-function Step({
-  n: index,
-  title,
-  where,
-  stat,
-  last,
-  children,
-}: {
-  n: number;
-  title: string;
-  where: string;
-  stat?: [string, string];
-  last?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <li className="relative flex gap-4 pb-8 last:pb-0">
-      {!last && <span aria-hidden className="absolute left-[13px] top-8 bottom-0 w-px bg-border" />}
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-full border bg-background font-mono text-[12px] tabular-nums">
-        {index}
-      </span>
-      <div className="min-w-0 flex-1 pt-0.5">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="text-[15px] font-medium">
-            {title}
-            <span className="ml-2 text-[12px] font-normal text-muted-foreground">{where}</span>
-          </h3>
-          {stat && (
-            <span className="text-[12px] text-muted-foreground">
-              <span className="font-mono text-[13px] tabular-nums text-foreground">{stat[0]}</span> {stat[1]}
-            </span>
-          )}
-        </div>
-        <p className="mt-1.5 text-[14px] leading-relaxed text-muted-foreground">{children}</p>
-      </div>
-    </li>
   );
 }
 
@@ -365,7 +371,7 @@ function WalkthroughView({ w }: { w: Walkthrough }) {
         <p className="mt-2 text-[12px] text-muted-foreground">
           {w.isEmbedded
             ? `Turned into ${PIPELINE.embeddingDimensions} numbers and stored with the post.`
-            : 'Not embedded yet: the next search improvement adds it, for a fraction of a cent.'}
+            : 'Not embedded yet: Improve search adds it, for a fraction of a cent.'}
         </p>
       </Panel>
     </div>
