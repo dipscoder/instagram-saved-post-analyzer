@@ -25,7 +25,9 @@ import { reserveRanks } from '../src/background/order';
 import { collectionFromPath, isFullSavedFeed, isSavedRoute, savedFeedPath } from '../src/routes';
 import { migrate } from '../src/background/settings';
 import { toRecord } from '../src/types';
-import { pillButton, pillStatus, type PillState } from '../src/page/flow';
+import { pillButton, pillLink, pillStatus, type PillState } from '../src/page/flow';
+import manifest from '../public/manifest.json';
+import { WEB_APP_URL } from '@saved-index/shared/config';
 import { validCollection } from '../src/background/collections';
 import {
   BadRequest,
@@ -786,7 +788,7 @@ console.log('\ninstagram collections');
 console.log('\nthe pill');
 {
   const s = (over: Partial<PillState>): PillState => ({
-    finding: false, total: 0, strays: 0, confirming: false, message: null, ...over,
+    finding: false, total: 0, strays: 0, confirming: false, message: null, lastFound: null, ...over,
   });
   check('nothing found yet: find', pillButton(s({})).action === 'find');
   check('finding: stop', pillButton(s({ finding: true, strays: 3 })).action === 'stop');
@@ -798,6 +800,13 @@ console.log('\nthe pill');
   check('status for strays', pillStatus(s({ total: 9, strays: 2 })) === '2 posts no longer saved on Instagram');
   check('a rate-limit message is shown as is',
     pillStatus(s({ total: 9, message: 'Instagram rate-limited the page.' })) === 'Instagram rate-limited the page.');
+  check('a finished sweep says when nothing was new',
+    pillStatus(s({ total: 293, lastFound: 0 })) === 'Done · no new saves since last time' && pillLink(s({ lastFound: 0 })) === 'Open library ↗');
+  check('a finished sweep names what it found and the next step',
+    pillStatus(s({ total: 295, lastFound: 2 })) === 'Done · 2 new posts, sent to your library' && pillLink(s({ lastFound: 2 })) === 'Organise them ↗');
+  check('an empty library says how to start', pillStatus(s({})) === 'Press Find new posts to start');
+  check('the web app\'s own origin is a host permission, so its open tab can be reused',
+    manifest.host_permissions.includes(`${new URL(WEB_APP_URL).origin}/*`));
 }
 
 console.log('\nweb app search');

@@ -20,15 +20,18 @@ import { PORT, type AccountState, type Broadcast, type Request, type Response } 
 import { savedFeedPath } from '../routes';
 import { forgetCollections, rememberCollection, validCollection } from './collections';
 import { toRecord, type CapturedPost } from '../types';
+import { WEB_APP_URL } from '../config';
 
 // Assert on every wake, not just install — see settings.ts.
 void lockDownStorage();
 // Land any pending settings migration in storage, which is also what removes the OpenAI
 // key an older build kept.
 void migrateSettings();
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(({ reason }) => {
   void lockDownStorage();
   void migrateSettings();
+  // A first install has no popup anyone knows to click: the web app's welcome takes over.
+  if (reason === chrome.runtime.OnInstalledReason.INSTALL) void openApp();
 });
 // Catch up on anything captured since the last upload.
 scheduleSync();
@@ -179,6 +182,9 @@ async function handle(req: Request): Promise<unknown> {
       return `${INSTAGRAM}${typeof stored[LIBRARY_KEY] === 'string' ? stored[LIBRARY_KEY] : '/'}`;
     }
 
+    case 'app:open':
+      return openApp();
+
     case 'settings:get':
       return getSettings();
 
@@ -236,6 +242,20 @@ const MAX_HASHTAGS = 60;
 async function accountState(): Promise<AccountState> {
   const [{ email }, sync] = await Promise.all([getAccount(), getSyncStatus()]);
   return { email, ...sync };
+}
+
+/**
+ * Brings the web app forward instead of opening it again. Finding its tab by URL needs only
+ * the host permission for the app's own origin (manifest), not the `tabs` permission.
+ */
+async function openApp(): Promise<void> {
+  const [tab] = await chrome.tabs.query({ url: `${new URL(WEB_APP_URL).origin}/*` });
+  if (tab?.id === undefined) {
+    await chrome.tabs.create({ url: WEB_APP_URL });
+    return;
+  }
+  await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(tab.windowId, { focused: true });
 }
 
 const INSTAGRAM = 'https://www.instagram.com';

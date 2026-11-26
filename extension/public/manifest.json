@@ -11,7 +11,8 @@
     "https://www.instagram.com/*",
     "https://*.cdninstagram.com/*",
     "https://*.fbcdn.net/*",
-    "https://siwmxcsrzdvvtouolvph.supabase.co/*"
+    "https://siwmxcsrzdvvtouolvph.supabase.co/*",
+    "http://localhost:3000/*"
   ],
 
   "background": {
