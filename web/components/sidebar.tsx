@@ -1,8 +1,9 @@
 'use client';
 
-import { Bookmark, CircleHelp, Folder } from 'lucide-react';
+import { Bookmark, Folder } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { ReactNode } from 'react';
+import { emojiOf, NO_CATEGORY_EMOJI } from '@/lib/emoji';
 import { NO_CATEGORY, type Facets, type View } from '@/lib/library';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -38,6 +39,15 @@ function Row({ active, onClick, onHover, icon, label, count, hint }: { active: b
     </Tooltip>
   ) : (
     button
+  );
+}
+
+/** An emoji sized and centred like the row icons, so labels line up whichever a row has. */
+function Emoji({ children }: { children: string }) {
+  return (
+    <span aria-hidden className="flex size-4 items-center justify-center text-[13px] leading-none">
+      {children}
+    </span>
   );
 }
 
@@ -79,7 +89,7 @@ export function Sidebar({
   return (
     <nav className="p-3">
       {row({ kind: 'all' }, 'All saved', facets.total, <Bookmark />)}
-      {facets.needsLook > 0 && row({ kind: 'needs-look' }, NO_CATEGORY, facets.needsLook, <CircleHelp />, undefined, 'Not organised yet, or the AI wasn’t sure where it goes')}
+      {facets.needsLook > 0 && row({ kind: 'needs-look' }, NO_CATEGORY, facets.needsLook, <Emoji>{NO_CATEGORY_EMOJI}</Emoji>, undefined, 'Not organised yet, or the AI wasn’t sure where it goes')}
       {facets.collections.length > 0 && (
         <Section title="Collections">
           {facets.collections.map((c) => row({ kind: 'collection', id: c.key }, c.label, c.count, <Folder />, c.key))}
@@ -87,7 +97,7 @@ export function Sidebar({
       )}
       {facets.categories.length > 0 && (
         <Section title="Categories">
-          {facets.categories.map((c) => row({ kind: 'category', name: c.key }, c.label, c.count, undefined, c.key))}
+          {facets.categories.map((c) => row({ kind: 'category', name: c.key }, c.label, c.count, <Emoji>{emojiOf(c.key)}</Emoji>, c.key))}
         </Section>
       )}
     </nav>
@@ -99,9 +109,9 @@ export function FilterChips({ facets, view, onView }: { facets: Facets | null; v
   if (!facets) return null;
   const items: { v: View; label: string }[] = [
     { v: { kind: 'all' }, label: 'All' },
-    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `${NO_CATEGORY} · ${facets.needsLook}` }] : []),
+    ...(facets.needsLook > 0 ? [{ v: { kind: 'needs-look' } as View, label: `${NO_CATEGORY_EMOJI} ${NO_CATEGORY} · ${facets.needsLook}` }] : []),
     ...facets.collections.map((c) => ({ v: { kind: 'collection', id: c.key } as View, label: c.label })),
-    ...facets.categories.map((c) => ({ v: { kind: 'category', name: c.key } as View, label: c.label })),
+    ...facets.categories.map((c) => ({ v: { kind: 'category', name: c.key } as View, label: `${emojiOf(c.key)} ${c.label}` })),
   ];
   return (
     <div className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 md:hidden">

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import type { Filing } from '@/lib/corrections';
+import { emojiOf } from '@/lib/emoji';
 import { categoryLabel, fetchDetails, handleOf, INDEX_ERRORS, instagramUrl, profileUrl, type Post, type PostDetails } from '@/lib/library';
 
 export function PostSheet({
@@ -68,9 +69,15 @@ export function PostSheet({
             <div className="space-y-5 p-5">
               <div>
                 <SheetTitle className="text-base font-semibold">
+                  <span aria-hidden className="mr-1.5">{post.categorized_at === null ? '⏳' : emojiOf(post.category)}</span>
                   {categoryLabel(post)}
                   {post.subcategory && <span className="font-normal text-muted-foreground"> · {post.subcategory}</span>}
                 </SheetTitle>
+                {post.also_category && (
+                  <p className="mt-1 text-[13px] text-muted-foreground">
+                    Also in <span className="font-medium text-foreground">{emojiOf(post.also_category)} {post.also_category}</span>
+                  </p>
+                )}
                 <SheetDescription className="mt-0.5 text-[13px] text-muted-foreground">
                   {handleOf(post) ? (
                     <a href={profileUrl(handleOf(post))} target="_blank" rel="noopener noreferrer" className="hover:text-foreground hover:underline">

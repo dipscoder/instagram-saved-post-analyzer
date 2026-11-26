@@ -15,6 +15,11 @@ export const PIPELINE = {
   transcribeModel: TRANSCRIBE_MODEL,
   /** Below this probability a category is a guess, and the post is filed as Unknown. */
   minProbability: 0.6,
+  /** A second category this likely is kept as "Also in". */
+  alsoProbability: 0.25,
+  /** A split vote: each of the top two this likely, and together this much, files under both. */
+  splitEach: 0.3,
+  splitTotal: 0.8,
   categories: CATEGORY_NAMES.length,
   batchSize: 25,
   /** USD per million tokens (per minute for transcripts), list price. */

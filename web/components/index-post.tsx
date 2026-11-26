@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/toast';
+import { emojiOf } from '@/lib/emoji';
 import { fetchPost, NO_CATEGORY, type Post, type PostDetails } from '@/lib/library';
 import { indexOne, oneQuoteUsd, priceLabel } from '@/lib/sorting';
 
@@ -55,7 +56,7 @@ export function IndexPost({
       if (fresh) onIndexed(fresh);
       setAsking(false);
       if (!ok) setError('Couldn’t organise this post this time.');
-      else if (fresh?.category && fresh.category !== 'Uncategorized') toast(`Filed under ${fresh.category}`);
+      else if (fresh?.category && fresh.category !== 'Uncategorized') toast(`Filed under ${emojiOf(fresh.category)} ${fresh.category}${fresh.also_category ? `, also in ${fresh.also_category}` : ''}`);
       else toast(`The AI wasn’t sure, so it stays in ${NO_CATEGORY}.`);
     } catch (e) {
       setError((e as Error).message);

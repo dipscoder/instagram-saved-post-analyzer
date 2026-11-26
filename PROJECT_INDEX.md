@@ -39,7 +39,7 @@ copying the same explanation into all four.
   bounds spend.
 - Posts and verdicts live in IndexedDB and mirror to the Supabase account. The extension
   pulls each verdict filed on the server so its uploads never carry an older category.
-- The regression suite currently contains **312 checks**. It does not replace a live
+- The regression suite currently contains **328 checks**. It does not replace a live
   Instagram smoke test.
 
 ## Code map by question

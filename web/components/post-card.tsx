@@ -2,6 +2,7 @@
 
 import { Play } from 'lucide-react';
 import { useState } from 'react';
+import { emojiOf } from '@/lib/emoji';
 import { categoryLabel, handleOf, profileUrl, type Post } from '@/lib/library';
 import { cn } from '@/lib/utils';
 
@@ -48,14 +49,24 @@ export function PostCard({ post, thumb, eager, active, onOpen }: { post: Post; t
           )}
         </div>
       </button>
-      <div className="mt-2 flex min-w-0 items-center gap-2 text-[12px]">
-        <span className={cn('shrink-0', unsorted ? 'text-muted-foreground' : 'font-medium')}>{label}</span>
+      {/* Two short lines: what it is, then who posted it, so neither crowds the other out. */}
+      <div className="mt-2 min-w-0 text-[12px] leading-[18px]">
+        <p className={cn('flex min-w-0 items-center gap-1', unsorted ? 'text-muted-foreground' : 'font-medium')}>
+          <span aria-hidden>{post.categorized_at === null ? '⏳' : emojiOf(post.category)}</span>
+          <span className="truncate">{label}</span>
+          {post.also_category && (
+            <span className="shrink-0 font-normal text-muted-foreground" title={`Also in ${post.also_category}`}>
+              <span className="sr-only">, also in {post.also_category}</span>
+              <span aria-hidden>+ {emojiOf(post.also_category)}</span>
+            </span>
+          )}
+        </p>
         {handle && (
           <a
             href={profileUrl(handle)}
             target="_blank"
             rel="noopener noreferrer"
-            className="truncate text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            className="block truncate text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
             @{handle}
           </a>

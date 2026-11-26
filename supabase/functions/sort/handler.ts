@@ -19,7 +19,8 @@
  * web app sends the time the user confirmed the run, quoted beforehand, so a batch sent
  * twice finds its posts already filed and bills nothing more.
  *
- * A post filed as not sure keeps the categories the AI found likeliest as suggestions.
+ * A post about two things is filed under one and kept "Also in" the other, so it shows up
+ * under both. A post filed as not sure keeps the categories the AI found likeliest as suggestions.
  * `suggest: true` asks for them for posts filed before suggestions existed: category
  * decisions only, a fraction of the cost of filing, and each post is asked at most once.
  *
@@ -138,7 +139,7 @@ async function route(req: Request, env: Env): Promise<Response> {
       // A rate limit is ours, not the post's: it is retried without counting against it.
       if (!result) return void (busy ? failures.push({ row, reason, counted: false }) : failures.push({ row, reason }));
       const filed = filedFrom(row, result);
-      verdicts.push(verdictRow(row, filed, MODEL_LABEL, at));
+      verdicts.push(verdictRow(row, filed, MODEL_LABEL, at, decided.get(id)?.also ?? null));
       toEmbed.push({ row, filed });
       if (filed.category === null) suggestions.push({ shortcode: row.shortcode, suggestions: decided.get(id)?.ranked ?? [] });
     });

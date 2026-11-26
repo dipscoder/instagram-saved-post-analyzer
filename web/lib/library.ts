@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 /** The columns the library shows. Everything else on the row stays in the database. */
 const POST_COLUMNS =
   'shortcode, permalink, handle, caption, hashtags, thumbnail_url, thumbnail_stored, is_video, ' +
-  'thumbnail_format, duration_sec, audio_track_name, category, subcategory, tags, summary, collections, saved_rank, categorized_at, model_used';
+  'thumbnail_format, duration_sec, audio_track_name, category, also_category, subcategory, tags, summary, collections, saved_rank, categorized_at, model_used';
 
 export interface Post {
   shortcode: string;
@@ -20,6 +20,8 @@ export interface Post {
   duration_sec: number | null;
   audio_track_name: string | null;
   category: string | null;
+  /** A second category the post is also about ("Also in"): it shows up under both. */
+  also_category: string | null;
   subcategory: string | null;
   tags: string[];
   summary: string | null;
@@ -88,7 +90,8 @@ export async function fetchPosts(view: View, query: string, page: number, signal
     .order('shortcode')
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
-  if (view.kind === 'category') q = q.eq('category', view.name);
+  // A post shows up under its second category too.
+  if (view.kind === 'category') q = q.or(`category.eq.${quoted(view.name)},also_category.eq.${quoted(view.name)}`);
   if (view.kind === 'collection') q = q.contains('collections', [view.id]);
   if (view.kind === 'needs-look') q = q.or(`category.is.null,category.eq.${UNCATEGORIZED}`);
   for (const filter of searchFilters(query)) q = q.or(filter);
@@ -97,6 +100,11 @@ export async function fetchPosts(view: View, query: string, page: number, signal
   const { data, error } = await q.returns<Post[]>();
   if (error) throw new Error(error.message);
   return data ?? [];
+}
+
+/** A value inside a PostgREST `or=(...)` filter, where `,` `.` `(` `)` would otherwise be syntax. */
+function quoted(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /** The most results a search returns. There is no second page of a search. */

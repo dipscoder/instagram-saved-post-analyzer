@@ -8,6 +8,8 @@
  *     guessed at; a wrong category buries a post where nobody will look for it.
  *     The runners-up are kept as suggestions, so a post left in Needs a category comes
  *     with the categories it most likely belongs in, for the user to pick with one press.
+ *     A post about two things (a comedy reel about a dating app) keeps the second as
+ *     `also`, and appears under both; see `place` for when a split vote is filed.
  *   - The filing prompt the extension uses (shared/src/filing.ts) writes the summary,
  *     tags and subcategory. Its subcategory is kept only when it belongs to the category
  *     the Decisions API chose.
@@ -32,6 +34,15 @@ const HIGH_PROBABILITY = 0.85;
 /** A category less likely than this is not worth offering as a suggestion. */
 const SUGGEST_MIN_PROBABILITY = 0.1;
 export const MAX_SUGGESTIONS = 3;
+/** A second category at least this likely goes beside the first: the post appears in both. */
+export const ALSO_MIN_PROBABILITY = 0.25;
+/**
+ * A split vote: no category reaches MIN_PROBABILITY, but the top two each reach
+ * SPLIT_MIN_EACH and together SPLIT_MIN_TOTAL. The post is about one of two things, and
+ * filed under both it is found from either, so nothing is buried by the guess.
+ */
+export const SPLIT_MIN_EACH = 0.3;
+export const SPLIT_MIN_TOTAL = 0.8;
 const UNKNOWN = 'unknown';
 
 /** USD per million tokens, list price. The Decisions API bills input only. */
@@ -102,10 +113,44 @@ export function decisionsBody(req: AnalyzeRequest): object {
 
 export interface Decision {
   category: string | null;
+  /** A second category the post is also about, shown as "Also in". Null when filed under one. */
+  also: string | null;
   /** The probability of the chosen category. */
   probability: number;
   /** The likeliest real categories, best first: what to suggest when `category` is null. */
   ranked: string[];
+}
+
+export interface Likely {
+  value: string;
+  probability: number;
+}
+
+/**
+ * Where a post goes, from the API's choice and every category's probability:
+ *   - a choice at MIN_PROBABILITY or above is filed there, with the likeliest other
+ *     category as `also` when it reaches ALSO_MIN_PROBABILITY;
+ *   - otherwise a split vote between two categories is filed under both;
+ *   - otherwise it is not sure, and filed under neither.
+ */
+export function place(choice: string, probability: number, likely: Likely[]): { category: string | null; also: string | null; probability: number } {
+  const real = likely
+    .filter((p) => p.value !== UNKNOWN && TAXONOMY.some((c) => c.name === p.value) && Number.isFinite(p.probability))
+    .sort((a, b) => b.probability - a.probability);
+  const known = choice !== UNKNOWN && TAXONOMY.some((c) => c.name === choice);
+  if (known && probability >= MIN_PROBABILITY) {
+    const second = real.find((p) => p.value !== choice);
+    return { category: choice, also: second && second.probability >= ALSO_MIN_PROBABILITY ? second.value : null, probability };
+  }
+  const [first, second] = real;
+  if (
+    first && second &&
+    first.probability >= SPLIT_MIN_EACH && second.probability >= SPLIT_MIN_EACH &&
+    first.probability + second.probability >= SPLIT_MIN_TOTAL
+  ) {
+    return { category: first.value, also: second.value, probability: first.probability };
+  }
+  return { category: null, also: null, probability: Number.isFinite(probability) ? probability : 0 };
 }
 
 /** Each post's decision, by id. A refusal or a malformed answer is simply absent. */
@@ -120,18 +165,13 @@ export function readDecisions(reply: unknown): Map<number, Decision> {
     const choice = String(a['choice']);
     const probabilities = Array.isArray(a['probabilities']) ? (a['probabilities'] as Record<string, unknown>[]) : [];
     const probability = Number(probabilities.find((p) => p['value'] === choice)?.['probability'] ?? a['confidence']);
-    const known = choice !== UNKNOWN && TAXONOMY.some((c) => c.name === choice);
-    const ranked = probabilities
-      .map((p) => ({ value: String(p['value']), probability: Number(p['probability']) }))
+    const likely = probabilities.map((p) => ({ value: String(p['value']), probability: Number(p['probability']) }));
+    const ranked = likely
       .filter((p) => p.value !== UNKNOWN && TAXONOMY.some((c) => c.name === p.value) && p.probability >= SUGGEST_MIN_PROBABILITY)
       .sort((a, b) => b.probability - a.probability)
       .slice(0, MAX_SUGGESTIONS)
       .map((p) => p.value);
-    out.set(Number(id), {
-      category: known && probability >= MIN_PROBABILITY ? choice : null,
-      probability: Number.isFinite(probability) ? probability : 0,
-      ranked,
-    });
+    out.set(Number(id), { ...place(choice, probability, likely), ranked });
   }
   return out;
 }

@@ -17,7 +17,7 @@ version plus the things that are easy to break without noticing.
 npm run app          # install, build the extension, start the web app (localhost:3000)
 npm run deploy       # install, bundle and deploy every Edge Function (migrations by hand first)
 npm run typecheck    # tsc across every workspace
-npm run verify       # 312 pure-function checks, no browser needed — run this
+npm run verify       # 328 pure-function checks, no browser needed — run this
 npm run build        # writes extension/dist/, then Load unpacked in chrome://extensions
 npm run watch        # unminified rebuild on save
 ```
@@ -122,19 +122,23 @@ The code is heavily commented and several oddities are deliberate. Read the comm
   wrong category buries a post somewhere you will never look. Instead it keeps the AI's
   likeliest categories in `posts.suggestions`, and the user confirms one with a press
   (Needs a category → Sort them one by one). Don't turn suggestions into filings.
+  The one exception is a close split between two categories (`place` in
+  `analyze/decide.ts`): filed under both, as category and `also_category`, the post is
+  found from either side, so nothing is buried by the guess.
 - `SCHEMA_VERSION` (record shape) and `DB_VERSION` (store shape) are separate on purpose and
   no longer move together.
 
 ## State
 
-The work through Phase 48 is the current implementation: paid-result ledger, capture/media
+The work through Phase 50 is the current implementation: paid-result ledger, capture/media
 resilience, the Supabase account (sync, thumbnails, the ledger), server-side indexing with a
 daily cap, frame-accurate video controls, a light theme with a dark toggle, the web app as the
 product, hybrid search by meaning, reels transcribed with `gpt-transcribe`, category
 corrections, an extension that only collects (Phase 42), a polish pass (43), indexing
 one post from its panel (44), the user-test fixes (45–47), and a library whose address
-holds where you are, with Organise again for many posts (48). `npm run verify` currently
-contains 312 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
+holds where you are, with Organise again for many posts (48), new categories (49), and
+a second category per post, "Also in", with category emojis (50). `npm run verify` currently
+contains 328 checks. See `PROJECT_INDEX.md` for the handoff checklist and `TODO.md` for the
 small remaining backlog.
 
 **Outstanding, not fixable in code:** a live OpenAI key was committed in repository

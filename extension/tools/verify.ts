@@ -32,6 +32,7 @@ import { WEB_APP_URL } from '@saved-index/shared/config';
 import { validCollection } from '../src/background/collections';
 import {
   BadRequest,
+  ALSO_MIN_PROBABILITY,
   combine,
   costUsd,
   decisionsBody,
@@ -39,6 +40,9 @@ import {
   MAX_POSTS,
   MIN_PROBABILITY,
   parseRequest,
+  place,
+  SPLIT_MIN_EACH,
+  SPLIT_MIN_TOTAL,
   SUMMARY_MODEL,
   readDecisions,
   readSummaries,
@@ -65,6 +69,7 @@ import {
   vectorLiteral,
 } from '@saved-index/shared/embedding';
 import { PIPELINE } from '../../web/lib/pipeline-facts';
+import { CATEGORY_EMOJI, emojiOf, NO_CATEGORY_EMOJI } from '../../web/lib/emoji';
 import { placeFrom, searchOf, type Place } from '../../web/lib/url-state';
 import { CORRECTION_TARGETS, evalCases, isCorrectionTarget } from '@saved-index/shared/corrections';
 import { filedFromResult, needsPicture, SERVER_QUOTE_USD_PER_POST, signature, type FilingInput } from '@saved-index/shared/filing';
@@ -724,8 +729,24 @@ console.log('\nserver analysis');
     { value: 'Travel', probability: 0.38 }, { value: 'Food & Recipes', probability: 0.45 }, { value: 'unknown', probability: 0.1 },
     { value: 'Not a category', probability: 0.3 }, { value: 'Humor & Misc', probability: 0.05 },
   ] }] }).get(0);
-  check('a split vote files nothing but suggests the likeliest real categories, best first',
-    split?.category === null && split.ranked.join() === 'Food & Recipes,Travel', split);
+  check('a close split between two categories files under both',
+    split?.category === 'Food & Recipes' && split.also === 'Travel' && split.ranked.join() === 'Food & Recipes,Travel', split);
+  const unsure = readDecisions({ answers: [{ type: 'choice', name: 'post_0', choice: 'unknown', probabilities: [
+    { value: 'unknown', probability: 0.4 }, { value: 'Food & Recipes', probability: 0.35 }, { value: 'Travel', probability: 0.2 },
+  ] }] }).get(0);
+  check('a vote spread thin files nothing but suggests the likeliest real categories, best first',
+    unsure?.category === null && unsure.also === null && unsure.ranked.join() === 'Food & Recipes,Travel', unsure);
+  check('a confident post about two things keeps the second as Also in',
+    place('Humor & Misc', 0.62, [{ value: 'Humor & Misc', probability: 0.62 }, { value: 'Relationships & Dating', probability: 0.33 }]).also === 'Relationships & Dating');
+  check('a faint second category is not Also in',
+    place('Humor & Misc', 0.8, [{ value: 'Humor & Misc', probability: 0.8 }, { value: 'Fitness', probability: ALSO_MIN_PROBABILITY - 0.01 }]).also === null);
+  check('unknown is never Also in',
+    place('Food & Recipes', 0.7, [{ value: 'Food & Recipes', probability: 0.7 }, { value: 'unknown', probability: 0.3 }]).also === null);
+  check('a split with one side under SPLIT_MIN_EACH is not filed',
+    place('Travel', 0.55, [{ value: 'Travel', probability: 0.55 }, { value: 'Food & Recipes', probability: SPLIT_MIN_EACH - 0.01 }]).category === null);
+  check('a split that adds up to less than SPLIT_MIN_TOTAL is not filed',
+    place('Travel', 0.4, [{ value: 'Travel', probability: 0.4 }, { value: 'Food & Recipes', probability: SPLIT_MIN_TOTAL - 0.41 }]).category === null);
+  check('a confident post with no runner-up has no Also in', decisions.get(0)?.also === null);
   check('a food place in a city guide is steered to Food & Recipes',
     JSON.stringify(decisionsBody(req)).includes('A place to eat or drink'));
 
@@ -876,6 +897,14 @@ console.log('\nserver sorting');
   });
   const v = verdictRow(textual, { category: 'Travel', subcategory: null, tags: [], summary: 'x' }, 'm', new Date());
   check('the server hashes exactly what the extension hashes', v['input_hash'] === hashText(signature(post)));
+  const filedTravel = { category: 'Travel', subcategory: null, tags: [], summary: 'x' };
+  check('a verdict carries its second category',
+    verdictRow(textual, filedTravel, 'm', new Date(), 'Food & Recipes')['also_category'] === 'Food & Recipes');
+  check('a verdict without a second category clears the old one', v['also_category'] === null);
+  check('a second category the same as the first is dropped',
+    verdictRow(textual, filedTravel, 'm', new Date(), 'Travel')['also_category'] === null);
+  check('a post filed as not sure has no second category',
+    verdictRow(textual, { ...filedTravel, category: null }, 'm', new Date(), 'Travel')['also_category'] === null);
 
   check('a sort request is de-duplicated', parseSortRequest({ shortcodes: ['A', 'A', 'B'] }).shortcodes.join() === 'A,B');
   check('a sort request does not refile unless asked', parseSortRequest({ shortcodes: ['A'] }).refile === false);
@@ -1002,6 +1031,8 @@ console.log('\nhow indexing works page');
   check('the page names the models the server uses',
     PIPELINE.decisionsModel === DECISIONS_MODEL && PIPELINE.summaryModel === SUMMARY_MODEL && PIPELINE.embeddingModel === EMBEDDING_MODEL);
   check('the page gives the server\'s confidence floor and batch size', PIPELINE.minProbability === MIN_PROBABILITY && PIPELINE.batchSize === MAX_POSTS);
+  check('the page gives the server\'s Also in and split-vote thresholds',
+    PIPELINE.alsoProbability === ALSO_MIN_PROBABILITY && PIPELINE.splitEach === SPLIT_MIN_EACH && PIPELINE.splitTotal === SPLIT_MIN_TOTAL);
   const million = { inputTokens: 1_000_000, outputTokens: 0 };
   const none = { inputTokens: 0, outputTokens: 0 };
   check('the page quotes the prices the server bills by',
@@ -1113,6 +1144,8 @@ console.log('\nfiling eval');
   check('right, unknown and wrong are counted apart', s.right === 2 && s.unknown === 1 && s.wrong === 1, s);
   check('precision counts only posts given a category', s.precision === 0.5, s.precision);
   check('a thin post left Unknown is right', verdictOf(o(null, null)) === 'right');
+  check('a post also filed under the expected category is right',
+    verdictOf({ ...o('Relationships & Dating', 'Humor & Misc'), also: 'Relationships & Dating' }) === 'right');
 
   // The free keyword rules must never put a labeled post in the wrong category: a wrong
   // category is the mistake nobody notices. Missing one is fine; the model picks it up.
@@ -1125,6 +1158,14 @@ console.log('\nfiling eval');
   check(`the keyword rules misfile none of the ${posts.length} labeled posts`, misfiled.length === 0, misfiled);
   check('every label is a real category or null',
     posts.every((p) => p.expected === null || CATEGORY_NAMES.includes(p.expected)), posts.filter((p) => p.expected && !CATEGORY_NAMES.includes(p.expected)));
+}
+
+console.log('\ncategory emojis');
+{
+  check('every category has its own emoji',
+    TAXONOMY.every((c) => CATEGORY_EMOJI[c.name]) && new Set(TAXONOMY.map((c) => CATEGORY_EMOJI[c.name])).size === TAXONOMY.length);
+  check('no emoji is left for a category that is gone', Object.keys(CATEGORY_EMOJI).every((k) => TAXONOMY.some((c) => c.name === k)));
+  check('a post with no category gets the not-sure emoji', emojiOf(null) === NO_CATEGORY_EMOJI && emojiOf('Uncategorized') === NO_CATEGORY_EMOJI);
 }
 
 console.log('\nweb app address');

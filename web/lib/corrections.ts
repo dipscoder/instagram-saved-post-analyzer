@@ -12,7 +12,7 @@ export async function correctCategory(shortcode: string, category: string | null
 }
 
 /** How a post was filed: what Undo puts back after a move. */
-export type Filing = { category: string | null; subcategory: string | null; model_used: string | null };
+export type Filing = { category: string | null; also_category: string | null; subcategory: string | null; model_used: string | null };
 
 /**
  * Takes a move back: the post is filed exactly as it was before, subcategory and all, and
@@ -27,6 +27,10 @@ export async function undoCorrection(shortcode: string, before: Filing): Promise
   });
   if (error) throw new Error(error.message);
   if (data !== true) throw new Error('Couldn’t undo: the post has changed since.');
+  // A move drops the AI's second category; putting the post back brings it back too.
+  if (before.also_category) {
+    await supabase.from('posts').update({ also_category: before.also_category }).eq('shortcode', shortcode);
+  }
 }
 
 export async function countCorrections(): Promise<number> {
